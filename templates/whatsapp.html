@@ -1,0 +1,399 @@
+{% extends "base_platform.html" %}
+
+{% block title %}WhatsApp — {{ platform_title }}{% endblock %}
+
+{% block workspace_class %} workspace-whatsapp{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+{% endblock %}
+
+{% block module_toolbar %}
+<div class="module-toolbar">
+  <h2>Conversas por instância</h2>
+  <span class="toolbar-spacer"></span>
+  <span id="last-updated"></span>
+  <button class="refresh-btn" id="refresh-btn" type="button" title="Atualizar dados">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+      <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+    </svg>
+    Atualizar
+  </button>
+</div>
+{% endblock %}
+
+{% block workspace_content %}
+<div id="wa-app">
+  <nav id="inst-sidebar">
+    <div class="is-head">Instâncias</div>
+    <div id="inst-list">
+      <div class="loading-row"><div class="spin"></div></div>
+    </div>
+  </nav>
+  <aside id="conv-sidebar">
+    <div class="cs-head">
+      <h2>Conversas</h2>
+      <input id="search" type="text" placeholder="Buscar número ou nome…" />
+    </div>
+    <div id="conv-list">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        <p>Selecione uma instância</p>
+      </div>
+    </div>
+  </aside>
+  <div id="chat">
+    <div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+        <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+      <p>Nenhuma conversa selecionada</p>
+      <small>Escolha uma conversa na lista ao lado</small>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  let activeInstance = null;
+  let activeContact  = null;
+  let allConvs       = [];
+  let dateFrom       = '';
+  let dateTo         = '';
+  let isRefreshing   = false;
+
+  const mediaLabels = {
+    imageMessage:        '📷 Imagem',
+    videoMessage:        '🎥 Vídeo',
+    audioMessage:        '🎵 Áudio',
+    documentMessage:     '📄 Documento',
+    stickerMessage:      '🎭 Sticker',
+    locationMessage:     '📍 Localização',
+    contactMessage:      '👤 Contato',
+    reactionMessage:     '👍 Reação',
+    pollCreationMessage: '📊 Enquete',
+  };
+
+  function fmtDate(ts) {
+    if (!ts) return '';
+    return new Date(ts * 1000).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  }
+  function fmtTime(ts) {
+    if (!ts) return '';
+    return new Date(ts * 1000).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  }
+  function initials(jid) {
+    return (jid||'').replace('@s.whatsapp.net','').replace(/\D/g,'').slice(-2) || '??';
+  }
+  function phone(jid) {
+    return (jid||'').replace('@s.whatsapp.net','').replace('@g.us','');
+  }
+  function trunc(s, n) { return s && s.length > n ? s.slice(0,n)+'…' : (s||''); }
+  function esc(s) {
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function shortName(name) {
+    return (name||'').replace(/^Instance_/i,'');
+  }
+
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('platform-toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  function setLastUpdated() {
+    const now = new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    document.getElementById('last-updated').textContent = 'Atualizado às ' + now;
+  }
+
+  document.getElementById('refresh-btn').addEventListener('click', () => refreshAll());
+
+  async function refreshAll() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    const btn = document.getElementById('refresh-btn');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    try {
+      await refreshInstances();
+      if (activeInstance) {
+        const cl = document.getElementById('conv-list');
+        if (cl) cl.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Atualizando conversas…</small></div>';
+        const res  = await fetch('/api/conversations?instanceId=' + encodeURIComponent(activeInstance.id));
+        const data = await res.json();
+        if (!data.error) { allConvs = data; renderConvs(data); }
+      }
+      if (activeInstance && activeContact) {
+        const box = document.getElementById('msgs');
+        if (box) box.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Atualizando mensagens…</small></div>';
+        await refreshMessages();
+      }
+      setLastUpdated();
+      showToast('✓ Atualizado com sucesso');
+    } catch (e) {
+      showToast('Erro ao atualizar');
+    } finally {
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+      isRefreshing = false;
+    }
+  }
+
+  async function boot() {
+    try {
+      const res  = await fetch('/api/instances');
+      const list = await res.json();
+      if (list.error) throw new Error(list.error);
+      const il = document.getElementById('inst-list');
+      if (!list.length) {
+        il.innerHTML = '<div class="empty"><p>Sem instâncias</p></div>';
+        return;
+      }
+      il.innerHTML = list.map(inst => `
+        <button type="button" class="inst-btn" data-id="${esc(inst.id)}" data-name="${esc(inst.name)}">
+          <div class="inst-name">${esc(shortName(inst.name))}</div>
+          <div class="inst-sub">
+            <div class="inst-dot ${inst.status==='open'?'online':''}"></div>
+            <span class="inst-count">${Number(inst.message_count).toLocaleString('pt-BR')} msgs</span>
+          </div>
+        </button>`).join('');
+      il.querySelectorAll('.inst-btn').forEach(b =>
+        b.addEventListener('click', () => selectInstance(b.dataset.id, b.dataset.name))
+      );
+      selectInstance(list[0].id, list[0].name);
+      setLastUpdated();
+    } catch (e) {
+      document.getElementById('inst-list').innerHTML =
+        '<div class="err" style="margin:10px;">' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function refreshInstances() {
+    try {
+      const res  = await fetch('/api/instances');
+      const list = await res.json();
+      if (list.error || !list.length) return;
+      list.forEach(inst => {
+        const el = document.querySelector('.inst-btn[data-id="' + inst.id + '"]');
+        if (!el) return;
+        const countEl = el.querySelector('.inst-count');
+        const dotEl   = el.querySelector('.inst-dot');
+        if (countEl) countEl.textContent = Number(inst.message_count).toLocaleString('pt-BR') + ' msgs';
+        if (dotEl)   dotEl.className = 'inst-dot' + (inst.status==='open' ? ' online' : '');
+      });
+    } catch (_) {}
+  }
+
+  async function refreshMessages() {
+    const box = document.getElementById('msgs');
+    if (!box) return;
+    const params = new URLSearchParams({ instanceId: activeInstance.id, contactJid: activeContact });
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo)   params.set('dateTo',   dateTo);
+    const res  = await fetch('/api/messages?' + params);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const countEl = document.getElementById('hdr-count');
+    if (countEl) countEl.textContent = data.length + ' msgs';
+    if (!data.length) {
+      box.innerHTML = '<div class="empty"><p>Sem mensagens no período</p></div>';
+      return;
+    }
+    const ph = phone(activeContact);
+    let lastDate = '', html = '';
+    data.forEach(msg => {
+      const date  = fmtDate(msg.messageTimestamp);
+      const time  = fmtTime(msg.messageTimestamp);
+      const side  = msg.from_me ? 'sent' : 'recv';
+      const label = msg.from_me ? 'Você' : (msg.pushName || ph);
+      if (date !== lastDate) { html += '<div class="date-sep">' + date + '</div>'; lastDate = date; }
+      let bubbleText, isMedia = false;
+      if (msg.text) { bubbleText = esc(msg.text); }
+      else if (mediaLabels[msg.messageType]) { bubbleText = mediaLabels[msg.messageType]; isMedia = true; }
+      else { bubbleText = '(' + esc(msg.messageType||'desconhecido') + ')'; isMedia = true; }
+      html += '<div class="msg-row ' + side + '"><div class="msg-lbl">' + esc(label) + '</div>' +
+        '<div class="bubble' + (isMedia?' media':'') + '">' + bubbleText + '</div>' +
+        '<div class="msg-time">' + time + '</div></div>';
+    });
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function selectInstance(id, name) {
+    activeInstance = {id, name};
+    activeContact  = null;
+    dateFrom = ''; dateTo = '';
+    document.querySelectorAll('.inst-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.id === id)
+    );
+    loadConversations(id);
+    resetChat();
+  }
+
+  function resetChat() {
+    document.getElementById('chat').innerHTML =
+      '<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">' +
+      '<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>' +
+      '<p>Nenhuma conversa selecionada</p><small>Escolha uma conversa na lista ao lado</small></div>';
+  }
+
+  async function loadConversations(instanceId) {
+    const cl = document.getElementById('conv-list');
+    cl.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Carregando…</small></div>';
+    document.getElementById('search').value = '';
+    try {
+      const res  = await fetch('/api/conversations?instanceId=' + encodeURIComponent(instanceId));
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      allConvs = data;
+      renderConvs(data);
+    } catch (e) {
+      cl.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    }
+  }
+
+  function renderConvs(data) {
+    const cl = document.getElementById('conv-list');
+    if (!data.length) {
+      cl.innerHTML = '<div class="empty"><p>Sem conversas</p></div>';
+      return;
+    }
+    cl.innerHTML = data.map(c => {
+      const ph      = phone(c.contact_jid);
+      const preview = c.last_text ? trunc(c.last_text,48) : (mediaLabels[c.last_message_type]||'(sem texto)');
+      const arrow   = c.last_from_me ? '↩ ' : '';
+      const nameTag = c.last_push_name
+        ? ' · <span style="color:var(--muted);font-weight:400">' + esc(c.last_push_name) + '</span>' : '';
+      return '<div class="conv-item" data-jid="' + esc(c.contact_jid) + '">' +
+        '<div class="avatar">' + initials(c.contact_jid) + '</div>' +
+        '<div class="ci-info"><div class="ci-phone">' + ph + nameTag + '</div>' +
+        '<div class="ci-preview">' + arrow + esc(preview) + '</div></div>' +
+        '<div class="ci-meta"><span class="ci-date">' + fmtDate(c.last_ts) + '</span>' +
+        '<span class="ci-badge">' + c.message_count + '</span></div></div>';
+    }).join('');
+    cl.querySelectorAll('.conv-item').forEach(el =>
+      el.addEventListener('click', () => selectConv(el.dataset.jid))
+    );
+    if (activeContact) {
+      cl.querySelectorAll('.conv-item').forEach(el =>
+        el.classList.toggle('active', el.dataset.jid === activeContact)
+      );
+    }
+  }
+
+  document.getElementById('search').addEventListener('input', function() {
+    const q = this.value.trim().toLowerCase();
+    renderConvs(q ? allConvs.filter(c =>
+      (c.contact_jid||'').toLowerCase().includes(q) ||
+      (c.last_push_name||'').toLowerCase().includes(q)
+    ) : allConvs);
+  });
+
+  function selectConv(jid) {
+    activeContact = jid;
+    dateFrom = ''; dateTo = '';
+    document.querySelectorAll('.conv-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.jid === jid)
+    );
+    renderChatShell(jid);
+    loadMessages(jid);
+  }
+
+  function renderChatShell(jid) {
+    const ph = phone(jid);
+    document.getElementById('chat').innerHTML =
+      '<div id="chat-hdr"><div class="avatar">' + initials(jid) + '</div><div>' +
+      '<div id="hdr-phone">' + ph + '</div><div id="hdr-inst">' + esc(activeInstance.name) + '</div></div>' +
+      '<span id="hdr-count">Carregando…</span></div>' +
+      '<div id="date-bar"><span class="date-bar-label">Filtrar período:</span>' +
+      '<input class="date-input" type="date" id="df-from" title="Data inicial" />' +
+      '<span class="date-bar-label" style="padding:0 2px;">até</span>' +
+      '<input class="date-input" type="date" id="df-to" title="Data final" />' +
+      '<button class="filter-btn" type="button" id="df-apply">Aplicar</button>' +
+      '<button class="clear-btn" type="button" id="df-clear">Limpar</button>' +
+      '<span id="filter-status" style="display:none" class="filter-status"></span></div>' +
+      '<div id="msgs"><div class="loading-row"><div class="spin"></div><small>Carregando mensagens…</small></div></div>';
+    document.getElementById('df-apply').addEventListener('click', applyFilter);
+    document.getElementById('df-clear').addEventListener('click', clearFilter);
+    document.getElementById('df-from').addEventListener('keydown', e => { if (e.key==='Enter') applyFilter(); });
+    document.getElementById('df-to').addEventListener('keydown',   e => { if (e.key==='Enter') applyFilter(); });
+    if (dateFrom) document.getElementById('df-from').value = dateFrom;
+    if (dateTo)   document.getElementById('df-to').value   = dateTo;
+  }
+
+  function applyFilter() {
+    dateFrom = document.getElementById('df-from').value;
+    dateTo   = document.getElementById('df-to').value;
+    if (!dateFrom && !dateTo) return;
+    loadMessages(activeContact);
+  }
+
+  function clearFilter() {
+    dateFrom = ''; dateTo = '';
+    document.getElementById('df-from').value = '';
+    document.getElementById('df-to').value   = '';
+    const fs = document.getElementById('filter-status');
+    if (fs) fs.style.display = 'none';
+    loadMessages(activeContact);
+  }
+
+  async function loadMessages(jid) {
+    const box = document.getElementById('msgs');
+    if (!box) return;
+    box.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Carregando mensagens…</small></div>';
+    const params = new URLSearchParams({ instanceId: activeInstance.id, contactJid: jid });
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo)   params.set('dateTo',   dateTo);
+    try {
+      const res  = await fetch('/api/messages?' + params);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const countEl = document.getElementById('hdr-count');
+      if (countEl) countEl.textContent = data.length + ' msgs';
+      const fs = document.getElementById('filter-status');
+      if (fs) {
+        if (dateFrom || dateTo) {
+          const from = dateFrom ? new Date(dateFrom+'T00:00:00').toLocaleDateString('pt-BR') : '…';
+          const to   = dateTo   ? new Date(dateTo+'T00:00:00').toLocaleDateString('pt-BR')   : '…';
+          fs.textContent = from + ' → ' + to;
+          fs.style.display = '';
+        } else fs.style.display = 'none';
+      }
+      if (!data.length) {
+        box.innerHTML = '<div class="empty"><p>Sem mensagens no período</p><small>Tente outro intervalo de datas</small></div>';
+        return;
+      }
+      const ph = phone(jid);
+      let lastDate = '', html = '';
+      data.forEach(msg => {
+        const date  = fmtDate(msg.messageTimestamp);
+        const time  = fmtTime(msg.messageTimestamp);
+        const side  = msg.from_me ? 'sent' : 'recv';
+        const label = msg.from_me ? 'Você' : (msg.pushName || ph);
+        if (date !== lastDate) { html += '<div class="date-sep">' + date + '</div>'; lastDate = date; }
+        let bubbleText, isMedia = false;
+        if (msg.text) bubbleText = esc(msg.text);
+        else if (mediaLabels[msg.messageType]) { bubbleText = mediaLabels[msg.messageType]; isMedia = true; }
+        else { bubbleText = '(' + esc(msg.messageType||'desconhecido') + ')'; isMedia = true; }
+        html += '<div class="msg-row ' + side + '"><div class="msg-lbl">' + esc(label) + '</div>' +
+          '<div class="bubble' + (isMedia?' media':'') + '">' + bubbleText + '</div>' +
+          '<div class="msg-time">' + time + '</div></div>';
+      });
+      box.innerHTML = html;
+      box.scrollTop = box.scrollHeight;
+    } catch (e) {
+      if (box) box.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+    }
+  }
+
+  boot();
+</script>
+{% endblock %}

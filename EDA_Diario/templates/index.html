@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Painel EDA — {{ platform_title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl">
+
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold text-white">Painel de Processamento</h1>
+    <p class="text-slate-400 mt-1 text-sm">Faça os uploads, execute as etapas e baixe os resultados.</p>
+  </div>
+
+  <!-- Grid de uploads + acoes -->
+  <div class="grid grid-cols-1 gap-6">
+
+    <!-- ── ETAPA 1 ─────────────────────────────────────────────────────── -->
+    <div class="bg-slate-900 border border-white/5 rounded-2xl p-6">
+      <div class="flex items-center gap-3 mb-6">
+        <span class="w-8 h-8 rounded-lg bg-indigo-600 text-white text-sm font-bold flex items-center justify-center shadow shadow-indigo-500/40">1</span>
+        <div>
+          <h2 class="text-white font-semibold">Etapa 1 — Enriquecimento Lemitti</h2>
+          <p class="text-slate-500 text-xs mt-0.5">Cruza a planilha principal com os contatos da Lemitti (P2)</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+
+        <!-- Upload principal -->
+        <div class="bg-slate-800/60 rounded-xl p-4 border border-white/5">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-sm font-medium text-slate-300">Planilha Principal</p>
+            {% if arquivos.principal %}
+              <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">Carregado</span>
+            {% else %}
+              <span class="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded-full">Pendente</span>
+            {% endif %}
+          </div>
+          <form action="{{ url_for('eda.upload', tipo='principal') }}" method="POST" enctype="multipart/form-data">
+            <label class="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all group">
+              <svg class="w-6 h-6 text-slate-500 group-hover:text-indigo-400 mb-1 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span class="text-xs text-slate-500 group-hover:text-slate-400">.xlsx</span>
+              <input type="file" name="arquivo" accept=".xlsx" class="hidden" onchange="this.form.submit()">
+            </label>
+          </form>
+        </div>
+
+        <!-- Upload P2 -->
+        <div class="bg-slate-800/60 rounded-xl p-4 border border-white/5">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-sm font-medium text-slate-300">Lemitti (P2)</p>
+            {% if arquivos.p2 %}
+              <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">Carregado</span>
+            {% else %}
+              <span class="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded-full">Pendente</span>
+            {% endif %}
+          </div>
+          <form action="{{ url_for('eda.upload', tipo='p2') }}" method="POST" enctype="multipart/form-data">
+            <label class="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all group">
+              <svg class="w-6 h-6 text-slate-500 group-hover:text-indigo-400 mb-1 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span class="text-xs text-slate-500 group-hover:text-slate-400">.csv</span>
+              <input type="file" name="arquivo" accept=".csv" class="hidden" onchange="this.form.submit()">
+            </label>
+          </form>
+        </div>
+      </div>
+
+      <!-- Acoes etapa 1 -->
+      <div class="flex flex-wrap gap-3 items-center">
+        <form action="{{ url_for('eda.rodar_etapa1') }}" method="POST">
+          <button type="submit"
+            class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-all shadow shadow-indigo-500/30 disabled:opacity-40"
+            {% if not arquivos.principal or not arquivos.p2 %}disabled title="Faça os uploads primeiro"{% endif %}>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Rodar Etapa 1
+          </button>
+        </form>
+
+        {% if arquivos.intermediaria %}
+          <a href="{{ url_for('eda.download', arquivo='intermediaria') }}"
+             class="flex flex-col px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-xl transition-all">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Intermediária
+            </span>
+            {% if arquivos.data_intermediaria %}
+              <span class="text-xs text-slate-500 mt-0.5">gerado em {{ arquivos.data_intermediaria }}</span>
+            {% endif %}
+          </a>
+        {% endif %}
+
+        {% if arquivos.nao_encontrados %}
+          <a href="{{ url_for('eda.download', arquivo='nao_encontrados') }}"
+             class="flex flex-col px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm font-medium rounded-xl transition-all border border-amber-500/20">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              CPFs não encontrados
+            </span>
+            {% if arquivos.data_nao_encontrados %}
+              <span class="text-xs text-amber-600 mt-0.5">gerado em {{ arquivos.data_nao_encontrados }}</span>
+            {% endif %}
+          </a>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ── ETAPA 2 ─────────────────────────────────────────────────────── -->
+    <div class="bg-slate-900 border border-white/5 rounded-2xl p-6">
+      <div class="flex items-center gap-3 mb-6">
+        <span class="w-8 h-8 rounded-lg bg-purple-600 text-white text-sm font-bold flex items-center justify-center shadow shadow-purple-500/40">2</span>
+        <div>
+          <h2 class="text-white font-semibold">Etapa 2 — Enriquecimento Assertiva</h2>
+          <p class="text-slate-500 text-xs mt-0.5">Completa os CPFs não encontrados com dados da Assertiva (P3)</p>
+        </div>
+      </div>
+
+      <div class="mb-6 max-w-sm">
+        <!-- Upload P3 -->
+        <div class="bg-slate-800/60 rounded-xl p-4 border border-white/5">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-sm font-medium text-slate-300">Assertiva (P3)</p>
+            {% if arquivos.p3 %}
+              <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">Carregado</span>
+            {% else %}
+              <span class="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded-full">Pendente</span>
+            {% endif %}
+          </div>
+          <form action="{{ url_for('eda.upload', tipo='p3') }}" method="POST" enctype="multipart/form-data">
+            <label class="flex flex-col items-center justify-center w-full h-20 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-purple-500/50 hover:bg-purple-500/5 transition-all group">
+              <svg class="w-6 h-6 text-slate-500 group-hover:text-purple-400 mb-1 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <span class="text-xs text-slate-500 group-hover:text-slate-400">.csv</span>
+              <input type="file" name="arquivo" accept=".csv" class="hidden" onchange="this.form.submit()">
+            </label>
+          </form>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-3 items-center">
+        <form action="{{ url_for('eda.rodar_etapa2') }}" method="POST">
+          <button type="submit"
+            class="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-xl transition-all shadow shadow-purple-500/30 disabled:opacity-40"
+            {% if not arquivos.intermediaria or not arquivos.p3 %}disabled title="Rode a Etapa 1 e envie a planilha P3 primeiro"{% endif %}>
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Rodar Etapa 2
+          </button>
+        </form>
+
+        {% if arquivos.final %}
+          <a href="{{ url_for('eda.download', arquivo='final') }}"
+             class="flex flex-col px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-xl transition-all shadow shadow-emerald-500/30">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              {{ arquivos.nome_final }}
+            </span>
+            {% if arquivos.data_final %}
+              <span class="text-xs text-emerald-300/70 mt-0.5 font-normal">gerado em {{ arquivos.data_final }}</span>
+            {% endif %}
+          </a>
+        {% endif %}
+
+        {% if arquivos.blacklist_bloqueios %}
+          <a href="{{ url_for('eda.download', arquivo='blacklist_bloqueios') }}"
+             class="flex flex-col px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-sm font-medium rounded-xl transition-all border border-rose-500/20">
+            <span class="flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Bloqueios blacklist (CSV)
+            </span>
+            {% if arquivos.data_blacklist_bloq %}
+              <span class="text-xs text-rose-400/60 mt-0.5">atualizado em {{ arquivos.data_blacklist_bloq }}</span>
+            {% endif %}
+          </a>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

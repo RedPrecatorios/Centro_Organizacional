@@ -1,0 +1,35 @@
+# Ambiente e segredos
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+.cursor/
+
+# SO
+.DS_Store
+Thumbs.db
+
+# Dados EDA (entrada/saída — não versionar planilhas)
+EDA_Diario/Entrada/
+EDA_Diario/Resultados/
+EDA_Diario/venv/
+
+# Logs / temporários
+*.log
+.pytest_cache/

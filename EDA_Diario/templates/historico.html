@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico — {{ platform_title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl">
+
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold text-white">Histórico de Execuções</h1>
+    <p class="text-slate-400 mt-1 text-sm">Últimas 50 execuções registradas no banco.</p>
+  </div>
+
+  <div class="bg-slate-900 border border-white/5 rounded-2xl overflow-hidden">
+    {% if registros %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-white/5">
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Etapa</th>
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Data</th>
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Registros</th>
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Enriq. P2</th>
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Enriq. P3</th>
+                  <th class="text-left text-xs text-slate-500 font-medium px-5 py-4">Sem contato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in registros %}
+                  <tr class="border-b border-white/5 hover:bg-white/2 transition-colors">
+                    <td class="px-5 py-4">
+                      <span class="px-2.5 py-1 rounded-lg text-xs font-bold
+                        {% if r.etapa == 1 %}bg-indigo-500/15 text-indigo-400
+                        {% else %}bg-purple-500/15 text-purple-400{% endif %}">
+                        Etapa {{ r.etapa }}
+                      </span>
+                    </td>
+                    <td class="px-5 py-4 text-slate-500 text-xs whitespace-nowrap">{{ r.data_execucao or '—' }}</td>
+                    <td class="px-5 py-4 text-slate-300">{{ r.total_registros or '—' }}</td>
+                    <td class="px-5 py-4 text-slate-300">{{ r.total_enriquecidos_p2 or '—' }}</td>
+                    <td class="px-5 py-4 text-slate-300">{{ r.total_enriquecidos_p3 or '—' }}</td>
+                    <td class="px-5 py-4 text-slate-500">{{ r.total_sem_contato or 0 }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="flex flex-col items-center justify-center py-16 text-center">
+        <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
+          <svg class="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <p class="text-slate-500 text-sm">Nenhuma execução registrada ainda</p>
+        <p class="text-slate-600 text-xs mt-1">As execuções aparecerão aqui após rodar as etapas</p>
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

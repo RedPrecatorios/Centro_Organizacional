@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Blacklist — {{ platform_title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl">
+
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-white">Blacklist</h1>
+    <p class="text-slate-400 mt-1 text-sm">Gerencie os contatos, emails, CPFs e nomes bloqueados.</p>
+  </div>
+
+  <!-- ── Formulário horizontal compacto ─────────────────────────────────────── -->
+  <div class="bg-slate-900 border border-white/5 rounded-2xl p-4 mb-4">
+    <form action="{{ url_for('eda.blacklist_adicionar') }}" method="POST"
+          class="flex flex-wrap items-end gap-3">
+      <div class="flex flex-col gap-1 min-w-[160px]">
+        <label class="text-xs text-slate-500 font-medium">Tipo</label>
+        <select name="tipo" required
+          class="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors">
+          <option value="CPF">CPF</option>
+          <option value="NOME">NOME</option>
+          <option value="TELEFONE">TELEFONE</option>
+          <option value="EMAIL">EMAIL</option>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1 flex-1 min-w-[200px]">
+        <label class="text-xs text-slate-500 font-medium">Valor</label>
+        <input type="text" name="valor" required placeholder="Ex: 12345678900"
+          class="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors" />
+      </div>
+      <div class="flex flex-col gap-1 flex-1 min-w-[200px]">
+        <label class="text-xs text-slate-500 font-medium">Motivo <span class="text-slate-600">(opcional)</span></label>
+        <input type="text" name="motivo" placeholder="Ex: Solicitou remoção"
+          class="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors" />
+      </div>
+      <button type="submit"
+        class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-all shadow shadow-indigo-500/30 whitespace-nowrap">
+        + Adicionar
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Tabela ─────────────────────────────────────────────────────────────── -->
+  <div class="bg-slate-900 border border-white/5 rounded-2xl overflow-hidden">
+
+    <!-- Busca -->
+    <form method="GET" action="{{ url_for('eda.blacklist') }}"
+          class="px-4 py-3 border-b border-white/5 flex gap-2 items-center">
+      <input type="text" name="q" value="{{ busca }}" placeholder="Buscar por valor..."
+        class="flex-1 bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors" />
+      <button type="submit"
+        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-all">
+        Buscar
+      </button>
+      {% if busca %}
+        <a href="{{ url_for('eda.blacklist') }}"
+           class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm font-medium rounded-lg transition-all">
+          Limpar
+        </a>
+      {% endif %}
+    </form>
+
+    {% if registros %}
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="border-b border-white/5">
+            <th class="text-left text-slate-500 font-medium px-4 py-2 w-24">Tipo</th>
+            <th class="text-left text-slate-500 font-medium px-4 py-2">Valor</th>
+            <th class="text-left text-slate-500 font-medium px-4 py-2 w-64">Motivo</th>
+            <th class="text-left text-slate-500 font-medium px-4 py-2 w-36 whitespace-nowrap">Data inclusão</th>
+            <th class="px-4 py-2 w-8"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in registros %}
+            <tr class="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+              <td class="px-4 py-1.5">
+                <span class="px-2 py-0.5 rounded text-xs font-semibold
+                  {% if r.tipo == 'CPF' %}bg-red-500/15 text-red-400
+                  {% elif r.tipo == 'NOME' %}bg-orange-500/15 text-orange-400
+                  {% elif r.tipo == 'TELEFONE' %}bg-amber-500/15 text-amber-400
+                  {% else %}bg-blue-500/15 text-blue-400{% endif %}">
+                  {{ r.tipo }}
+                </span>
+              </td>
+              <td class="px-4 py-1.5 text-slate-300 font-mono">{{ r.valor }}</td>
+              <td class="px-4 py-1.5 text-slate-500">{{ r.motivo or '—' }}</td>
+              <td class="px-4 py-1.5 text-slate-600 whitespace-nowrap">{{ r.data_inclusao }}</td>
+              <td class="px-4 py-1.5">
+                <form action="{{ url_for('eda.blacklist_remover', id_registro=r.id) }}" method="POST"
+                      onsubmit="return confirm('Remover esta entrada da blacklist?')">
+                  <button type="submit"
+                    class="text-slate-700 hover:text-red-400 transition-colors p-0.5 rounded hover:bg-red-500/10">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+    {% else %}
+      <div class="flex flex-col items-center justify-center py-16 text-center">
+        <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
+          <svg class="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+          </svg>
+        </div>
+        <p class="text-slate-500 text-sm">Nenhuma entrada na blacklist</p>
+        <p class="text-slate-600 text-xs mt-1">Use o formulário acima para adicionar</p>
+      </div>
+    {% endif %}
+
+    <!-- Paginação -->
+    {% if total > 0 %}
+    <div class="flex items-center justify-between px-4 py-3 border-t border-white/5">
+      <p class="text-slate-600 text-xs">
+        {{ (pagina - 1) * por_pag + 1 }}–{{ [pagina * por_pag, total]|min }}
+        de <span class="text-slate-400">{{ total }}</span> entrada(s)
+        {% if busca %} para "<span class="text-slate-300">{{ busca }}</span>"{% endif %}
+      </p>
+
+      <div class="flex items-center gap-1">
+        {% if pagina > 1 %}
+          <a href="{{ url_for('eda.blacklist', p=pagina-1, q=busca) }}"
+             class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition-all">&laquo;</a>
+        {% endif %}
+
+        {% set inicio = [1, pagina - 2]|max %}
+        {% set fim    = [total_paginas, pagina + 2]|min %}
+
+        {% if inicio > 1 %}
+          <a href="{{ url_for('eda.blacklist', p=1, q=busca) }}"
+             class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs rounded transition-all">1</a>
+          {% if inicio > 2 %}<span class="text-slate-600 text-xs px-1">…</span>{% endif %}
+        {% endif %}
+
+        {% for n in range(inicio, fim + 1) %}
+          <a href="{{ url_for('eda.blacklist', p=n, q=busca) }}"
+             class="px-2.5 py-1 text-xs rounded transition-all
+             {% if n == pagina %}bg-indigo-600 text-white font-semibold
+             {% else %}bg-slate-800 hover:bg-slate-700 text-slate-400{% endif %}">
+            {{ n }}
+          </a>
+        {% endfor %}
+
+        {% if fim < total_paginas %}
+          {% if fim < total_paginas - 1 %}<span class="text-slate-600 text-xs px-1">…</span>{% endif %}
+          <a href="{{ url_for('eda.blacklist', p=total_paginas, q=busca) }}"
+             class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs rounded transition-all">{{ total_paginas }}</a>
+        {% endif %}
+
+        {% if pagina < total_paginas %}
+          <a href="{{ url_for('eda.blacklist', p=pagina+1, q=busca) }}"
+             class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition-all">&raquo;</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

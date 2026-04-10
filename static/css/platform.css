@@ -1,0 +1,156 @@
+/* ── Plataforma unificada ─────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:           #0c0e14;
+  --surface:      #12151f;
+  --surface-elev: #181c28;
+  --border:       #2a3142;
+  --text:         #e8eaf0;
+  --muted:        #8b92a8;
+  --accent:       #3b82f6;
+  --accent-soft:  rgba(59, 130, 246, 0.15);
+  --whatsapp:     #25d366;
+  --r:            10px;
+}
+
+html, body { height: 100%; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Barra superior */
+.platform-shell {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.platform-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: 54px;
+}
+
+.platform-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.platform-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.platform-title-wrap { min-width: 0; }
+.platform-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.platform-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* Abas principais */
+.platform-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin-left: 28px;
+  height: 100%;
+}
+
+.platform-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.platform-tab:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.03);
+}
+.platform-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.platform-tab .tab-icon { font-size: 15px; line-height: 1; opacity: 0.9; }
+.platform-tab.active[data-module="whatsapp"] {
+  border-bottom-color: var(--whatsapp);
+}
+
+/* Área de trabalho */
+.workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Barra secundária (módulo) */
+.module-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px;
+  background: var(--surface-elev);
+  border-bottom: 1px solid var(--border);
+}
+.module-toolbar h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.module-toolbar .toolbar-spacer { flex: 1; }
+
+/* Toast global */
+#platform-toast {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+  background: var(--whatsapp);
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 999px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 200;
+}
+#platform-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
