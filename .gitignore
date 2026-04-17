@@ -25,11 +25,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# Dados EDA (entrada/saída — não versionar planilhas)
-EDA_Diario/Entrada/
-EDA_Diario/Resultados/
-EDA_Diario/venv/
-
 # Logs / temporários
 *.log
 .pytest_cache/

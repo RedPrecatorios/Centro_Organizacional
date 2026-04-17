@@ -4,47 +4,21 @@ from datetime import datetime, timezone
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, url_for
-
-load_dotenv()
-
-from blueprints.eda import eda_bp, init_eda_db
+from flask import Flask, jsonify, render_template, request
 
 # cd "c:\Users\justi\OneDrive\Documentos\Python Projects\PycharmProjects\View_Message"
 # python app.py
 
+load_dotenv()
+
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-production")
-
-PLATFORM_TITLE = os.getenv("PLATFORM_TITLE", "Workspace")
-PLATFORM_SUBTITLE = os.getenv("PLATFORM_SUBTITLE", "Ferramentas internas")
-
-app.register_blueprint(eda_bp)
-init_eda_db()
-
-
-@app.context_processor
-def inject_platform():
-    path = request.path or ""
-    if path.startswith("/whatsapp"):
-        tab = "whatsapp"
-    elif path.startswith("/eda"):
-        tab = "planilhas"
-    else:
-        tab = "planilhas"
-    return {
-        "active_tab": tab,
-        "platform_title": PLATFORM_TITLE,
-        "platform_subtitle": PLATFORM_SUBTITLE,
-    }
-
 
 DB_CONFIG = {
-    "host":     os.getenv("DB_HOST", "localhost"),
-    "port":     int(os.getenv("DB_PORT", "5432")),
-    "database": os.getenv("DB_NAME", "evolution"),
-    "user":     os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", ""),
+    "host":     os.getenv("DB_HOST",     "209.38.154.187"),
+    "port":     int(os.getenv("DB_PORT", 5432)),
+    "database": os.getenv("DB_NAME",     "evolution"),
+    "user":     os.getenv("DB_USER",     "postgres"),
+    "password": os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD") or "",
 }
 
 NORM_JID = """
@@ -61,21 +35,11 @@ def get_db():
 
 
 @app.route("/")
-def root():
-    return redirect(url_for("eda.index"))
+def index():
+    return render_template("index.html")
 
 
-@app.route("/planilhas")
-def planilhas_redirect():
-    """Compatibilidade com links antigos."""
-    return redirect(url_for("eda.index"))
-
-
-@app.route("/whatsapp")
-def whatsapp_view():
-    return render_template("whatsapp.html")
-
-
+# ── instances ────────────────────────────────────────────────────────────────
 @app.route("/api/instances")
 def get_instances():
     try:
@@ -150,7 +114,7 @@ def get_messages():
     instance_id = request.args.get("instanceId", "")
     contact_jid = request.args.get("contactJid", "")
     date_from   = request.args.get("dateFrom", "")
-    date_to     = request.args.get("dateTo",   "")
+    date_to     = request.args.get("dateTo", "")
 
     date_clauses = ""
     params = [instance_id, contact_jid]

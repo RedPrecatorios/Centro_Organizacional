@@ -1,17 +1,22 @@
-{% extends "base_platform.html" %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Viewer de mensagens</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body>
 
-{% block title %}WhatsApp — {{ platform_title }}{% endblock %}
-
-{% block workspace_class %} workspace-whatsapp{% endblock %}
-
-{% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
-{% endblock %}
-
-{% block module_toolbar %}
-<div class="module-toolbar">
-  <h2>Conversas por instância</h2>
-  <span class="toolbar-spacer"></span>
+<header class="viewer-header">
+  <div class="logo" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  </div>
+  <h1>Conversas</h1>
+  <span class="hdr-spacer"></span>
   <span id="last-updated"></span>
   <button class="refresh-btn" id="refresh-btn" type="button" title="Atualizar dados">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -20,10 +25,9 @@
     </svg>
     Atualizar
   </button>
-</div>
-{% endblock %}
+</header>
+<div id="app-toast"></div>
 
-{% block workspace_content %}
 <div id="wa-app">
   <nav id="inst-sidebar">
     <div class="is-head">Instâncias</div>
@@ -55,9 +59,7 @@
     </div>
   </div>
 </div>
-{% endblock %}
 
-{% block extra_scripts %}
 <script>
   let activeInstance = null;
   let activeContact  = null;
@@ -67,15 +69,15 @@
   let isRefreshing   = false;
 
   const mediaLabels = {
-    imageMessage:        '📷 Imagem',
-    videoMessage:        '🎥 Vídeo',
-    audioMessage:        '🎵 Áudio',
-    documentMessage:     '📄 Documento',
-    stickerMessage:      '🎭 Sticker',
-    locationMessage:     '📍 Localização',
-    contactMessage:      '👤 Contato',
-    reactionMessage:     '👍 Reação',
-    pollCreationMessage: '📊 Enquete',
+    imageMessage:        'Imagem',
+    videoMessage:        'Vídeo',
+    audioMessage:        'Áudio',
+    documentMessage:     'Documento',
+    stickerMessage:      'Figurinha',
+    locationMessage:     'Localização',
+    contactMessage:      'Contato',
+    reactionMessage:     'Reação',
+    pollCreationMessage: 'Enquete',
   };
 
   function fmtDate(ts) {
@@ -101,12 +103,16 @@
   }
 
   let toastTimer = null;
-  function showToast(msg) {
-    const t = document.getElementById('platform-toast');
+  function showToast(msg, isError) {
+    const t = document.getElementById('app-toast');
     t.textContent = msg;
+    t.classList.toggle('toast-error', !!isError);
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+    toastTimer = setTimeout(function () {
+      t.classList.remove('show');
+      t.classList.remove('toast-error');
+    }, isError ? 4000 : 2800);
   }
 
   function setLastUpdated() {
@@ -129,17 +135,23 @@
         if (cl) cl.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Atualizando conversas…</small></div>';
         const res  = await fetch('/api/conversations?instanceId=' + encodeURIComponent(activeInstance.id));
         const data = await res.json();
-        if (!data.error) { allConvs = data; renderConvs(data); }
+        if (data.error) throw new Error(data.error);
+        allConvs = data;
+        renderConvs(data);
       }
       if (activeInstance && activeContact) {
-        const box = document.getElementById('msgs');
-        if (box) box.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Atualizando mensagens…</small></div>';
-        await refreshMessages();
+        const ok = await loadMessages(activeContact, { silent: true });
+        if (!ok) throw new Error('Falha ao recarregar mensagens');
       }
       setLastUpdated();
-      showToast('✓ Atualizado com sucesso');
+      showToast('Dados atualizados.');
     } catch (e) {
-      showToast('Erro ao atualizar');
+      showToast('Não foi possível atualizar. Verifique a conexão e tente de novo.', true);
+      const cl = document.getElementById('conv-list');
+      if (activeInstance && cl && Array.isArray(allConvs)) {
+        if (allConvs.length) renderConvs(allConvs);
+        else cl.innerHTML = '<div class="empty"><p>Sem conversas</p></div>';
+      }
     } finally {
       btn.classList.remove('spinning');
       btn.disabled = false;
@@ -151,7 +163,8 @@
     try {
       const res  = await fetch('/api/instances');
       const list = await res.json();
-      if (list.error) throw new Error(list.error);
+      if (list && list.error) throw new Error(list.error);
+      if (!Array.isArray(list)) throw new Error('Resposta inválida do servidor.');
       const il = document.getElementById('inst-list');
       if (!list.length) {
         il.innerHTML = '<div class="empty"><p>Sem instâncias</p></div>';
@@ -162,7 +175,7 @@
           <div class="inst-name">${esc(shortName(inst.name))}</div>
           <div class="inst-sub">
             <div class="inst-dot ${inst.status==='open'?'online':''}"></div>
-            <span class="inst-count">${Number(inst.message_count).toLocaleString('pt-BR')} msgs</span>
+            <span class="inst-count">${Number(inst.message_count).toLocaleString('pt-BR')} mensagens</span>
           </div>
         </button>`).join('');
       il.querySelectorAll('.inst-btn').forEach(b =>
@@ -180,51 +193,16 @@
     try {
       const res  = await fetch('/api/instances');
       const list = await res.json();
-      if (list.error || !list.length) return;
+      if (!list || list.error || !Array.isArray(list) || !list.length) return;
       list.forEach(inst => {
         const el = document.querySelector('.inst-btn[data-id="' + inst.id + '"]');
         if (!el) return;
         const countEl = el.querySelector('.inst-count');
         const dotEl   = el.querySelector('.inst-dot');
-        if (countEl) countEl.textContent = Number(inst.message_count).toLocaleString('pt-BR') + ' msgs';
+        if (countEl) countEl.textContent = Number(inst.message_count).toLocaleString('pt-BR') + ' mensagens';
         if (dotEl)   dotEl.className = 'inst-dot' + (inst.status==='open' ? ' online' : '');
       });
     } catch (_) {}
-  }
-
-  async function refreshMessages() {
-    const box = document.getElementById('msgs');
-    if (!box) return;
-    const params = new URLSearchParams({ instanceId: activeInstance.id, contactJid: activeContact });
-    if (dateFrom) params.set('dateFrom', dateFrom);
-    if (dateTo)   params.set('dateTo',   dateTo);
-    const res  = await fetch('/api/messages?' + params);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    const countEl = document.getElementById('hdr-count');
-    if (countEl) countEl.textContent = data.length + ' msgs';
-    if (!data.length) {
-      box.innerHTML = '<div class="empty"><p>Sem mensagens no período</p></div>';
-      return;
-    }
-    const ph = phone(activeContact);
-    let lastDate = '', html = '';
-    data.forEach(msg => {
-      const date  = fmtDate(msg.messageTimestamp);
-      const time  = fmtTime(msg.messageTimestamp);
-      const side  = msg.from_me ? 'sent' : 'recv';
-      const label = msg.from_me ? 'Você' : (msg.pushName || ph);
-      if (date !== lastDate) { html += '<div class="date-sep">' + date + '</div>'; lastDate = date; }
-      let bubbleText, isMedia = false;
-      if (msg.text) { bubbleText = esc(msg.text); }
-      else if (mediaLabels[msg.messageType]) { bubbleText = mediaLabels[msg.messageType]; isMedia = true; }
-      else { bubbleText = '(' + esc(msg.messageType||'desconhecido') + ')'; isMedia = true; }
-      html += '<div class="msg-row ' + side + '"><div class="msg-lbl">' + esc(label) + '</div>' +
-        '<div class="bubble' + (isMedia?' media':'') + '">' + bubbleText + '</div>' +
-        '<div class="msg-time">' + time + '</div></div>';
-    });
-    box.innerHTML = html;
-    box.scrollTop = box.scrollHeight;
   }
 
   function selectInstance(id, name) {
@@ -252,7 +230,8 @@
     try {
       const res  = await fetch('/api/conversations?instanceId=' + encodeURIComponent(instanceId));
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data && data.error) throw new Error(data.error);
+      if (!Array.isArray(data)) throw new Error('Resposta inválida do servidor.');
       allConvs = data;
       renderConvs(data);
     } catch (e) {
@@ -271,7 +250,7 @@
       const preview = c.last_text ? trunc(c.last_text,48) : (mediaLabels[c.last_message_type]||'(sem texto)');
       const arrow   = c.last_from_me ? '↩ ' : '';
       const nameTag = c.last_push_name
-        ? ' · <span style="color:var(--muted);font-weight:400">' + esc(c.last_push_name) + '</span>' : '';
+        ? ' · <span class="ci-name-secondary">' + esc(c.last_push_name) + '</span>' : '';
       return '<div class="conv-item" data-jid="' + esc(c.contact_jid) + '">' +
         '<div class="avatar">' + initials(c.contact_jid) + '</div>' +
         '<div class="ci-info"><div class="ci-phone">' + ph + nameTag + '</div>' +
@@ -304,7 +283,7 @@
       el.classList.toggle('active', el.dataset.jid === jid)
     );
     renderChatShell(jid);
-    loadMessages(jid);
+    loadMessages(jid, {});
   }
 
   function renderChatShell(jid) {
@@ -332,8 +311,7 @@
   function applyFilter() {
     dateFrom = document.getElementById('df-from').value;
     dateTo   = document.getElementById('df-to').value;
-    if (!dateFrom && !dateTo) return;
-    loadMessages(activeContact);
+    loadMessages(activeContact, {});
   }
 
   function clearFilter() {
@@ -342,58 +320,79 @@
     document.getElementById('df-to').value   = '';
     const fs = document.getElementById('filter-status');
     if (fs) fs.style.display = 'none';
-    loadMessages(activeContact);
+    loadMessages(activeContact, {});
   }
 
-  async function loadMessages(jid) {
+  function renderMessageList(data, jid) {
     const box = document.getElementById('msgs');
     if (!box) return;
-    box.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Carregando mensagens…</small></div>';
+    if (!data.length) {
+      const hasFilter = !!(dateFrom || dateTo);
+      box.innerHTML = hasFilter
+        ? '<div class="empty"><p>Nenhuma mensagem neste período</p><small>Ajuste as datas ou limpe o filtro.</small></div>'
+        : '<div class="empty"><p>Nenhuma mensagem</p></div>';
+      return;
+    }
+    const ph = phone(jid);
+    let lastDate = '', html = '';
+    data.forEach(function (msg) {
+      const date  = fmtDate(msg.messageTimestamp);
+      const time  = fmtTime(msg.messageTimestamp);
+      const side  = msg.from_me ? 'sent' : 'recv';
+      const label = msg.from_me ? 'Você' : (msg.pushName || ph);
+      if (date !== lastDate) { html += '<div class="date-sep">' + date + '</div>'; lastDate = date; }
+      let bubbleText, isMedia = false;
+      if (msg.text) bubbleText = esc(msg.text);
+      else if (mediaLabels[msg.messageType]) { bubbleText = mediaLabels[msg.messageType]; isMedia = true; }
+      else { bubbleText = '(' + esc(msg.messageType||'desconhecido') + ')'; isMedia = true; }
+      html += '<div class="msg-row ' + side + '"><div class="msg-lbl">' + esc(label) + '</div>' +
+        '<div class="bubble' + (isMedia?' media':'') + '">' + bubbleText + '</div>' +
+        '<div class="msg-time">' + time + '</div></div>';
+    });
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /**
+   * @param {string} jid
+   * @param {object} opts opções; opts.silent=true omite o estado de carregamento (ex.: ao atualizar)
+   * @returns {Promise<boolean>}
+   */
+  async function loadMessages(jid, opts) {
+    opts = opts || {};
+    const box = document.getElementById('msgs');
+    if (!box || !activeInstance) return false;
+    if (!opts.silent) {
+      box.innerHTML = '<div class="loading-row"><div class="spin"></div><small>Carregando mensagens…</small></div>';
+    }
     const params = new URLSearchParams({ instanceId: activeInstance.id, contactJid: jid });
     if (dateFrom) params.set('dateFrom', dateFrom);
     if (dateTo)   params.set('dateTo',   dateTo);
     try {
       const res  = await fetch('/api/messages?' + params);
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data && data.error) throw new Error(data.error);
+      if (!Array.isArray(data)) throw new Error('Resposta inválida do servidor.');
       const countEl = document.getElementById('hdr-count');
-      if (countEl) countEl.textContent = data.length + ' msgs';
+      if (countEl) countEl.textContent = data.length.toLocaleString('pt-BR') + ' mensagens';
       const fs = document.getElementById('filter-status');
       if (fs) {
         if (dateFrom || dateTo) {
           const from = dateFrom ? new Date(dateFrom+'T00:00:00').toLocaleDateString('pt-BR') : '…';
           const to   = dateTo   ? new Date(dateTo+'T00:00:00').toLocaleDateString('pt-BR')   : '…';
-          fs.textContent = from + ' → ' + to;
+          fs.textContent = from + ' — ' + to;
           fs.style.display = '';
         } else fs.style.display = 'none';
       }
-      if (!data.length) {
-        box.innerHTML = '<div class="empty"><p>Sem mensagens no período</p><small>Tente outro intervalo de datas</small></div>';
-        return;
-      }
-      const ph = phone(jid);
-      let lastDate = '', html = '';
-      data.forEach(msg => {
-        const date  = fmtDate(msg.messageTimestamp);
-        const time  = fmtTime(msg.messageTimestamp);
-        const side  = msg.from_me ? 'sent' : 'recv';
-        const label = msg.from_me ? 'Você' : (msg.pushName || ph);
-        if (date !== lastDate) { html += '<div class="date-sep">' + date + '</div>'; lastDate = date; }
-        let bubbleText, isMedia = false;
-        if (msg.text) bubbleText = esc(msg.text);
-        else if (mediaLabels[msg.messageType]) { bubbleText = mediaLabels[msg.messageType]; isMedia = true; }
-        else { bubbleText = '(' + esc(msg.messageType||'desconhecido') + ')'; isMedia = true; }
-        html += '<div class="msg-row ' + side + '"><div class="msg-lbl">' + esc(label) + '</div>' +
-          '<div class="bubble' + (isMedia?' media':'') + '">' + bubbleText + '</div>' +
-          '<div class="msg-time">' + time + '</div></div>';
-      });
-      box.innerHTML = html;
-      box.scrollTop = box.scrollHeight;
+      renderMessageList(data, jid);
+      return true;
     } catch (e) {
       if (box) box.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+      return false;
     }
   }
 
   boot();
 </script>
-{% endblock %}
+</body>
+</html>

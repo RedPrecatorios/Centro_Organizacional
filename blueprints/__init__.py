@@ -1,1 +1,0 @@
-# Blueprints da plataforma
