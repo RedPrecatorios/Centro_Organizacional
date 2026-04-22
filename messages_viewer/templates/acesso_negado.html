@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Acesso negado — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="auth-body">
+  <main class="auth-wrap">
+    <div class="auth-card">
+      <h1 class="auth-title">Acesso negado</h1>
+      {% if motivo == 'deny' %}
+      <p class="auth-sub">Esta rota não está exposta. Volte à página inicial.</p>
+      {% elif motivo == 'admin' %}
+      <p class="auth-sub">Apenas administradores acedem a esta área.</p>
+      {% else %}
+      <p class="auth-sub">Falta permissão para o módulo que tentou abrir. Peça a um administrador que active a aba correspondente (Utilizadores) ou tente a partir do link no menu, se tiver acesso.</p>
+      {% endif %}
+      <p class="auth-actions">
+        <a class="auth-link" href="{{ url_for('index') }}">Início</a>
+        <a class="auth-link" href="{{ url_for('auth.logout') }}">Trocar de utilizador</a>
+      </p>
+    </div>
+  </main>
+</body>
+</html>

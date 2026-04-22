@@ -1,3 +1,6 @@
+# Sessão / auth local (SQLite)
+instance/
+
 # Ambiente e segredos
 .env
 .env.local

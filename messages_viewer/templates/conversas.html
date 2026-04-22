@@ -20,8 +20,16 @@
   </a>
   <nav class="platform-tabs" role="tablist" aria-label="Módulos da plataforma">
     <button type="button" class="platform-tab active" id="tab-btn-messages" role="tab" aria-selected="true" aria-controls="panel-messages">Conversas</button>
+    {% if user_can('outro_modulo') %}
     <button type="button" class="platform-tab" id="tab-btn-other" role="tab" aria-selected="false" aria-controls="panel-other">{{ second_tab_label|e }}</button>
+    {% endif %}
   </nav>
+  {% if plataforma_user %}
+  <div class="platform-user-bar">
+    <span class="platform-user-name">{{ plataforma_user.username|e }}</span>
+    <a class="platform-user-logout" href="{{ url_for('auth.logout') }}">Sair</a>
+  </div>
+  {% endif %}
 </header>
 
 <div id="app-toast"></div>
@@ -73,6 +81,7 @@
 </div>
 </section>
 
+{% if user_can('outro_modulo') %}
 <section id="panel-other" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-other">
   {% if second_iframe_src %}
   <iframe class="embed-frame" id="second-app-frame" title="{{ second_tab_label|e }}" src="{{ second_iframe_src }}"></iframe>
@@ -87,6 +96,7 @@ APP_TITLE=Plataforma</pre>
   </div>
   {% endif %}
 </section>
+{% endif %}
 
 <script>
   (function () {

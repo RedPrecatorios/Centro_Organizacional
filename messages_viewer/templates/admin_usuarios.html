@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Utilizadores — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Utilizadores e abas do painel</h1>
+        <p class="dash-sub">Como <strong>admin</strong>, define em cada <strong>colaborador</strong> quais <strong>abas e entradas do menu</strong> estão visíveis (e que rotas o sistema permite). Cada aba abaixo corresponde ao que o utilizador vê no painel após fazer login.</p>
+      </div>
+    </header>
+    <main class="dash-content admin-users-main">
+      {% if error %}
+      <p class="auth-err" role="alert">{{ error }}</p>
+      {% endif %}
+      {% if ok_message %}
+      <p class="auth-ok" role="status">{{ ok_message }}</p>
+      {% endif %}
+
+      <section class="admin-section" aria-labelledby="h-new">
+        <h2 id="h-new" class="dash-section-title">Novo utilizador</h2>
+        <p class="admin-intro">Se escolher <strong>Colaborador</strong>, marque logo abaixo <strong>quais abas do painel</strong> ele pode ver; pode alterar depois na secção de cada conta.</p>
+        <form class="admin-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="form-novo-user">
+          <input type="hidden" name="action" value="create" />
+          <div class="admin-row">
+            <label>Utilizador <input class="auth-input" name="new_username" type="text" required autocomplete="off" /></label>
+            <label>Palavra-passe <input class="auth-input" name="new_password" type="password" required autocomplete="new-password" /></label>
+            <label>Tipo
+              <select class="auth-input" name="new_role" id="new-role">
+                <option value="colaborador">Colaborador</option>
+                <option value="admin">Administrador</option>
+              </select>
+            </label>
+            <button class="auth-submit" type="submit">Criar</button>
+          </div>
+          <div class="admin-new-tabs" id="new-collab-tabs" role="group" aria-labelledby="new-tabs-label">
+            <p id="new-tabs-label" class="admin-perm-label">Abas visíveis para este colaborador (após fazer login):</p>
+            <div class="admin-checkboxes">
+              {% for key, label in tab_defs %}
+              <label class="admin-cb">
+                <input type="checkbox" name="new_tab_{{ key }}" value="1" />
+                {{ label }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </form>
+        <script>
+        (function () {
+          var sel = document.getElementById("new-role");
+          var block = document.getElementById("new-collab-tabs");
+          if (!sel || !block) return;
+          function sync() {
+            var isCol = sel.value === "colaborador";
+            block.classList.toggle("dash-hidden", !isCol);
+            block.setAttribute("aria-hidden", isCol ? "false" : "true");
+          }
+          sel.addEventListener("change", sync);
+          sync();
+        })();
+        </script>
+      </section>
+
+      <section class="admin-section" aria-labelledby="h-list">
+        <h2 id="h-list" class="dash-section-title">Contas: editar abas de cada colaborador</h2>
+        <p class="admin-intro">Para cada <strong>colaborador</strong>, marque as <strong>abas do painel</strong> a mostrar, depois clique <strong>Guardar permissões</strong>. Administradores têm todas as abas; não precisam de caixas.</p>
+        <div class="admin-user-list">
+          {% for u in users %}
+          <div class="admin-user-block">
+            <div class="admin-user-header">
+              <strong>{{ u.username|e }}</strong>
+              <span class="dash-pill {{ 'dash-pill-ok' if u.active else '' }}">
+                {{ 'Ativo' if u.active else 'Inactivo' }} · {{ 'Admin' if u.role == 'admin' else 'Colaborador' }}
+              </span>
+            </div>
+            {% if u.role == 'colaborador' %}
+            <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+              <input type="hidden" name="action" value="save_perms" />
+              <input type="hidden" name="user_id" value="{{ u.id }}" />
+              <p class="admin-perm-label">Abas visíveis no painel deste utilizador (menu lateral e extras):</p>
+              <div class="admin-checkboxes">
+                {% for key, label in tab_defs %}
+                <label class="admin-cb">
+                  <input type="checkbox" name="tab_{{ key }}" value="1" {% if key in u.tabs %}checked{% endif %} />
+                  {{ label }}
+                </label>
+                {% endfor %}
+              </div>
+              <button class="auth-submit admin-perm-btn" type="submit">Guardar permissões</button>
+            </form>
+            {% else %}
+            <p class="admin-note">O administrador tem acesso a todos os módulos.</p>
+            {% endif %}
+
+            <div class="admin-actions">
+              <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+                <input type="hidden" name="action" value="toggle" />
+                <input type="hidden" name="user_id" value="{{ u.id }}" />
+                <button class="admin-btn" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>
+                  {{ 'Desactivar' if u.active else 'Activar' }}
+                </button>
+              </form>
+              <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}" onsubmit="return confirm('Remover este utilizador?');">
+                <input type="hidden" name="action" value="delete" />
+                <input type="hidden" name="user_id" value="{{ u.id }}" />
+                <button class="admin-btn admin-btn-danger" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>Apagar</button>
+              </form>
+            </div>
+            <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+              <input type="hidden" name="action" value="set_password" />
+              <input type="hidden" name="user_id" value="{{ u.id }}" />
+              <label>Nova palavra-passe (mín. 4 caracteres)
+                <input class="auth-input" name="new_pass" type="password" autocomplete="new-password" minlength="4" />
+              </label>
+              <button class="auth-submit" type="submit">Alterar palavra-passe</button>
+            </form>
+          </div>
+          {% else %}
+          <p>Nenhum utilizador (o bootstrap do .env deveria ter criado o primeiro admin).</p>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

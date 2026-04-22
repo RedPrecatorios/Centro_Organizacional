@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iniciar sessão — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="auth-body">
+  <main class="auth-wrap">
+    <div class="auth-card">
+      <h1 class="auth-title">{{ app_title|e }}</h1>
+      <p class="auth-sub">Inicie sessão para aceder à plataforma</p>
+      {% if error %}
+      <p class="auth-err" role="alert">{{ error }}</p>
+      {% endif %}
+      {% if n_users == 0 %}
+      <p class="auth-hint">
+        Ainda não existe utilizador. Crie o primeiro <strong>administrador</strong> no ficheiro <code>.env</code>:
+      </p>
+      <pre class="auth-code">AUTH_BOOTSTRAP_USER=seu_nome
+AUTH_BOOTSTRAP_PASSWORD=uma_senha_forte</pre>
+      <p class="auth-hint">Reinicie a aplicação, faça login e altere as credenciais na página «Utilizadores».</p>
+      {% else %}
+      <form method="post" class="auth-form" action="{{ url_for('auth.login') }}">
+        <input type="hidden" name="next" value="{{ next_url|e }}" />
+        <label class="auth-label" for="username">Utilizador</label>
+        <input class="auth-input" id="username" name="username" type="text" autocomplete="username" required autofocus />
+        <label class="auth-label" for="password">Palavra-passe</label>
+        <input class="auth-input" id="password" name="password" type="password" autocomplete="current-password" required />
+        <button class="auth-submit" type="submit">Entrar</button>
+      </form>
+      {% endif %}
+    </div>
+  </main>
+</body>
+</html>

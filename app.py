@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import mysql.connector
@@ -23,6 +23,8 @@ app = Flask(
     static_folder=str(_MV / "static"),
     static_url_path="/static",
 )
+app.secret_key = (os.getenv("FLASK_SECRET_KEY") or "").strip() or "dev-unsafe-defina-FLASK_SECRET_KEY-no-.env"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=14)
 
 
 def _safe_embed_url(raw: str) -> str | None:
@@ -45,6 +47,21 @@ try:
     _HAS_EMBEDDED = True
 except ImportError:
     pass
+
+from messages_viewer.plataforma_auth import (
+    auth_bp,
+    init_plataforma_auth,
+    plataforma_before_request,
+    wsgi_eda_session_guard,
+)
+
+app.register_blueprint(auth_bp, url_prefix="/auth")
+init_plataforma_auth(app)
+
+
+@app.before_request
+def _plataforma_auth_guard():
+    return plataforma_before_request()
 
 
 @app.context_processor
@@ -427,6 +444,8 @@ except Exception as _e:
     import sys
     print(_log_msg, file=sys.stderr)
     app.config["HAS_EDIARIO"] = False
+
+app.wsgi_app = wsgi_eda_session_guard(app, app.wsgi_app)
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
