@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %} — Blacklist{% endblock %}
+
+{% block content %}
+<div class="eda-wrap-wider">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Blacklist</h1>
+    <p class="eda-lead">Gerencie os contatos, e-mails, CPFs e nomes bloqueados.</p>
+  </div>
+
+  <div class="eda-form-bar">
+    <form action="{{ url_for('blacklist_adicionar') }}" method="POST" class="eda-form-row">
+      <div class="eda-field" style="min-width:160px;">
+        <label class="eda-label" for="tipo_bl">Tipo</label>
+        <select name="tipo" id="tipo_bl" required class="eda-select" style="width:100%;">
+          <option value="CPF">CPF</option>
+          <option value="NOME">NOME</option>
+          <option value="TELEFONE">TELEFONE</option>
+          <option value="EMAIL">EMAIL</option>
+        </select>
+      </div>
+      <div class="eda-field eda-field--grow">
+        <label class="eda-label" for="valor_bl">Valor</label>
+        <input type="text" name="valor" id="valor_bl" required placeholder="Ex.: 12345678900" class="eda-input" style="width:100%;" />
+      </div>
+      <div class="eda-field eda-field--grow">
+        <label class="eda-label" for="motivo_bl">Motivo <span style="color:#94a3b8;font-weight:400;">(opcional)</span></label>
+        <input type="text" name="motivo" id="motivo_bl" placeholder="Ex.: Solicitou remoção" class="eda-input" style="width:100%;" />
+      </div>
+      <button type="submit" class="eda-btn eda-btn-primary" style="align-self:flex-end;">+ Adicionar</button>
+    </form>
+  </div>
+
+  <div class="eda-table-shell">
+    <form method="GET" action="{{ url_for('blacklist') }}" class="eda-form-inline">
+      <input type="text" name="q" value="{{ busca }}" placeholder="Buscar por valor…" class="eda-input" />
+      <button type="submit" class="eda-btn eda-btn-primary">Buscar</button>
+      {% if busca %}
+        <a href="{{ url_for('blacklist') }}" class="eda-btn eda-btn-secondary">Limpar</a>
+      {% endif %}
+    </form>
+
+    {% if registros %}
+      <div class="eda-table-scroll">
+        <table class="eda-table">
+          <thead>
+            <tr>
+              <th style="width:6rem;">Tipo</th>
+              <th>Valor</th>
+              <th style="width:16rem;">Motivo</th>
+              <th style="width:10rem;">Data inclusão</th>
+              <th style="width:2rem;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in registros %}
+            <tr>
+              <td>
+                <span class="eda-tag {% if r.tipo == 'CPF' %}eda-tag-cpf{% elif r.tipo == 'NOME' %}eda-tag-nome{% elif r.tipo == 'TELEFONE' %}eda-tag-tel{% else %}eda-tag-email{% endif %}">
+                  {{ r.tipo }}
+                </span>
+              </td>
+              <td class="eda-mono">{{ r.valor }}</td>
+              <td style="color:var(--muted);">{{ r.motivo or '—' }}</td>
+              <td style="color:var(--muted);font-size:12px;white-space:nowrap;">{{ r.data_inclusao }}</td>
+              <td>
+                <form action="{{ url_for('blacklist_remover', id_registro=r.id) }}" method="POST"
+                      onsubmit="return confirm('Remover esta entrada da blacklist?')">
+                  <button type="submit" class="eda-btn" style="padding:4px 6px;background:transparent;border:none;color:var(--muted);cursor:pointer;" title="Remover">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="eda-empty">
+        <div class="eda-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+        </div>
+        <p>Nenhuma entrada na blacklist</p>
+        <p class="eda-empty-sub">Use o formulário acima para adicionar</p>
+      </div>
+    {% endif %}
+
+    {% if total > 0 %}
+    <div class="eda-pagination">
+      <p class="eda-pagination-meta">
+        {{ (pagina - 1) * por_pag + 1 }}–{{ [pagina * por_pag, total]|min }}
+        de <strong style="color:var(--text);font-weight:600;">{{ total }}</strong> entrada(s)
+        {% if busca %} para “{{ busca }}”{% endif %}
+      </p>
+      <div class="eda-toolbar" style="gap:4px;">
+        {% if pagina > 1 %}
+          <a href="{{ url_for('blacklist', p=pagina-1, q=busca) }}" class="eda-pg-btn">&laquo;</a>
+        {% endif %}
+        {% set inicio = [1, pagina - 2]|max %}
+        {% set fim    = [total_paginas, pagina + 2]|min %}
+        {% if inicio > 1 %}
+          <a href="{{ url_for('blacklist', p=1, q=busca) }}" class="eda-pg-btn">1</a>
+          {% if inicio > 2 %}<span style="color:var(--muted);font-size:12px;">…</span>{% endif %}
+        {% endif %}
+        {% for n in range(inicio, fim + 1) %}
+          <a href="{{ url_for('blacklist', p=n, q=busca) }}"
+             class="eda-pg-btn {% if n == pagina %}is-active{% endif %}">{{ n }}</a>
+        {% endfor %}
+        {% if fim < total_paginas %}
+          {% if fim < total_paginas - 1 %}<span style="color:var(--muted);font-size:12px;">…</span>{% endif %}
+          <a href="{{ url_for('blacklist', p=total_paginas, q=busca) }}" class="eda-pg-btn">{{ total_paginas }}</a>
+        {% endif %}
+        {% if pagina < total_paginas %}
+          <a href="{{ url_for('blacklist', p=pagina+1, q=busca) }}" class="eda-pg-btn">&raquo;</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

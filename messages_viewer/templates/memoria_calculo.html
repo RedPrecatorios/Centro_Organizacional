@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Memória de Cálculo — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  <aside class="dash-sidebar" aria-label="Navegação principal">
+    <div class="dash-sidebar-brand">
+      <div class="platform-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <span class="dash-sidebar-title">{{ app_title|e }}</span>
+    </div>
+    <nav class="dash-nav">
+      <a class="dash-nav-item{% if request.endpoint == 'index' %} active{% endif %}" href="{{ url_for('index') }}">
+        <span class="dash-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
+        </span>
+        Início
+      </a>
+      <a class="dash-nav-item{% if request.endpoint == 'conversas' %} active{% endif %}" href="{{ url_for('conversas') }}">
+        <span class="dash-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        </span>
+        Conversas
+      </a>
+      <a class="dash-nav-item{% if request.endpoint == 'memoria_calculo' %} active{% endif %}" href="{{ url_for('memoria_calculo') }}">
+        <span class="dash-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </span>
+        Memória de Cálculo
+      </a>
+      {% if has_ediario %}
+      <a class="dash-nav-item" href="/eda/">
+        <span class="dash-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        EDA Diário
+      </a>
+      {% endif %}
+    </nav>
+  </aside>
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Memória de Cálculo</h1>
+        <p class="dash-sub">Resumo de valores; integração com base de dados será adicionada depois.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <p class="memoria-skeleton-note" role="status">
+        <strong>Modo esqueleto.</strong> Os números abaixo são apenas de demonstração. O percentual de honorários pode ser alterado para simular o recálculo. Na próxima etapa, estes campos passarão a vir do banco.
+      </p>
+
+      <div class="memoria-wrap">
+        <div class="memoria-toolbar">
+          <div class="memoria-pct">
+            <label for="honor-pct">Reserva de honorários</label>
+            <input type="number" id="honor-pct" min="0" max="100" step="0.1" value="30" inputmode="decimal" aria-describedby="honor-pct-hint" />
+            <span>%</span>
+          </div>
+          <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
+        </div>
+
+        <table class="memoria-table" id="memoria-table">
+          <thead class="memoria-thead">
+            <tr>
+              <th colspan="2">Memória de Cálculo</th>
+            </tr>
+          </thead>
+          <tbody class="memoria-tbody" id="memoria-tbody">
+            <tr>
+              <td class="memoria-k">Principal Bruto</td>
+              <td class="memoria-v" data-field="principal"></td>
+            </tr>
+            <tr>
+              <td class="memoria-k">Juros</td>
+              <td class="memoria-v" data-field="juros"></td>
+            </tr>
+            <tr>
+              <td class="memoria-k">Total Bruto</td>
+              <td class="memoria-v" data-field="totalBruto"></td>
+            </tr>
+            <tr class="memoria-neg">
+              <td class="memoria-k">Desc. Saúde e Prev.</td>
+              <td class="memoria-v" data-field="descSaude"></td>
+            </tr>
+            <tr>
+              <td class="memoria-k">Desc. IR</td>
+              <td class="memoria-v" data-field="descIR"></td>
+            </tr>
+            <tr class="memoria-neg">
+              <td class="memoria-k" id="honor-label">Reserva de Honorários 30%</td>
+              <td class="memoria-v" data-field="honorarios"></td>
+            </tr>
+            <tr class="memoria-total">
+              <td class="memoria-k">Total Líquido</td>
+              <td class="memoria-v" data-field="totalLiquido"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <section class="memoria-proposta-section" aria-labelledby="proposta-heading">
+        <h2 class="memoria-h2" id="proposta-heading">Sugestões de proposta</h2>
+        <p class="memoria-skeleton-note" style="margin-top:0;">
+          Valores de sugestão de proposta: <strong>Total líquido</strong> da memória de cálculo (acima) multiplicado pelo fator de cada combinação cenário × perfil de credor.
+          Os percentuais das regras não são exibidos — apenas o valor em reais resultante, atualizado quando a memória é recalculada.
+        </p>
+        <div class="dash-table-wrap memoria-proposta-table-wrap">
+          <div class="dash-table-scroll">
+            <table class="dash-table proposta-regras-table" id="proposta-table">
+              <thead>
+                <tr>
+                  <th scope="col">Cenário (estadual)</th>
+                  <th scope="col" class="num">Credor original ou herdeiros habilitados</th>
+                  <th scope="col" class="num">Herdeiros não-habilitados</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Estadual com OC</td>
+                  <td class="num proposta-val" data-pi="0" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, estadual com OC">—</td>
+                  <td class="num proposta-val" data-pi="0" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, estadual com OC">—</td>
+                </tr>
+                <tr>
+                  <td>Estadual com ofício / sem OC</td>
+                  <td class="num proposta-val" data-pi="1" data-pj="0" aria-label="Sugestão, credor original, ofício/sem OC">—</td>
+                  <td class="num proposta-val" data-pi="1" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, ofício/sem OC">—</td>
+                </tr>
+                <tr>
+                  <td>Estadual com incidente / sem ofício</td>
+                  <td class="num proposta-val" data-pi="2" data-pj="0" aria-label="Sugestão, credor original, incidente/sem ofício">—</td>
+                  <td class="num proposta-val" data-pi="2" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, incidente/sem ofício">—</td>
+                </tr>
+                <tr>
+                  <td>Estadual cumprimento</td>
+                  <td class="num proposta-val" data-pi="3" data-pj="0" aria-label="Sugestão, credor original, cumprimento">—</td>
+                  <td class="num proposta-val" data-pi="3" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, cumprimento">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    // Placeholder — substituir por resposta de API
+    var base = {
+      principalBruto: 147137.05,
+      juros: 54224.21,
+      descSaudePrev: 12115.94,
+      descIR: 0
+    };
+    // Fatores de proposta (não exibidos): linha = cenário, col = perfil de credor
+    var TAXA_PROPOSTA = [
+      [0.35, 0.31],
+      [0.33, 0.27],
+      [0.30, 0.27],
+      [0.28, 0.25]
+    ];
+    var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    var pctInput = document.getElementById('honor-pct');
+    var honorLabel = document.getElementById('honor-label');
+
+    function round2(x) { return Math.round(x * 100) / 100; }
+
+    function recalc() {
+      var pct = parseFloat(pctInput.value);
+      if (isNaN(pct) || pct < 0) pct = 0;
+      if (pct > 100) pct = 100;
+      var totalBruto = base.principalBruto + base.juros;
+      var honor = round2(-(totalBruto * (pct / 100)));
+      var liq = round2(totalBruto - base.descSaudePrev - base.descIR + honor);
+
+      var map = {
+        principal: brl.format(base.principalBruto),
+        juros: brl.format(base.juros),
+        totalBruto: brl.format(totalBruto),
+        descSaude: brl.format(-base.descSaudePrev),
+        descIR: brl.format(-base.descIR),
+        honorarios: brl.format(honor),
+        totalLiquido: brl.format(liq)
+      };
+      document.querySelectorAll('[data-field]').forEach(function (el) {
+        var k = el.getAttribute('data-field');
+        if (map[k] != null) el.textContent = map[k];
+      });
+      honorLabel.textContent =
+        'Reserva de Honorários ' + pct.toLocaleString('pt-BR', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + '%';
+
+      document.querySelectorAll('.proposta-val').forEach(function (el) {
+        var ri = parseInt(el.getAttribute('data-pi'), 10);
+        var cj = parseInt(el.getAttribute('data-pj'), 10);
+        var t = TAXA_PROPOSTA[ri] && TAXA_PROPOSTA[ri][cj];
+        if (t == null) return;
+        var v = round2(liq * t);
+        el.textContent = brl.format(v);
+      });
+    }
+
+    pctInput.addEventListener('input', recalc);
+    pctInput.addEventListener('change', recalc);
+    recalc();
+  })();
+  </script>
+</body>
+</html>

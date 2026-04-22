@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %} — Processando...{% endblock %}
+
+{% block content %}
+<div class="eda-wrap eda-wrap-narrow" x-data="progresso()" x-init="iniciar()">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Processando…</h1>
+    <p class="eda-lead">Acompanhe o progresso em tempo real.</p>
+  </div>
+
+  <div class="eda-prog-card">
+    <div class="eda-prog-status">
+      <div x-show="rodando" class="eda-spin" aria-hidden="true"></div>
+      <div x-show="!rodando && !erro" x-cloak class="eda-ok-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+      </div>
+      <div x-show="!rodando && erro" x-cloak class="eda-err-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      </div>
+
+      <div>
+        <p class="eda-prog-title" x-text="rodando ? 'Executando Etapa ' + etapa + '…' : (erro ? 'Erro na execução' : 'Concluído com sucesso!')"></p>
+        <p class="eda-prog-sub" x-text="rodando ? 'Não feche esta janela.' : (erro ? 'Veja o log abaixo.' : 'Resultado disponível para download.')"></p>
+      </div>
+    </div>
+
+    <div class="eda-log-box" id="log-box">
+      <template x-for="(linha, i) in log" :key="i">
+        <div
+          :class="linha.includes('[ERRO]') ? 'eda-log-line--err' : (linha.includes('[OK]') ? 'eda-log-line--ok' : 'eda-log-line--muted')"
+          x-text="linha">
+        </div>
+      </template>
+      <div x-show="rodando" class="eda-log-wait">
+        <span>&gt;</span>
+        <span>aguardando…</span>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="!rodando" x-cloak class="eda-toolbar" style="margin-top:4px;">
+    <a href="{{ url_for('index') }}" class="eda-btn eda-btn-secondary">Voltar ao Painel</a>
+    <a x-show="!erro" href="{{ url_for('download', arquivo='final') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+      Baixar FINAL
+    </a>
+  </div>
+
+</div>
+
+<script>
+function progresso() {
+  return {
+    rodando: true,
+    erro: false,
+    etapa: null,
+    log: [],
+    _statusUrl: {{ url_for("api_status")|tojson }},
+
+    iniciar() {
+      this.buscar();
+    },
+
+    async buscar() {
+      try {
+        const res  = await fetch(this._statusUrl, { credentials: "same-origin" });
+        const data = await res.json();
+        this.rodando = data.rodando;
+        this.etapa   = data.etapa;
+        this.log     = data.log;
+        this.erro    = (data.log || []).some(l => l.includes('[ERRO]'));
+
+        const box = document.getElementById('log-box');
+        if (box) box.scrollTop = box.scrollHeight;
+
+        if (this.rodando) {
+          setTimeout(() => this.buscar(), 1000);
+        }
+      } catch (e) {
+        setTimeout(() => this.buscar(), 2000);
+      }
+    }
+  }
+}
+</script>
+{% endblock %}

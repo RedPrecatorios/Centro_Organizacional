@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %} — Histórico{% endblock %}
+
+{% block content %}
+<div class="eda-wrap">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Histórico de execuções</h1>
+    <p class="eda-lead">Últimas 50 execuções registradas no banco.</p>
+  </div>
+
+  <div class="eda-table-shell">
+    {% if registros %}
+      <div class="eda-table-scroll">
+        <table class="eda-table">
+          <thead>
+            <tr>
+              <th>Etapa</th>
+              <th>Data</th>
+              <th>Registros</th>
+              <th>Enriq. P2</th>
+              <th>Enriq. P3</th>
+              <th>Sem contato</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in registros %}
+            <tr>
+              <td>
+                <span class="eda-tag" style="{% if r.etapa == 1 %}background:#e0e7ff;color:#3730a3;{% else %}background:#f3e8ff;color:#6b21a8;{% endif %}">
+                  Etapa {{ r.etapa }}
+                </span>
+              </td>
+              <td style="color:var(--muted);font-size:12px;white-space:nowrap;">{{ r.data_execucao or '—' }}</td>
+              <td>{{ r.total_registros or '—' }}</td>
+              <td>{{ r.total_enriquecidos_p2 or '—' }}</td>
+              <td>{{ r.total_enriquecidos_p3 or '—' }}</td>
+              <td style="color:var(--muted);">{{ r.total_sem_contato or 0 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="eda-empty">
+        <div class="eda-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        </div>
+        <p>Nenhuma execução registrada ainda</p>
+        <p class="eda-empty-sub">As execuções aparecerão aqui após rodar as etapas</p>
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

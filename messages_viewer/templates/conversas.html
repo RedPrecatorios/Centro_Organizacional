@@ -3,19 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Viewer de mensagens</title>
+  <title>Conversas — {{ app_title|e }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
 </head>
-<body>
+<body class="platform-body">
 
-<header class="viewer-header">
-  <div class="logo" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-  </div>
-  <h1>Conversas</h1>
+<header class="platform-bar">
+  <a href="{{ url_for('index') }}" class="platform-brand platform-brand-link" title="Página inicial">
+    <div class="platform-logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <span class="platform-title">{{ app_title|e }}</span>
+  </a>
+  <nav class="platform-tabs" role="tablist" aria-label="Módulos da plataforma">
+    <button type="button" class="platform-tab active" id="tab-btn-messages" role="tab" aria-selected="true" aria-controls="panel-messages">Conversas</button>
+    <button type="button" class="platform-tab" id="tab-btn-other" role="tab" aria-selected="false" aria-controls="panel-other">{{ second_tab_label|e }}</button>
+  </nav>
+</header>
+
+<div id="app-toast"></div>
+
+<section id="panel-messages" class="tab-panel is-active" role="tabpanel" aria-labelledby="tab-btn-messages">
+<div class="viewer-subbar">
+  <span class="viewer-subbar-label">WhatsApp</span>
   <span class="hdr-spacer"></span>
   <span id="last-updated"></span>
   <button class="refresh-btn" id="refresh-btn" type="button" title="Atualizar dados">
@@ -25,8 +38,7 @@
     </svg>
     Atualizar
   </button>
-</header>
-<div id="app-toast"></div>
+</div>
 
 <div id="wa-app">
   <nav id="inst-sidebar">
@@ -59,6 +71,48 @@
     </div>
   </div>
 </div>
+</section>
+
+<section id="panel-other" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-other">
+  {% if second_iframe_src %}
+  <iframe class="embed-frame" id="second-app-frame" title="{{ second_tab_label|e }}" src="{{ second_iframe_src }}"></iframe>
+  {% else %}
+  <div class="embed-placeholder">
+    <p class="embed-placeholder-title">Segundo módulo</p>
+    <p class="embed-placeholder-text">Coloque o outro projeto na pasta <code>embedded/</code> (veja <code>embedded/blueprint.py</code>) ou defina uma URL externa no <code>.env</code>:</p>
+    <pre class="embed-placeholder-code">SECOND_APP_URL=https://exemplo.com/app
+SECOND_TAB_LABEL=Nome da aba
+APP_TITLE=Plataforma</pre>
+    <p class="embed-placeholder-note">Se usar URL externa, o serviço precisa permitir iframe (sem <code>X-Frame-Options: DENY</code>). O módulo em <code>/embedded/</code> é da mesma origem e não tem essa limitação.</p>
+  </div>
+  {% endif %}
+</section>
+
+<script>
+  (function () {
+    var btnMsg = document.getElementById('tab-btn-messages');
+    var btnOther = document.getElementById('tab-btn-other');
+    var panelMsg = document.getElementById('panel-messages');
+    var panelOther = document.getElementById('panel-other');
+    if (!btnMsg || !panelMsg) return;
+
+    function go(tab) {
+      var isMsg = tab === 'messages';
+      btnMsg.classList.toggle('active', isMsg);
+      btnMsg.setAttribute('aria-selected', isMsg ? 'true' : 'false');
+      panelMsg.classList.toggle('is-active', isMsg);
+
+      if (btnOther && panelOther) {
+        btnOther.classList.toggle('active', !isMsg);
+        btnOther.setAttribute('aria-selected', !isMsg ? 'true' : 'false');
+        panelOther.classList.toggle('is-active', !isMsg);
+      }
+    }
+
+    btnMsg.addEventListener('click', function () { go('messages'); });
+    if (btnOther) btnOther.addEventListener('click', function () { go('other'); });
+  })();
+</script>
 
 <script>
   let activeInstance = null;

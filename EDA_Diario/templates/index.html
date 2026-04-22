@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %} — Painel{% endblock %}
+
+{% block content %}
+<div class="eda-wrap">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Painel de Processamento</h1>
+    <p class="eda-lead">Faça os uploads, execute as etapas e baixe os resultados.</p>
+  </div>
+
+  <!-- Etapa 1 -->
+  <section class="eda-section-card">
+    <div class="eda-section-head">
+      <span class="eda-step-num">1</span>
+      <div>
+        <h2>Etapa 1 — Enriquecimento Lemitti</h2>
+        <p>Cruza a planilha principal com os contatos da Lemitti (P2)</p>
+      </div>
+    </div>
+
+    <div class="eda-grid-2">
+      <div class="eda-upload-box">
+        <div class="eda-upload-box-head">
+          <p>Planilha Principal</p>
+          {% if arquivos.principal %}
+            <span class="eda-badge eda-badge--ok">Carregado</span>
+          {% else %}
+            <span class="eda-badge eda-badge--pend">Pendente</span>
+          {% endif %}
+        </div>
+        <form action="{{ url_for('upload', tipo='principal') }}" method="POST" enctype="multipart/form-data">
+          <label class="eda-dropzone">
+            <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+            <span class="eda-dz-hint">.xlsx</span>
+            <input type="file" name="arquivo" accept=".xlsx" onchange="this.form.submit()">
+          </label>
+        </form>
+      </div>
+
+      <div class="eda-upload-box">
+        <div class="eda-upload-box-head">
+          <p>Lemitti (P2)</p>
+          {% if arquivos.p2 %}
+            <span class="eda-badge eda-badge--ok">Carregado</span>
+          {% else %}
+            <span class="eda-badge eda-badge--pend">Pendente</span>
+          {% endif %}
+        </div>
+        <form action="{{ url_for('upload', tipo='p2') }}" method="POST" enctype="multipart/form-data">
+          <label class="eda-dropzone">
+            <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+            <span class="eda-dz-hint">.csv</span>
+            <input type="file" name="arquivo" accept=".csv" onchange="this.form.submit()">
+          </label>
+        </form>
+      </div>
+    </div>
+
+    <div class="eda-toolbar">
+      <form action="{{ url_for('rodar_etapa1') }}" method="POST">
+        <button type="submit" class="eda-btn eda-btn-primary"
+          {% if not arquivos.principal or not arquivos.p2 %}disabled title="Faça os uploads primeiro"{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Rodar Etapa 1
+        </button>
+      </form>
+
+      {% if arquivos.intermediaria %}
+        <a href="{{ url_for('download', arquivo='intermediaria') }}" class="eda-btn eda-btn-secondary" style="flex-direction:column;align-items:flex-start;gap:2px;">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Intermediária
+          </span>
+          {% if arquivos.data_intermediaria %}
+            <span style="font-size:12px;font-weight:500;color:var(--muted);">gerada em {{ arquivos.data_intermediaria }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+
+      {% if arquivos.nao_encontrados %}
+        <a href="{{ url_for('download', arquivo='nao_encontrados') }}" class="eda-link-warn">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            CPFs não encontrados
+          </span>
+          {% if arquivos.data_nao_encontrados %}
+            <span class="eda-link-sub">gerado em {{ arquivos.data_nao_encontrados }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Etapa 2 -->
+  <section class="eda-section-card">
+    <div class="eda-section-head">
+      <span class="eda-step-num eda-step-num--b">2</span>
+      <div>
+        <h2>Etapa 2 — Enriquecimento Assertiva</h2>
+        <p>Completa os CPFs não encontrados com dados da Assertiva (P3)</p>
+      </div>
+    </div>
+
+    <div class="eda-max-w-sm" style="margin-bottom: 20px;">
+      <div class="eda-upload-box">
+        <div class="eda-upload-box-head">
+          <p>Assertiva (P3)</p>
+          {% if arquivos.p3 %}
+            <span class="eda-badge eda-badge--ok">Carregado</span>
+          {% else %}
+            <span class="eda-badge eda-badge--pend">Pendente</span>
+          {% endif %}
+        </div>
+        <form action="{{ url_for('upload', tipo='p3') }}" method="POST" enctype="multipart/form-data">
+          <label class="eda-dropzone">
+            <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+            <span class="eda-dz-hint">.csv</span>
+            <input type="file" name="arquivo" accept=".csv" onchange="this.form.submit()">
+          </label>
+        </form>
+      </div>
+    </div>
+
+    <div class="eda-toolbar">
+      <form action="{{ url_for('rodar_etapa2') }}" method="POST">
+        <button type="submit" class="eda-btn eda-btn-indigo"
+          {% if not arquivos.intermediaria or not arquivos.p3 %}disabled title="Rode a Etapa 1 e envie a planilha P3 primeiro"{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Rodar Etapa 2
+        </button>
+      </form>
+
+      {% if arquivos.final %}
+        <a href="{{ url_for('download', arquivo='final') }}" class="eda-link-download">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            {{ arquivos.nome_final }}
+          </span>
+          {% if arquivos.data_final %}
+            <span class="eda-link-sub">gerado em {{ arquivos.data_final }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+
+      {% if arquivos.blacklist_bloqueios %}
+        <a href="{{ url_for('download', arquivo='blacklist_bloqueios') }}" class="eda-link-rose">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Bloqueios blacklist (CSV)
+          </span>
+          {% if arquivos.data_blacklist_bloq %}
+            <span class="eda-link-sub">atualizado em {{ arquivos.data_blacklist_bloq }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}

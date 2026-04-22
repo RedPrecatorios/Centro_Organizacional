@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Módulo embutido</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --text: #1a2332;
+      --muted: #64748b;
+      --accent: #0d9488;
+      --border: #dbe4f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 480px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 12px 0; letter-spacing: -0.02em; }
+    p { font-size: 14px; line-height: 1.55; color: var(--muted); margin: 0 0 10px 0; }
+    code {
+      font-size: 12px;
+      background: #f8fafc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    ul { margin: 12px 0 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    a { color: var(--accent); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Módulo embutido</h1>
+    <p>Substitua esta página pelo seu projeto: edite <code>embedded/blueprint.py</code> e os ficheiros em <code>embedded/templates/</code> e <code>embedded/static/</code>.</p>
+    <p>Esta rota responde em <code>/embedded/</code> e abre na segunda aba da plataforma principal.</p>
+    <ul>
+      <li>Para várias páginas, acrescente rotas no blueprint.</li>
+      <li>Se precisar de pacotes Python, adicione-os ao <code>requirements.txt</code> da raiz.</li>
+      <li>Variáveis de ambiente: use o mesmo <code>.env</code> na raiz (carregado por <code>app.py</code>).</li>
+    </ul>
+  </div>
+</body>
+</html>

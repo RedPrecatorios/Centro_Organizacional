@@ -1,17 +1,81 @@
 import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, url_for
 
 # cd "c:\Users\justi\OneDrive\Documentos\Python Projects\PycharmProjects\View_Message"
 # python app.py
 
 load_dotenv()
 
-app = Flask(__name__)
+_PROJECT_ROOT = Path(__file__).resolve().parent
+_MV = _PROJECT_ROOT / "messages_viewer"
+
+app = Flask(
+    __name__,
+    template_folder=str(_MV / "templates"),
+    static_folder=str(_MV / "static"),
+    static_url_path="/static",
+)
+
+
+def _safe_embed_url(raw: str) -> str | None:
+    """Permite só http(s) para iframe; evita javascript: e dados malformados."""
+    url = (raw or "").strip()
+    if not url:
+        return None
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        return None
+    if re.search(r'[\s<>"\']', url):
+        return None
+    return url
+
+
+_HAS_EMBEDDED = False
+try:
+    from messages_viewer.embedded.blueprint import embedded_bp
+
+    app.register_blueprint(embedded_bp)
+    _HAS_EMBEDDED = True
+except ImportError:
+    pass
+
+
+@app.context_processor
+def inject_platform():
+    env_url = _safe_embed_url(os.getenv("SECOND_APP_URL", ""))
+    has_edi = bool(app.config.get("HAS_EDIARIO"))
+    internal = None
+    if _HAS_EMBEDDED:
+        try:
+            internal = url_for("embedded.index")
+        except Exception:
+            internal = None
+    if env_url:
+        second_src = env_url
+    elif has_edi:
+        second_src = "/eda/"
+    else:
+        second_src = internal
+    custom_label = (os.getenv("SECOND_TAB_LABEL") or "").strip()
+    if custom_label:
+        second_label = custom_label
+    elif has_edi:
+        second_label = "EDA Diário"
+    else:
+        second_label = "Outro módulo"
+    return {
+        "app_title": (os.getenv("APP_TITLE") or "Plataforma").strip() or "Plataforma",
+        "second_tab_label": second_label,
+        "second_iframe_src": second_src,
+        "has_ediario": has_edi,
+    }
+
 
 DB_CONFIG = {
     "host":     os.getenv("DB_HOST",     "209.38.154.187"),
@@ -36,7 +100,65 @@ def get_db():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("capa.html")
+
+
+@app.route("/conversas")
+def conversas():
+    return render_template("conversas.html")
+
+
+@app.route("/memoria-calculo")
+def memoria_calculo():
+    return render_template("memoria_calculo.html")
+
+
+# ── dashboard ────────────────────────────────────────────────────────────────
+@app.route("/api/summary")
+def get_summary():
+    """Métricas agregadas para a capa (um pedido, inclui lista de instâncias)."""
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            f"""
+            WITH norm AS (
+                SELECT
+                    m."instanceId" AS iid,
+                    {NORM_JID} AS contact_jid
+                FROM "Message" m
+            )
+            SELECT
+                (SELECT COALESCE(COUNT(*)::bigint, 0) FROM "Message") AS total_messages,
+                (SELECT COALESCE(COUNT(*)::bigint, 0) FROM "Instance") AS total_instances,
+                (SELECT COALESCE(COUNT(*)::bigint, 0) FROM "Instance" WHERE "connectionStatus" = 'open') AS online_instances,
+                (SELECT COALESCE(COUNT(*)::bigint, 0) FROM (SELECT DISTINCT iid, contact_jid FROM norm WHERE contact_jid IS NOT NULL) d) AS total_threads,
+                (SELECT COALESCE(COUNT(*)::bigint, 0) FROM "Message" m2
+                 WHERE (timezone('America/Sao_Paulo', to_timestamp(m2."messageTimestamp")))::date
+                     = (timezone('America/Sao_Paulo', now()))::date
+                ) AS messages_today
+        """
+        )
+        agg = cur.fetchone()
+        cur.execute(
+            """
+            SELECT i.id, i.name, i."connectionStatus" AS status,
+                   i."profileName",
+                   COALESCE(COUNT(m.id), 0)::bigint AS message_count
+            FROM "Instance" i
+            LEFT JOIN "Message" m ON m."instanceId" = i.id
+            GROUP BY i.id
+            ORDER BY i.name
+        """
+        )
+        inst_rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        d = dict(agg) if agg else {}
+        d["instances"] = inst_rows
+        return jsonify(d)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── instances ────────────────────────────────────────────────────────────────
@@ -159,6 +281,17 @@ def get_messages():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# EDA Diário: montado em /eda/ (ver eda_integracao.py e variável EDA_DIARIO_PATH)
+try:
+    from eda_integracao import tentar_montar_eda
+
+    tentar_montar_eda(app)
+except Exception as _e:
+    _log_msg = f"[EDA Diário] integração: {_e}"
+    import sys
+    print(_log_msg, file=sys.stderr)
+    app.config["HAS_EDIARIO"] = False
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
