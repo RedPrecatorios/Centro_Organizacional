@@ -51,26 +51,67 @@
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Memória de Cálculo</h1>
-        <p class="dash-sub">Resumo de valores; integração com base de dados será adicionada depois.</p>
+        <p class="dash-sub">Pesquise pelo requerente para carregar a memória a partir do banco. Até lá, tudo fica em zero.</p>
       </div>
     </header>
 
     <main class="dash-content">
-      <p class="memoria-skeleton-note" role="status">
-        <strong>Modo esqueleto.</strong> Os números abaixo são apenas de demonstração. O percentual de honorários pode ser alterado para simular o recálculo. Na próxima etapa, estes campos passarão a vir do banco.
+      {% if not memoria_mysql_configured %}
+      <p class="memoria-skeleton-note" role="status" id="memoria-config-hint">
+        <strong>MySQL não configurado.</strong> Defina <code>MEMORIA_MYSQL_DATABASE</code> (e, se necessário, <code>MEMORIA_MYSQL_HOST</code>, <code>MEMORIA_MYSQL_USER</code>, <code>MEMORIA_MYSQL_PASSWORD</code>) no <code>.env</code> para ativar a pesquisa. A memória fica em zero até carregar um registo.
       </p>
+      {% else %}
+      <p class="memoria-skeleton-note" role="status" id="memoria-skeleton">
+        <strong>Como funciona.</strong> Os totais e as sugestões de proposta só são preenchidos após <strong>pesquisar e carregar</strong> um requerente (ou escolher um entre vários com o mesmo nome). Antes disso, tudo fica em zero.
+      </p>
+      {% endif %}
 
-      <div class="memoria-wrap">
-        <div class="memoria-toolbar">
-          <div class="memoria-pct">
-            <label for="honor-pct">Reserva de honorários</label>
-            <input type="number" id="honor-pct" min="0" max="100" step="0.1" value="30" inputmode="decimal" aria-describedby="honor-pct-hint" />
-            <span>%</span>
+      <div class="memoria-linha" role="group" aria-label="Pesquisa e memória de cálculo">
+        <div class="memoria-col-busca">
+          <div class="memoria-search" id="memoria-search" aria-label="Pesquisa por requerente">
+            <label for="memoria-nome">Pesquisar requerente</label>
+            <div class="memoria-search-row">
+              <input type="search" id="memoria-nome" name="memoria_nome" placeholder="Digite o nome" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+              <button type="button" class="memoria-btn-buscar" id="memoria-btn-buscar" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
+            </div>
+            <p class="memoria-search-msg" id="memoria-search-msg" role="status" aria-live="polite"></p>
+            <div class="memoria-escolher" id="memoria-escolher" hidden>
+              <p class="memoria-escolher-tit">Vários casos com este nome. Selecione processo e incidente:</p>
+              <ul class="memoria-escolher-list" id="memoria-escolher-list"></ul>
+            </div>
           </div>
-          <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
         </div>
 
-        <table class="memoria-table" id="memoria-table">
+        <div class="memoria-col-valores">
+          <div class="memoria-case-meta" id="memoria-case-meta" hidden>
+            <div class="memoria-case-row">
+              <span class="l">Requerente</span>
+              <span class="v" id="memoria-meta-req"></span>
+            </div>
+            <div class="memoria-case-row">
+              <span class="l">Nº processo</span>
+              <span class="v" id="memoria-meta-proc"></span>
+            </div>
+            <div class="memoria-case-row">
+              <span class="l">Nº incidente</span>
+              <span class="v" id="memoria-meta-inc"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="memoria-linha" role="group" aria-label="Pesquisa e memória de cálculo">
+        <div class="memoria-col-valores">
+          <div class="memoria-wrap">
+            <div class="memoria-toolbar">
+              <div class="memoria-pct">
+                <label for="honor-pct">Reserva de honorários</label>
+                <input type="number" id="honor-pct" min="0" max="100" step="0.1" value="0" inputmode="decimal" aria-describedby="honor-pct-hint" />
+                <span>%</span>
+              </div>
+              <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
+            </div>
+
+            <table class="memoria-table" id="memoria-table">
           <thead class="memoria-thead">
             <tr>
               <th colspan="2">Memória de Cálculo</th>
@@ -105,65 +146,63 @@
               <td class="memoria-k">Total Líquido</td>
               <td class="memoria-v" data-field="totalLiquido"></td>
             </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <section class="memoria-proposta-section" aria-labelledby="proposta-heading">
-        <h2 class="memoria-h2" id="proposta-heading">Sugestões de proposta</h2>
-        <p class="memoria-skeleton-note" style="margin-top:0;">
-          Valores de sugestão de proposta: <strong>Total líquido</strong> da memória de cálculo (acima) multiplicado pelo fator de cada combinação cenário × perfil de credor.
-          Os percentuais das regras não são exibidos — apenas o valor em reais resultante, atualizado quando a memória é recalculada.
-        </p>
-        <div class="dash-table-wrap memoria-proposta-table-wrap">
-          <div class="dash-table-scroll">
-            <table class="dash-table proposta-regras-table" id="proposta-table">
-              <thead>
-                <tr>
-                  <th scope="col">Cenário (estadual)</th>
-                  <th scope="col" class="num">Credor original ou herdeiros habilitados</th>
-                  <th scope="col" class="num">Herdeiros não-habilitados</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Estadual com OC</td>
-                  <td class="num proposta-val" data-pi="0" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, estadual com OC">—</td>
-                  <td class="num proposta-val" data-pi="0" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, estadual com OC">—</td>
-                </tr>
-                <tr>
-                  <td>Estadual com ofício / sem OC</td>
-                  <td class="num proposta-val" data-pi="1" data-pj="0" aria-label="Sugestão, credor original, ofício/sem OC">—</td>
-                  <td class="num proposta-val" data-pi="1" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, ofício/sem OC">—</td>
-                </tr>
-                <tr>
-                  <td>Estadual com incidente / sem ofício</td>
-                  <td class="num proposta-val" data-pi="2" data-pj="0" aria-label="Sugestão, credor original, incidente/sem ofício">—</td>
-                  <td class="num proposta-val" data-pi="2" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, incidente/sem ofício">—</td>
-                </tr>
-                <tr>
-                  <td>Estadual cumprimento</td>
-                  <td class="num proposta-val" data-pi="3" data-pj="0" aria-label="Sugestão, credor original, cumprimento">—</td>
-                  <td class="num proposta-val" data-pi="3" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, cumprimento">—</td>
-                </tr>
-              </tbody>
+            </tbody>
             </table>
           </div>
         </div>
-      </section>
+        <section class="memoria-proposta-section" aria-labelledby="proposta-heading">
+          <h2 class="memoria-h2" id="proposta-heading">Sugestões de proposta</h2>
+          <p class="memoria-skeleton-note" style="margin-top:0;">
+            Valores de sugestão: <strong>Total líquido</strong> da memória (acima) × fator (cenário × perfil de credor). Só são calculados depois de carregar um requerente na pesquisa. Os percentuais das regras não são exibidos.
+          </p>
+          <div class="dash-table-wrap memoria-proposta-table-wrap">
+            <div class="dash-table-scroll">
+              <table class="dash-table proposta-regras-table" id="proposta-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Cenário (estadual)</th>
+                    <th scope="col" class="num">Credor original ou herdeiros habilitados</th>
+                    <th scope="col" class="num">Herdeiros não-habilitados</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Estadual com OC</td>
+                    <td class="num proposta-val" data-pi="0" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, estadual com OC">—</td>
+                    <td class="num proposta-val" data-pi="0" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, estadual com OC">—</td>
+                  </tr>
+                  <tr>
+                    <td>Estadual com ofício / sem OC</td>
+                    <td class="num proposta-val" data-pi="1" data-pj="0" aria-label="Sugestão, credor original, ofício/sem OC">—</td>
+                    <td class="num proposta-val" data-pi="1" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, ofício/sem OC">—</td>
+                  </tr>
+                  <tr>
+                    <td>Estadual com incidente / sem ofício</td>
+                    <td class="num proposta-val" data-pi="2" data-pj="0" aria-label="Sugestão, credor original, incidente/sem ofício">—</td>
+                    <td class="num proposta-val" data-pi="2" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, incidente/sem ofício">—</td>
+                  </tr>
+                  <tr>
+                    <td>Estadual cumprimento</td>
+                    <td class="num proposta-val" data-pi="3" data-pj="0" aria-label="Sugestão, credor original, cumprimento">—</td>
+                    <td class="num proposta-val" data-pi="3" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, cumprimento">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      
     </main>
   </div>
 
   <script>
   (function () {
-    // Placeholder — substituir por resposta de API
-    var base = {
-      principalBruto: 147137.05,
-      juros: 54224.21,
-      descSaudePrev: 12115.94,
-      descIR: 0
-    };
-    // Fatores de proposta (não exibidos): linha = cenário, col = perfil de credor
+    var memoriaConfigured = {{ memoria_mysql_configured | tojson }};
+    var lastResults = [];
+    var temRegistoCarregado = false;
+    var base = { principalBruto: 0, juros: 0, descSaudePrev: 0, descIR: 0 };
     var TAXA_PROPOSTA = [
       [0.35, 0.31],
       [0.33, 0.27],
@@ -173,8 +212,31 @@
     var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
     var pctInput = document.getElementById('honor-pct');
     var honorLabel = document.getElementById('honor-label');
+    var searchInput = document.getElementById('memoria-nome');
+    var searchBtn = document.getElementById('memoria-btn-buscar');
+    var searchMsg = document.getElementById('memoria-search-msg');
+    var escolher = document.getElementById('memoria-escolher');
+    var escolherList = document.getElementById('memoria-escolher-list');
+    var caseMeta = document.getElementById('memoria-case-meta');
+    var metaReq = document.getElementById('memoria-meta-req');
+    var metaProc = document.getElementById('memoria-meta-proc');
+    var metaInc = document.getElementById('memoria-meta-inc');
 
     function round2(x) { return Math.round(x * 100) / 100; }
+
+    function n(x) { var v = parseFloat(x); return isNaN(v) ? 0 : v; }
+
+    function clearMsg() {
+      if (!searchMsg) return;
+      searchMsg.textContent = '';
+      searchMsg.className = 'memoria-search-msg';
+    }
+
+    function setMsg(t, isErr) {
+      if (!searchMsg) return;
+      searchMsg.textContent = t;
+      searchMsg.className = 'memoria-search-msg' + (isErr ? ' memoria-search-msg-err' : '');
+    }
 
     function recalc() {
       var pct = parseFloat(pctInput.value);
@@ -201,6 +263,10 @@
         'Reserva de Honorários ' + pct.toLocaleString('pt-BR', { maximumFractionDigits: 2, minimumFractionDigits: 0 }) + '%';
 
       document.querySelectorAll('.proposta-val').forEach(function (el) {
+        if (!temRegistoCarregado) {
+          el.textContent = '—';
+          return;
+        }
         var ri = parseInt(el.getAttribute('data-pi'), 10);
         var cj = parseInt(el.getAttribute('data-pj'), 10);
         var t = TAXA_PROPOSTA[ri] && TAXA_PROPOSTA[ri][cj];
@@ -210,8 +276,116 @@
       });
     }
 
+    function resetMemoriaVazia() {
+      temRegistoCarregado = false;
+      base.principalBruto = 0;
+      base.juros = 0;
+      base.descSaudePrev = 0;
+      base.descIR = 0;
+      pctInput.value = '0';
+      showCaseMeta(null);
+      recalc();
+    }
+
+    function showCaseMeta(r) {
+      if (!caseMeta) return;
+      if (!r) {
+        caseMeta.setAttribute('hidden', '');
+        return;
+      }
+      caseMeta.removeAttribute('hidden');
+      metaReq.textContent = r.requerente || '—';
+      metaProc.textContent = (r.numero_de_processo != null && r.numero_de_processo !== '') ? r.numero_de_processo : '—';
+      metaInc.textContent = (r.numero_do_incidente != null && r.numero_do_incidente !== '') ? r.numero_do_incidente : '—';
+    }
+
+    function applyRow(r) {
+      if (!r) return;
+      temRegistoCarregado = true;
+      base.principalBruto = n(r.principal_bruto);
+      base.juros = n(r.juros);
+      base.descSaudePrev = n(r.desc_saude_prev);
+      base.descIR = n(r.desc_ir);
+      if (r.percentual_honorarios != null && r.percentual_honorarios !== '') {
+        pctInput.value = String(n(r.percentual_honorarios));
+      } else {
+        pctInput.value = '30';
+      }
+      showCaseMeta(r);
+      escolher.setAttribute('hidden', '');
+      escolherList.innerHTML = '';
+      setMsg('Memória carregada (id ' + (r.id != null ? r.id : '') + ').', false);
+      recalc();
+    }
+
+    function doSearch() {
+      if (!memoriaConfigured) return;
+      var q = (searchInput && searchInput.value) ? searchInput.value.trim() : '';
+      if (q.length < 2) {
+        setMsg('Digite ao menos 2 caracteres no nome.', true);
+        return;
+      }
+      clearMsg();
+      setMsg('A pesquisar…', false);
+      escolher.setAttribute('hidden', '');
+      escolherList.innerHTML = '';
+      lastResults = [];
+      var u = new URLSearchParams();
+      u.set('nome', q);
+      fetch('/api/memoria-calculo/buscar?' + u.toString())
+        .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setMsg((o.d && o.d.error) ? o.d.error : 'Erro na pesquisa.', true);
+            return;
+          }
+          lastResults = o.d.results || [];
+          if (lastResults.length === 0) {
+            setMsg('Nenhum registo com esse requerente. Memória zerada.', false);
+            resetMemoriaVazia();
+            return;
+          }
+          if (lastResults.length === 1) {
+            applyRow(lastResults[0]);
+            return;
+          }
+          setMsg(lastResults.length + ' casos encontrados. Escolha abaixo.', false);
+          resetMemoriaVazia();
+          lastResults.forEach(function (row, i) {
+            var li = document.createElement('li');
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'memoria-escolher-item';
+            b.setAttribute('data-ix', String(i));
+            var n1 = document.createElement('span');
+            n1.className = 'memoria-escolher-name';
+            n1.textContent = row.requerente || '—';
+            var n2 = document.createElement('span');
+            n2.className = 'memoria-escolher-tag';
+            n2.textContent = 'Processo: ' + (row.numero_de_processo || '—') + ' · Incidente: ' + (row.numero_do_incidente || '—');
+            b.appendChild(n1);
+            b.appendChild(n2);
+            b.addEventListener('click', function () {
+              applyRow(lastResults[i]);
+            });
+            li.appendChild(b);
+            escolherList.appendChild(li);
+          });
+          escolher.removeAttribute('hidden');
+        })
+        .catch(function () {
+          setMsg('Falha de rede ou servidor.', true);
+        });
+    }
+
     pctInput.addEventListener('input', recalc);
     pctInput.addEventListener('change', recalc);
+    if (searchBtn) searchBtn.addEventListener('click', doSearch);
+    if (searchInput) {
+      searchInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+      });
+    }
     recalc();
   })();
   </script>

@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+import mysql.connector
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
@@ -98,6 +99,52 @@ def get_db():
     return psycopg2.connect(**DB_CONFIG)
 
 
+def _memoria_mysql_config() -> dict | None:
+    """
+    Conexão MySQL só para a tabela `memoria_calculo`.
+    Sem MEMORIA_MYSQL_DATABASE = desativado.
+
+    Variáveis de ambiente: MEMORIA_MYSQL_HOST, MEMORIA_MYSQL_PORT, MEMORIA_MYSQL_DATABASE,
+    MEMORIA_MYSQL_USER, MEMORIA_MYSQL_PASSWORD, MEMORIA_MYSQL_CONNECT_TIMEOUT (segundos; padrão 1200).
+    Credenciais no .env (nunca no código; use aspas se a password tiver # ou !).
+    """
+    name = (os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()
+    if not name:
+        return None
+    raw_to = (os.getenv("MEMORIA_MYSQL_CONNECT_TIMEOUT") or "1200").strip()
+    try:
+        connect_timeout = int(raw_to)
+    except ValueError:
+        connect_timeout = 1200
+    if connect_timeout < 1:
+        connect_timeout = 1200
+    return {
+        "host": (os.getenv("MEMORIA_MYSQL_HOST") or "127.0.0.1").strip(),
+        "port": int(os.getenv("MEMORIA_MYSQL_PORT", "3306")),
+        "database": name,
+        "user": (os.getenv("MEMORIA_MYSQL_USER") or "root").strip(),
+        "password": os.getenv("MEMORIA_MYSQL_PASSWORD", "") or "",
+        "connect_timeout": connect_timeout,
+    }
+
+
+def _memoria_row_to_api(row: dict) -> dict:
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    out: dict = {}
+    for k, v in row.items():
+        if v is None:
+            out[k] = None
+        elif isinstance(v, Decimal):
+            out[k] = float(v)
+        elif isinstance(v, (datetime, date)):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
+
+
 @app.route("/")
 def index():
     return render_template("capa.html")
@@ -110,7 +157,95 @@ def conversas():
 
 @app.route("/memoria-calculo")
 def memoria_calculo():
-    return render_template("memoria_calculo.html")
+    return render_template(
+        "memoria_calculo.html",
+        memoria_mysql_configured=bool((os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()),
+    )
+
+
+@app.route("/api/memoria-calculo/buscar")
+def api_memoria_buscar():
+    """
+    Pesquisa por nome do requerente (LIKE, sem injeção: parâmetro bind + escape de % e _).
+    Retorna linhas de `memoria_calculo` para a página carregar memória e propostas.
+    """
+    q = (request.args.get("nome") or request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Digite ao menos 2 caracteres no nome do requerente.",
+                }
+            ),
+            400,
+        )
+    cfg = _memoria_mysql_config()
+    if not cfg:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Banco de memória não configurado. Defina MEMORIA_MYSQL_DATABASE (e, se necessário, MEMORIA_MYSQL_HOST, etc.) no .env.",
+                }
+            ),
+            503,
+        )
+
+    def esc_like(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+
+    like_pat = f"%{esc_like(q)}%"
+    sql = """
+        SELECT
+            id,
+            id_precainfosnew,
+            requerente,
+            numero_de_processo,
+            numero_do_incidente,
+            principal_bruto,
+            juros,
+            desc_saude_prev,
+            desc_ir,
+            percentual_honorarios,
+            total_bruto,
+            reserva_honorarios,
+            total_liquido
+        FROM memoria_calculo
+        WHERE requerente IS NOT NULL
+          AND TRIM(requerente) <> ''
+          AND requerente LIKE %s
+        ORDER BY
+            requerente ASC,
+            COALESCE(numero_de_processo, '') ASC,
+            COALESCE(numero_do_incidente, '') ASC,
+            id ASC
+    """
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (like_pat,))
+        raw = cur.fetchall()
+        cur.close()
+        conn.close()
+    except mysql.connector.Error as e:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Erro ao consultar o MySQL: {e}",
+                }
+            ),
+            500,
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "results": [_memoria_row_to_api(r) for r in raw],
+        }
+    )
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────
