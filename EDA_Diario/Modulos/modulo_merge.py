@@ -1,17 +1,28 @@
 """
-Enriquecimento em duas etapas (mesmo fluxo para PRC TJSP, PRC CMP e PRC IMP):
+Enriquecimento em duas etapas — mesmo fluxo para prc_tjsp, prc_cmp e prc_imp:
 
-  Etapa 1 — `etapa1_enriquecer_com_p2`: cruza a principal (tratada por `modelo`) com a
-  base Lemitti (P2). Saídas: INTERMEDIARIA.xlsx e cpfs_nao_encontrados_p2.csv.
+  Etapa 1 — `etapa1_enriquecer_com_p2`: principal (via `modelo` em
+  `processar_planilha_principal`) + Lemitti (P2) -> INTERMEDIARIA.xlsx e
+  cpfs_nao_encontrados_p2.csv (CPFs sem contato na P2).
 
-  Etapa 2 — `etapa2_enriquecer_com_p3`: para linhas ainda sem contato, cruza com a
-  segunda base (P3, ex. Assertiva). Saída: planilha final (nome definido na app).
+  Etapa 2 — `etapa2_enriquecer_com_p3`: retoma a intermediária + P3 (ex. Assertiva)
+  para enriquecer só quem ainda faltou.
 
-  O `modelo` só altera leitura da principal (e chave CPF no CMP — `cpf.1` vs `CPF`).
+  O `modelo` só afecta a leitura da principal. CMP e IMP usam 2.ª coluna CPF
+  no cruzamento; TJSP tipicamente só `CPF`.
 """
 import os
 import re
 import pandas as pd
+
+
+def _pular_cooldown_etapa2() -> bool:
+    """
+    Se EDA_SKIP_COOLDOWN=1|true|yes|on|sim, a etapa 2 nao remove linhas por cooldown
+    (util em testes). Variavel de ambiente; pode vir do .env na raiz do projecto.
+    """
+    v = (os.environ.get("EDA_SKIP_COOLDOWN") or "").strip().lower()
+    return v in ("1", "true", "yes", "on", "sim")
 from openpyxl import load_workbook
 from openpyxl.styles import Font
 
@@ -37,26 +48,77 @@ PADRAO_EMAIL_COL = re.compile(r"EMAIL", re.IGNORECASE)
 
 
 def _normalizar_cpf(cpf) -> str:
-    """Remove caracteres nao numericos e normaliza para 11 digitos com zeros a esquerda."""
-    if pd.isna(cpf):
+    """
+    11 digitos; zfill(11) a esquerda se faltarem.
+    Trata int/float (Excel), strings com sufixo '.0' e leitura com dtype=str (etapa 2).
+    """
+    if cpf is None or (isinstance(cpf, float) and pd.isna(cpf)):
         return ""
-    return str(cpf).strip().replace(".", "").replace("-", "").replace("/", "").zfill(11)
+    if isinstance(cpf, bool):
+        return ""
+    if isinstance(cpf, (int, float)):
+        if isinstance(cpf, float) and not cpf == int(cpf):
+            s = str(cpf)
+        else:
+            s = str(int(cpf))
+    else:
+        s = str(cpf).strip()
+    if s.lower() in ("", "nan", "none", "nat"):
+        return ""
+    if s.endswith(".0"):
+        b = s[:-2].lstrip("-")
+        if b.isdigit():
+            s = s[:-2]
+    dig = re.sub(r"\D", "", s)
+    if not dig:
+        return ""
+    if len(dig) > 11:
+        dig = dig[-11:]
+    if len(dig) < 11:
+        return dig.zfill(11)
+    return dig
+
+
+def _linha_ja_enriquecida_p2(val) -> bool:
+    """Coluna _ENRIQUECIDO apos regravar a intermediaria (bool, 0/1, str, etc.)."""
+    if val is None:
+        return False
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, float) and pd.isna(val):
+        return False
+    if isinstance(val, (int, float)):
+        return int(val) != 0
+    t = str(val).strip().lower()
+    if t in ("true", "1", "yes", "verdadeiro", "t"):
+        return True
+    if t in ("false", "0", "no", "falso", "f", ""):
+        return False
+    return False
+
+
+def _nome_coluna_cpf_vinculo_enriquecimento(df: pd.DataFrame) -> str | None:
+    """Segunda coluna CPF (Excel duplicado). Pandas: `CPF.1` ou `cpf.1` conforme o rótulo."""
+    if "CPF.1" in df.columns:
+        return "CPF.1"
+    if "cpf.1" in df.columns:
+        return "cpf.1"
+    return None
 
 
 def _coluna_cpf_cruzamento_enriquecimento(
     df: pd.DataFrame, modelo: str | None = None
 ) -> str:
     """
-    PRC CMP: duas colunas «cpf» (CPF e cpf.1). O cruzamento com P2/P3 deve usar
-    `cpf.1` — o mesmo «formato numérico» das planilhas de enriquecimento (sem
-    ambiguidade de zeros à esquerda). Outros modelos: só `CPF`.
-    Se `modelo` for None (ex.: etapa 2 a partir do .xlsx), infere por presença de `cpf.1`.
+    PRC CMP e PRC IMP: cruzamento P2/P3 com a segunda coluna CPF
+    (`CPF.1` ou `cpf.1`). Sem modelo (etapa 2), usa a segunda se existir.
     """
     m = (modelo or "").strip().lower()
-    if m == "prc_cmp" and "cpf.1" in df.columns:
-        return "cpf.1"
-    if modelo is None and "cpf.1" in df.columns:
-        return "cpf.1"
+    v = _nome_coluna_cpf_vinculo_enriquecimento(df)
+    if m in ("prc_cmp", "prc_imp") and v:
+        return v
+    if modelo is None and v:
+        return v
     return "CPF"
 
 
@@ -317,6 +379,10 @@ def etapa1_enriquecer_com_p2(
     print(
         f"\n[3/3] Cruzando CPFs com planilha 2 (chave: {col_cpf_x})..."
     )
+    if col_cpf_x not in df_main.columns:
+        raise KeyError(
+            f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). Colunas: {list(df_main.columns)}"
+        )
     df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
     df_p2["_CPF_NORM"]   = df_p2["CPF/CNPJ"].apply(_normalizar_cpf)
 
@@ -411,6 +477,10 @@ def etapa2_enriquecer_com_p3(
     print(
         f"\n[3/3] Cruzando CPFs nao enriquecidos com planilha 3 (chave: {col_cpf_x})..."
     )
+    if col_cpf_x not in df_main.columns:
+        raise KeyError(
+            f"Coluna de CPF inexistente apos reabrir a intermediaria: {col_cpf_x!r}. Colunas: {list(df_main.columns)}"
+        )
     df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
     df_p3["_CPF_NORM"]   = df_p3["CPF"].apply(_normalizar_cpf)
 
@@ -439,8 +509,7 @@ def etapa2_enriquecer_com_p3(
     enriquecidos_p3 = 0
     for pos in range(len(df_main)):
         row = df_main.iloc[pos]
-        ja_enriquecido = str(row.get(COL_ENRIQUECIDO, "False")).strip().lower() == "true"
-        if ja_enriquecido:
+        if _linha_ja_enriquecida_p2(row.get(COL_ENRIQUECIDO, False)):
             continue
 
         fones, emails = _coletar_contatos(df_p3, row["_CPF_NORM"], "CPF")
@@ -460,25 +529,35 @@ def etapa2_enriquecer_com_p3(
     df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
 
     # ── Cooldown — remove CPFs processados nos ultimos 14 dias ───────────────
-    print("\n     Verificando cooldown (14 dias)...")
-    cpfs_cooldown = buscar_cpfs_cooldown(dias=14)
-    if cpfs_cooldown:
-        col_cd = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo=None)
-        df_main["_CPF_NORM"] = df_main[col_cd].apply(_normalizar_cpf)
-        mascara_cooldown = df_main["_CPF_NORM"].isin(cpfs_cooldown)
-        total_cooldown   = mascara_cooldown.sum()
-        if total_cooldown:
-            idx_manter        = df_main.index[~mascara_cooldown].tolist()
-            registros_tel     = [registros_tel[i]   for i in idx_manter]
-            registros_email   = [registros_email[i] for i in idx_manter]
-            df_main           = df_main[~mascara_cooldown].reset_index(drop=True)
-            print(f"     Cooldown: {total_cooldown} registro(s) removido(s) da planilha final.")
-        else:
-            print("     Cooldown: nenhum registro em cooldown.")
-        df_main.drop(columns=["_CPF_NORM"], inplace=True, errors="ignore")
-    else:
+    if _pular_cooldown_etapa2():
         total_cooldown = 0
-        print("     Cooldown: nenhum historico encontrado.")
+        print("\n     Cooldown: desativado (env EDA_SKIP_COOLDOWN=1, etc.). Nenhuma linha removida.")
+    else:
+        print("\n     Verificando cooldown (14 dias)...")
+        cpfs_cooldown = buscar_cpfs_cooldown(dias=14)
+        if cpfs_cooldown:
+            col_cd = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo=None)
+            if col_cd not in df_main.columns:
+                raise KeyError(
+                    f"Coluna de CPF inexistente no cooldown: {col_cd!r}. Colunas: {list(df_main.columns)}"
+                )
+            df_main["_CPF_NORM"] = df_main[col_cd].apply(_normalizar_cpf)
+            mascara_cooldown = df_main["_CPF_NORM"].isin(cpfs_cooldown)
+            total_cooldown   = int(mascara_cooldown.sum())
+            if total_cooldown:
+                idx_manter        = df_main.index[~mascara_cooldown].tolist()
+                registros_tel     = [registros_tel[i]   for i in idx_manter]
+                registros_email   = [registros_email[i] for i in idx_manter]
+                df_main           = df_main[~mascara_cooldown].reset_index(drop=True)
+                print(
+                    f"     Cooldown: {total_cooldown} registro(s) removido(s) da planilha final."
+                )
+            else:
+                print("     Cooldown: nenhum registro em cooldown.")
+            df_main.drop(columns=["_CPF_NORM"], inplace=True, errors="ignore")
+        else:
+            total_cooldown = 0
+            print("     Cooldown: nenhum historico encontrado.")
 
     # ── Blacklist — filtra antes de gerar as abas ─────────────────────────────
     print("\n     Aplicando blacklist...")

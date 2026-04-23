@@ -20,6 +20,16 @@ from flask import (
 # ── Garante que os modulos sejam encontrados ──────────────────────────────────
 BASE_DIR = Path(__file__).parent
 
+# Carrega .env da raiz do repositório (ex.: EDA_SKIP_COOLDOWN) quando o EDA corre sozinho
+_env_raiz = BASE_DIR.parent / ".env"
+if _env_raiz.is_file():
+    try:
+        from dotenv import load_dotenv  # type: ignore
+
+        load_dotenv(_env_raiz)
+    except Exception:
+        pass
+
 MODULOS    = BASE_DIR / "Modulos"
 ENTRADA    = BASE_DIR / "Entrada"
 RESULTADOS = BASE_DIR / "Resultados"

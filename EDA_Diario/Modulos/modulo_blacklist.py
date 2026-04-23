@@ -135,13 +135,14 @@ def filtrar_registros_por_blacklist(
     detalhes: list[dict] = []
 
     def _cpf_para_regra(r) -> str:
-        """Alinha com o cruzamento P2/P3: prefere `cpf.1` no layout CMP."""
-        if "cpf.1" in r.index:
-            v = r.get("cpf.1")
-            if v is not None and not (isinstance(v, float) and pd.isna(v)):
-                s = str(v).strip()
-                if s and s.lower() != "nan":
-                    return s
+        """Alinha com o cruzamento P2/P3: prefere 2.ª coluna CPF (CMP/IMP)."""
+        for col in ("CPF.1", "cpf.1"):
+            if col in r.index:
+                v = r.get(col)
+                if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                    s = str(v).strip()
+                    if s and s.lower() != "nan":
+                        return s
         return r.get("CPF")
 
     def _row_meta(r) -> dict:

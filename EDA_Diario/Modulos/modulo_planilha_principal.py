@@ -33,16 +33,19 @@ def processar_planilha_principal(
 
     modelos:
       - prc_tjsp: remove COLUNAS_PARA_REMOVER (TJSP legado)
-      - prc_cmp:    modulo_planilha_prc_cmp (PRC CMP)
-      - prc_imp:    por ora igual a prc_tjsp (calibração futura)
+      - prc_cmp:  modulo_planilha_prc_cmp (PRC CMP)
+      - prc_imp:  modulo_planilha_prc_imp (PRC IMP)
     """
     m = (modelo or "prc_tjsp").strip().lower()
     if m == "prc_cmp":
         from modulo_planilha_prc_cmp import processar_planilha_prc_cmp
 
         return processar_planilha_prc_cmp(caminho_entrada)
-    # prc_imp: calibração futura; por ora mesmo tratamento que TJSP
-    if m not in ("prc_tjsp", "prc_imp"):
+    if m == "prc_imp":
+        from modulo_planilha_prc_imp import processar_planilha_prc_imp
+
+        return processar_planilha_prc_imp(caminho_entrada)
+    if m != "prc_tjsp":
         m = "prc_tjsp"
 
     df = pd.read_excel(caminho_entrada)

@@ -403,11 +403,12 @@ def _val(row, col):
 
 
 def _val_cpf_cadastro(row) -> str:
-    """Chave alinhada ao P2/P3: com duas colunas CPF (CMP), preferir `cpf.1`."""
-    if "cpf.1" in row.index:
-        v = _val(row, "cpf.1")
-        if v:
-            return v
+    """Chave alinhada ao P2/P3: com duas colunas CPF (CMP/IMP), preferir a segunda."""
+    for col in ("CPF.1", "cpf.1"):
+        if col in row.index:
+            v = _val(row, col)
+            if v:
+                return v
     return _val(row, "CPF") or ""
 
 
