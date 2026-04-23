@@ -10,6 +10,43 @@
     <p class="eda-lead">Faça os uploads, execute as etapas e baixe os resultados.</p>
   </div>
 
+  <section class="eda-template-section" aria-labelledby="eda-tpl-title">
+    <h2 class="eda-template-h2" id="eda-tpl-title">Modelo de planilha (template)</h2>
+    <p class="eda-template-lead">Escolha o modelo (1 = PRC TJSP, 2 = PRC CMP, 3 = PRC IMP). O <strong>fluxo de enriquecimento</strong> é o mesmo para os três: primeiro Lemitti, depois a segunda base. Só muda o tratamento da planilha principal (colunas, CPF, etc.).</p>
+    <div class="eda-template-group" role="radiogroup" aria-labelledby="eda-tpl-title">
+      <label class="eda-template-btn">
+        <input type="radio" name="eda_modelo" value="prc_tjsp"{% if eda_modelo == 'prc_tjsp' %} checked{% endif %} />
+        <span class="eda-template-btn-inner">
+          <span class="eda-template-btn-num">Modelo 1</span>
+          <span class="eda-template-btn-label">PRC TJSP</span>
+        </span>
+      </label>
+      <label class="eda-template-btn">
+        <input type="radio" name="eda_modelo" value="prc_cmp"{% if eda_modelo == 'prc_cmp' %} checked{% endif %} />
+        <span class="eda-template-btn-inner">
+          <span class="eda-template-btn-num">Modelo 2</span>
+          <span class="eda-template-btn-label">PRC CMP</span>
+        </span>
+      </label>
+      <label class="eda-template-btn">
+        <input type="radio" name="eda_modelo" value="prc_imp"{% if eda_modelo == 'prc_imp' %} checked{% endif %} />
+        <span class="eda-template-btn-inner">
+          <span class="eda-template-btn-num">Modelo 3</span>
+          <span class="eda-template-btn-label">PRC IMP</span>
+        </span>
+      </label>
+    </div>
+  </section>
+
+  <section class="eda-template-section" aria-labelledby="eda-fluxo-title" style="margin-top: 1.25rem;">
+    <h2 class="eda-template-h2" id="eda-fluxo-title" style="font-size:1rem;">Fluxo (igual ao PRC TJSP)</h2>
+    <ol class="eda-template-lead" style="margin:0.5rem 0 0 1.1rem; line-height:1.55; max-width: 52ch;">
+      <li><strong>Etapa 1</strong> — Enriquecimento com a base Lemitti (P2). Gera a planilha intermediária e o CSV de CPFs <em>sem</em> contato nessa base.</li>
+      <li>Use o CSV para consultar os CPFs faltantes na <strong>outra base de enriquecimento</strong> (ex.: Assertiva) e obtenha o ficheiro P3.</li>
+      <li><strong>Etapa 2</strong> — Carrega a intermediária e o P3; completa só quem ainda não tinha telefone/email. O ficheiro final usa o nome do modelo escolhido (TJSP, CMP ou IMP).</li>
+    </ol>
+  </section>
+
   <!-- Etapa 1 -->
   <section class="eda-section-card">
     <div class="eda-section-head">
@@ -159,4 +196,28 @@
   </section>
 
 </div>
+<script>
+(function () {
+  function urlSessaoModelo() {
+    var path = window.location.pathname;
+    if (!path.endsWith('/')) path = path + '/';
+    return new URL('sessao/modelo', window.location.origin + path).toString();
+  }
+  function enviar(m) {
+    fetch(urlSessaoModelo(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modelo: m }),
+      credentials: 'same-origin',
+    }).catch(function () {});
+  }
+  document.querySelectorAll('input[name="eda_modelo"]').forEach(function (el) {
+    el.addEventListener('change', function () {
+      if (this.checked) enviar(this.value);
+    });
+  });
+  var c = document.querySelector('input[name="eda_modelo"]:checked');
+  if (c) enviar(c.value);
+})();
+</script>
 {% endblock %}

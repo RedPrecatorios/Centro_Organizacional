@@ -5,7 +5,17 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import (
+    Flask,
+    jsonify,
+    render_template,
+    request,
+    redirect,
+    send_file,
+    session,
+    url_for,
+    flash,
+)
 
 # ── Garante que os modulos sejam encontrados ──────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -19,15 +29,28 @@ sys.path.insert(0, str(MODULOS))
 ENTRADA.mkdir(exist_ok=True)
 RESULTADOS.mkdir(exist_ok=True)
 
+# Modelos PRC: mesmo fluxo de enriquecimento (Lemitti -> Assertiva); muda template da principal e mapeamento.
+_E_MODELOS = frozenset({"prc_tjsp", "prc_cmp", "prc_imp"})
 
-def _nome_arquivo_final() -> str:
-    """Gera o nome do arquivo final no padrao: DD-MM-AAAA PRC TJSP FINAL.xlsx"""
+
+def _sufixo_arquivo_por_modelo(modelo: str | None) -> str:
+    """Parte do nome do .xlsx final: PRC TJSP / PRC CMP / PRC IMP."""
+    m = (modelo or "prc_tjsp").strip().lower()
+    if m == "prc_cmp":
+        return "CMP"
+    if m == "prc_imp":
+        return "IMP"
+    return "TJSP"
+
+
+def _nome_arquivo_final(modelo: str | None = None) -> str:
+    """DD-MM-AAAA PRC <TJSP|CMP|IMP> FINAL.xlsx — alinhado ao modelo escolhido na sessao."""
     data = datetime.now().strftime("%d-%m-%Y")
-    return f"{data} PRC TJSP FINAL.xlsx"
+    return f"{data} PRC {_sufixo_arquivo_por_modelo(modelo)} FINAL.xlsx"
 
 
-def _caminho_final() -> Path:
-    return RESULTADOS / _nome_arquivo_final()
+def _caminho_final(modelo: str | None = None) -> Path:
+    return RESULTADOS / _nome_arquivo_final(modelo)
 
 from modulo_banco import (
     criar_banco_e_tabelas,
@@ -43,6 +66,8 @@ app = Flask(
     static_folder=str(BASE_DIR / "static"),
 )
 app.secret_key = "eda_diario_secret"
+# Evita colidir com a sessão da plataforma quando o cookie é partilhado no mesmo host
+app.config.setdefault("SESSION_COOKIE_NAME", "eda_session")
 
 
 @app.context_processor
@@ -70,21 +95,47 @@ def _log(msg: str):
 
 @app.route("/")
 def index():
+    m_sessao = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if m_sessao not in _E_MODELOS:
+        m_sessao = "prc_tjsp"
+
     arquivos = {
         "principal":       _arquivo_entrada("principal"),
         "p2":              _arquivo_entrada("p2"),
         "p3":              _arquivo_entrada("p3"),
         "intermediaria":   (RESULTADOS / "INTERMEDIARIA.xlsx").exists(),
-        "final":           _caminho_final().exists(),
-        "nome_final":      _nome_arquivo_final(),
+        "final":           _caminho_final(m_sessao).exists(),
+        "nome_final":      _nome_arquivo_final(m_sessao),
         "nao_encontrados": (RESULTADOS / "cpfs_nao_encontrados_p2.csv").exists(),
         "data_intermediaria":    _data_arquivo(RESULTADOS / "INTERMEDIARIA.xlsx"),
         "data_nao_encontrados":  _data_arquivo(RESULTADOS / "cpfs_nao_encontrados_p2.csv"),
-        "data_final":            _data_arquivo(_caminho_final()),
+        "data_final":            _data_arquivo(_caminho_final(m_sessao)),
         "blacklist_bloqueios":   (RESULTADOS / "blacklist_bloqueios.csv").exists(),
         "data_blacklist_bloq":   _data_arquivo(RESULTADOS / "blacklist_bloqueios.csv"),
     }
-    return render_template("index.html", arquivos=arquivos, estado=estado)
+    return render_template(
+        "index.html", arquivos=arquivos, estado=estado, eda_modelo=m_sessao
+    )
+
+
+# ── Modelo PRC (gatilho pelos rádios no painel) ──────────────────────────────
+
+@app.route("/sessao/modelo", methods=["POST"])
+def definir_modelo():
+    """
+    Grava o modelo selecionado (PRC TJSP / PRC CMP / PRC IMP) na sessão do EDA.
+    Usado pelo painel; a Etapa 1 lê `session['eda_modelo']` ao processar.
+    """
+    raw = request.get_json(silent=True) or {}
+    m = (raw.get("modelo") or request.form.get("modelo") or "").strip().lower()
+    if m not in _E_MODELOS:
+        return (
+            jsonify({"ok": False, "error": "Modelo inválido."}),
+            400,
+        )
+    session["eda_modelo"] = m
+    session.permanent = True
+    return jsonify({"ok": True, "modelo": m})
 
 
 # ── Uploads ───────────────────────────────────────────────────────────────────
@@ -129,6 +180,10 @@ def rodar_etapa1():
     estado["log"]     = []
     estado["etapa"]   = 1
 
+    modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if modelo not in _E_MODELOS:
+        modelo = "prc_tjsp"
+
     def _executar():
         try:
             from modulo_merge import etapa1_enriquecer_com_p2
@@ -138,6 +193,7 @@ def rodar_etapa1():
                 caminho_saida_intermediaria = str(RESULTADOS / "INTERMEDIARIA.xlsx"),
                 caminho_csv_nao_encontrados = str(RESULTADOS / "cpfs_nao_encontrados_p2.csv"),
                 caminho_blacklist_txt       = str(BASE_DIR / "blacklist.txt"),
+                modelo                      = modelo,
             )
             _log("[OK] Etapa 1 concluida com sucesso.")
         except Exception as exc:
@@ -161,6 +217,11 @@ def rodar_etapa2():
         flash("Rode a Etapa 1 primeiro e envie a planilha Assertiva.", "error")
         return redirect(url_for("index"))
 
+    modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if modelo not in _E_MODELOS:
+        modelo = "prc_tjsp"
+    caminho_final = _caminho_final(modelo)
+
     estado["rodando"] = True
     estado["log"]     = []
     estado["etapa"]   = 2
@@ -171,7 +232,7 @@ def rodar_etapa2():
             etapa2_enriquecer_com_p3(
                 caminho_intermediaria = str(p_intermediaria),
                 caminho_p3            = str(p_p3),
-                caminho_saida_final   = str(_caminho_final()),
+                caminho_saida_final   = str(caminho_final),
                 caminho_blacklist_txt = str(BASE_DIR / "blacklist.txt"),
             )
             _log("[OK] Etapa 2 concluida com sucesso.")
@@ -204,8 +265,11 @@ def api_status():
 
 @app.route("/download/<arquivo>")
 def download(arquivo):
+    modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if modelo not in _E_MODELOS:
+        modelo = "prc_tjsp"
     mapa = {
-        "final":               _caminho_final(),
+        "final":               _caminho_final(modelo),
         "intermediaria":       RESULTADOS / "INTERMEDIARIA.xlsx",
         "nao_encontrados":     RESULTADOS / "cpfs_nao_encontrados_p2.csv",
         "blacklist_bloqueios": RESULTADOS / "blacklist_bloqueios.csv",

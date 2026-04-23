@@ -16,7 +16,7 @@
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Memória de Cálculo</h1>
-        <p class="dash-sub">Pesquise pelo requerente para carregar a memória a partir do banco. Até lá, tudo fica em zero.</p>
+        <p class="dash-sub">Pesquise <strong>por requerente</strong> (nome) <strong>ou</strong> por <strong>processo e incidente</strong> — um modo de cada vez. Até carregar, tudo fica em zero.</p>
       </div>
     </header>
 
@@ -27,21 +27,43 @@
       </p>
       {% else %}
       <p class="memoria-skeleton-note" role="status" id="memoria-skeleton">
-        <strong>Como funciona.</strong> Os totais e as sugestões de proposta só são preenchidos após <strong>pesquisar e carregar</strong> um requerente (ou escolher um entre vários com o mesmo nome). Antes disso, tudo fica em zero.
+        <strong>Como funciona.</strong> Use <strong>ou</strong> o nome do requerente, <strong>ou</strong> o nº do processo com o nº do incidente (não os dois). Os totais e as sugestões de proposta só surgem após <strong>pesquisar e carregar</strong> (ou escolher entre vários, se existirem). Antes disso, tudo fica em zero.
       </p>
       {% endif %}
 
       <div class="memoria-linha" role="group" aria-label="Pesquisa e memória de cálculo">
         <div class="memoria-col-busca">
-          <div class="memoria-search" id="memoria-search" aria-label="Pesquisa por requerente">
-            <label for="memoria-nome">Pesquisar requerente</label>
-            <div class="memoria-search-row">
-              <input type="search" id="memoria-nome" name="memoria_nome" placeholder="Digite o nome" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
-              <button type="button" class="memoria-btn-buscar" id="memoria-btn-buscar" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
+          <div class="memoria-search" id="memoria-search" aria-label="Pesquisa de memória de cálculo">
+            <fieldset class="memoria-modo">
+              <legend class="memoria-modo-legend">Modo de pesquisa</legend>
+              <div class="memoria-modo-radios" role="radiogroup" aria-label="Como deseja pesquisar?">
+                <label><input type="radio" name="memoria_modo" id="memoria-modo-nome" value="nome" checked /> Por requerente (nome)</label>
+                <label><input type="radio" name="memoria_modo" id="memoria-modo-proc" value="processo" /> Por processo e incidente</label>
+              </div>
+            </fieldset>
+            <div class="memoria-modo-panel" id="memoria-panel-nome" aria-labelledby="memoria-modo-nome">
+              <label class="memoria-input-label" for="memoria-nome">Pesquisar requerente</label>
+              <div class="memoria-search-row">
+                <input type="search" id="memoria-nome" name="memoria_nome" placeholder="Mín. 2 caracteres no nome" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+                <button type="button" class="memoria-btn-buscar" id="memoria-btn-buscar" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
+              </div>
+            </div>
+            <div class="memoria-modo-panel" id="memoria-panel-proc" hidden aria-labelledby="memoria-modo-proc">
+              <div class="memoria-dual-row">
+                <div class="memoria-fld">
+                  <label class="memoria-input-label" for="memoria-processo">Nº do processo</label>
+                  <input type="text" id="memoria-processo" name="memoria_processo" placeholder="Obrigatório" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+                </div>
+                <div class="memoria-fld">
+                  <label class="memoria-input-label" for="memoria-incidente">Nº do incidente</label>
+                  <input type="text" id="memoria-incidente" name="memoria_incidente" placeholder="Opcional (vazio = sem incidente)" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+                </div>
+                <button type="button" class="memoria-btn-buscar" id="memoria-btn-buscar-proc" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
+              </div>
             </div>
             <p class="memoria-search-msg" id="memoria-search-msg" role="status" aria-live="polite"></p>
             <div class="memoria-escolher" id="memoria-escolher" hidden>
-              <p class="memoria-escolher-tit">Vários casos com este nome. Selecione processo e incidente:</p>
+              <p class="memoria-escolher-tit" id="memoria-escolher-tit">Vários casos. Selecione:</p>
               <ul class="memoria-escolher-list" id="memoria-escolher-list"></ul>
             </div>
           </div>
@@ -60,6 +82,10 @@
             <div class="memoria-case-row">
               <span class="l">Nº incidente</span>
               <span class="v" id="memoria-meta-inc"></span>
+            </div>
+            <div class="memoria-case-row">
+              <span class="l">Última atualização</span>
+              <span class="v" id="memoria-meta-atual"></span>
             </div>
           </div>
         </div>
@@ -178,14 +204,33 @@
     var pctInput = document.getElementById('honor-pct');
     var honorLabel = document.getElementById('honor-label');
     var searchInput = document.getElementById('memoria-nome');
+    var inputProc = document.getElementById('memoria-processo');
+    var inputInc = document.getElementById('memoria-incidente');
     var searchBtn = document.getElementById('memoria-btn-buscar');
+    var searchBtnProc = document.getElementById('memoria-btn-buscar-proc');
+    var panelNome = document.getElementById('memoria-panel-nome');
+    var panelProc = document.getElementById('memoria-panel-proc');
     var searchMsg = document.getElementById('memoria-search-msg');
+    var escolherTit = document.getElementById('memoria-escolher-tit');
     var escolher = document.getElementById('memoria-escolher');
     var escolherList = document.getElementById('memoria-escolher-list');
     var caseMeta = document.getElementById('memoria-case-meta');
     var metaReq = document.getElementById('memoria-meta-req');
     var metaProc = document.getElementById('memoria-meta-proc');
     var metaInc = document.getElementById('memoria-meta-inc');
+    var metaAtual = document.getElementById('memoria-meta-atual');
+
+    function formatUltimaAtualizacao(v) {
+      if (v == null || v === '') return '—';
+      var d = new Date(v);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
+      }
+      return String(v);
+    }
 
     function round2(x) { return Math.round(x * 100) / 100; }
 
@@ -256,12 +301,16 @@
       if (!caseMeta) return;
       if (!r) {
         caseMeta.setAttribute('hidden', '');
+        if (metaAtual) metaAtual.textContent = '—';
         return;
       }
       caseMeta.removeAttribute('hidden');
       metaReq.textContent = r.requerente || '—';
       metaProc.textContent = (r.numero_de_processo != null && r.numero_de_processo !== '') ? r.numero_de_processo : '—';
       metaInc.textContent = (r.numero_do_incidente != null && r.numero_do_incidente !== '') ? r.numero_do_incidente : '—';
+      if (metaAtual) {
+        metaAtual.textContent = formatUltimaAtualizacao(r.ultima_atualizacao);
+      }
     }
 
     function applyRow(r) {
@@ -283,20 +332,54 @@
       recalc();
     }
 
+    function getModo() {
+      var r = document.querySelector('input[name="memoria_modo"]:checked');
+      return r && r.value === 'processo' ? 'processo' : 'nome';
+    }
+
+    function syncModePanels() {
+      var modo = getModo();
+      if (modo === 'processo') {
+        if (panelNome) panelNome.setAttribute('hidden', '');
+        if (panelProc) panelProc.removeAttribute('hidden');
+      } else {
+        if (panelProc) panelProc.setAttribute('hidden', '');
+        if (panelNome) panelNome.removeAttribute('hidden');
+      }
+    }
+
+    function onModoChange() {
+      syncModePanels();
+      clearMsg();
+    }
+
     function doSearch() {
       if (!memoriaConfigured) return;
-      var q = (searchInput && searchInput.value) ? searchInput.value.trim() : '';
-      if (q.length < 2) {
-        setMsg('Digite ao menos 2 caracteres no nome.', true);
-        return;
+      var modo = getModo();
+      var u = new URLSearchParams();
+      if (modo === 'processo') {
+        var p = (inputProc && inputProc.value) ? String(inputProc.value).trim() : '';
+        var incVal = (inputInc && inputInc.value) ? String(inputInc.value).trim() : '';
+        if (!p) {
+          setMsg('Indique o nº do processo (obrigatório). O incidente é opcional.', true);
+          return;
+        }
+        u.set('numero_de_processo', p);
+        u.set('numero_do_incidente', incVal);
+      } else {
+        var q = (searchInput && searchInput.value) ? String(searchInput.value).trim() : '';
+        if (q.length < 2) {
+          setMsg('Digite ao menos 2 caracteres no nome do requerente.', true);
+          return;
+        }
+        u.set('nome', q);
       }
       clearMsg();
       setMsg('A pesquisar…', false);
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
       lastResults = [];
-      var u = new URLSearchParams();
-      u.set('nome', q);
+      var porNome = modo !== 'processo';
       fetch('/api/memoria-calculo/buscar?' + u.toString())
         .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
         .then(function (o) {
@@ -306,13 +389,23 @@
           }
           lastResults = o.d.results || [];
           if (lastResults.length === 0) {
-            setMsg('Nenhum registo com esse requerente. Memória zerada.', false);
+            setMsg(
+              porNome
+                ? 'Nenhum registo com esse requerente. Memória zerada.'
+                : 'Nenhum registo com este processo e incidente. Memória zerada.',
+              false
+            );
             resetMemoriaVazia();
             return;
           }
           if (lastResults.length === 1) {
             applyRow(lastResults[0]);
             return;
+          }
+          if (escolherTit) {
+            escolherTit.textContent = porNome
+              ? 'Vários casos com este nome. Selecione processo e incidente:'
+              : 'Vários casos com este processo. Selecione:';
           }
           setMsg(lastResults.length + ' casos encontrados. Escolha abaixo.', false);
           resetMemoriaVazia();
@@ -327,7 +420,8 @@
             n1.textContent = row.requerente || '—';
             var n2 = document.createElement('span');
             n2.className = 'memoria-escolher-tag';
-            n2.textContent = 'Processo: ' + (row.numero_de_processo || '—') + ' · Incidente: ' + (row.numero_do_incidente || '—');
+            n2.textContent = 'Processo: ' + (row.numero_de_processo || '—') + ' · Incidente: ' + (row.numero_do_incidente || '—') +
+              (row.ultima_atualizacao ? (' · Últ. atual.: ' + formatUltimaAtualizacao(row.ultima_atualizacao)) : '');
             b.appendChild(n1);
             b.appendChild(n2);
             b.addEventListener('click', function () {
@@ -346,11 +440,26 @@
     pctInput.addEventListener('input', recalc);
     pctInput.addEventListener('change', recalc);
     if (searchBtn) searchBtn.addEventListener('click', doSearch);
+    if (searchBtnProc) searchBtnProc.addEventListener('click', doSearch);
     if (searchInput) {
       searchInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+        if (e.key === 'Enter' && getModo() === 'nome') { e.preventDefault(); doSearch(); }
       });
     }
+    if (inputProc) {
+      inputProc.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && getModo() === 'processo') { e.preventDefault(); doSearch(); }
+      });
+    }
+    if (inputInc) {
+      inputInc.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && getModo() === 'processo') { e.preventDefault(); doSearch(); }
+      });
+    }
+    document.querySelectorAll('input[name="memoria_modo"]').forEach(function (el) {
+      el.addEventListener('change', onModoChange);
+    });
+    syncModePanels();
     recalc();
   })();
   </script>

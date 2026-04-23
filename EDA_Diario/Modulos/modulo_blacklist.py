@@ -134,13 +134,23 @@ def filtrar_registros_por_blacklist(
     email_bloq     = 0
     detalhes: list[dict] = []
 
+    def _cpf_para_regra(r) -> str:
+        """Alinha com o cruzamento P2/P3: prefere `cpf.1` no layout CMP."""
+        if "cpf.1" in r.index:
+            v = r.get("cpf.1")
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                s = str(v).strip()
+                if s and s.lower() != "nan":
+                    return s
+        return r.get("CPF")
+
     def _row_meta(r) -> dict:
         proc = r.get("Numero_de_Processo")
         if proc is not None and not (isinstance(proc, float) and pd.isna(proc)):
             proc_str = str(proc).strip()
         else:
             proc_str = ""
-        cpf = r.get("CPF")
+        cpf = _cpf_para_regra(r)
         cpf_s = "" if cpf is None or (isinstance(cpf, float) and pd.isna(cpf)) else str(cpf).strip()
         req = r.get("Requerente")
         req_s = "" if req is None or (isinstance(req, float) and pd.isna(req)) else str(req).strip()
@@ -159,7 +169,9 @@ def filtrar_registros_por_blacklist(
         meta = _row_meta(row)
 
         # ── Bloqueio total ────────────────────────────────────────────────────
-        motivo_p = _motivo_bloqueio_pessoa(row.get("CPF"), row.get("Requerente"), bl)
+        motivo_p = _motivo_bloqueio_pessoa(
+            _cpf_para_regra(row), row.get("Requerente"), bl
+        )
         if motivo_p:
             n_t = len(registros_tel[pos])
             n_e = len(registros_email[pos])

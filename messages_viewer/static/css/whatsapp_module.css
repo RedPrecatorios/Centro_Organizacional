@@ -1080,12 +1080,77 @@ body.platform-body #app-toast {
   border: 1px solid var(--border);
   border-radius: var(--r);
 }
-.memoria-search > label[for="memoria-nome"] {
+.memoria-search .memoria-input-label {
   display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 8px;
+}
+.memoria-modo {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.memoria-modo-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.memoria-modo-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-bottom: 12px;
+}
+.memoria-modo-radios label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+.memoria-modo-radios input {
+  width: 16px;
+  height: 16px;
+  accent-color: #c41e1e;
+}
+.memoria-modo-panel[hidden] {
+  display: none !important;
+}
+.memoria-dual-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.memoria-fld {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.memoria-fld .memoria-input-label {
+  margin-bottom: 6px;
+}
+.memoria-fld input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.memoria-fld input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .memoria-search-row {
   display: flex;

@@ -46,6 +46,12 @@ def tentar_montar_eda(app) -> bool:
         eda_flask: Any = getattr(mod, "app", None)
         if eda_flask is None:
             return False
+        # O mesmo cookie `session` serve à plataforma (login) e à app EDA (`flash` após
+        # upload, etc.). Com `secret_key` diferente, o EDA re-assina o cookie e apaga
+        # a sessão de autenticação — o guard redireciona para /auth/login.
+        eda_flask.secret_key = app.secret_key
+        # Para `url_for` e links relativos quando montado em /eda
+        eda_flask.config.setdefault("APPLICATION_ROOT", "/eda")
     except Exception as e:
         print(f"[EDA Diário] Não foi possível carregar {ap}: {e}", file=sys.stderr)
         return False

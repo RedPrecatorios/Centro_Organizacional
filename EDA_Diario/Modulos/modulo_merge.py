@@ -1,3 +1,14 @@
+"""
+Enriquecimento em duas etapas (mesmo fluxo para PRC TJSP, PRC CMP e PRC IMP):
+
+  Etapa 1 — `etapa1_enriquecer_com_p2`: cruza a principal (tratada por `modelo`) com a
+  base Lemitti (P2). Saídas: INTERMEDIARIA.xlsx e cpfs_nao_encontrados_p2.csv.
+
+  Etapa 2 — `etapa2_enriquecer_com_p3`: para linhas ainda sem contato, cruza com a
+  segunda base (P3, ex. Assertiva). Saída: planilha final (nome definido na app).
+
+  O `modelo` só altera leitura da principal (e chave CPF no CMP — `cpf.1` vs `CPF`).
+"""
 import os
 import re
 import pandas as pd
@@ -30,6 +41,23 @@ def _normalizar_cpf(cpf) -> str:
     if pd.isna(cpf):
         return ""
     return str(cpf).strip().replace(".", "").replace("-", "").replace("/", "").zfill(11)
+
+
+def _coluna_cpf_cruzamento_enriquecimento(
+    df: pd.DataFrame, modelo: str | None = None
+) -> str:
+    """
+    PRC CMP: duas colunas «cpf» (CPF e cpf.1). O cruzamento com P2/P3 deve usar
+    `cpf.1` — o mesmo «formato numérico» das planilhas de enriquecimento (sem
+    ambiguidade de zeros à esquerda). Outros modelos: só `CPF`.
+    Se `modelo` for None (ex.: etapa 2 a partir do .xlsx), infere por presença de `cpf.1`.
+    """
+    m = (modelo or "").strip().lower()
+    if m == "prc_cmp" and "cpf.1" in df.columns:
+        return "cpf.1"
+    if modelo is None and "cpf.1" in df.columns:
+        return "cpf.1"
+    return "CPF"
 
 
 def _coletar_contatos(
@@ -268,6 +296,7 @@ def etapa1_enriquecer_com_p2(
     caminho_saida_intermediaria: str,
     caminho_csv_nao_encontrados: str,
     caminho_blacklist_txt: str = "blacklist.txt",
+    modelo: str = "prc_tjsp",
 ) -> None:
     """
     ETAPA 1 — Processa a planilha principal com os dados da planilha 2 (contatos).
@@ -279,13 +308,16 @@ def etapa1_enriquecer_com_p2(
     importar_blacklist_txt(caminho_blacklist_txt)
 
     print("\n[1/3] Processando planilha principal...")
-    df_main = processar_planilha_principal(caminho_principal)
+    df_main = processar_planilha_principal(caminho_principal, modelo=modelo)
 
     print("\n[2/3] Processando planilha 2 (contatos)...")
     df_p2 = processar_enriquecimento_contatos(caminho_p2)
 
-    print("\n[3/3] Cruzando CPFs com planilha 2...")
-    df_main["_CPF_NORM"] = df_main["CPF"].apply(_normalizar_cpf)
+    col_cpf_x = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo)
+    print(
+        f"\n[3/3] Cruzando CPFs com planilha 2 (chave: {col_cpf_x})..."
+    )
+    df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
     df_p2["_CPF_NORM"]   = df_p2["CPF/CNPJ"].apply(_normalizar_cpf)
 
     registros_tel    = []
@@ -302,7 +334,7 @@ def etapa1_enriquecer_com_p2(
         else:
             registros_tel.append([])
             registros_email.append([])
-            cpfs_nao_encontrados.append({"CPF": row["CPF"]})
+            cpfs_nao_encontrados.append({"CPF": row[col_cpf_x]})
 
     pd.DataFrame(cpfs_nao_encontrados).to_csv(caminho_csv_nao_encontrados, index=False)
 
@@ -375,8 +407,11 @@ def etapa2_enriquecer_com_p3(
     print("\n[2/3] Processando planilha 3 (relacionados)...")
     df_p3 = processar_enriquecimento_relacionados(caminho_p3)
 
-    print("\n[3/3] Cruzando CPFs nao enriquecidos com planilha 3...")
-    df_main["_CPF_NORM"] = df_main["CPF"].apply(_normalizar_cpf)
+    col_cpf_x = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo=None)
+    print(
+        f"\n[3/3] Cruzando CPFs nao enriquecidos com planilha 3 (chave: {col_cpf_x})..."
+    )
+    df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
     df_p3["_CPF_NORM"]   = df_p3["CPF"].apply(_normalizar_cpf)
 
     colunas_tel_exist   = [c for c in df_main.columns if c.startswith(f"{PREFIXO_TELEFONE}_")]
@@ -428,7 +463,8 @@ def etapa2_enriquecer_com_p3(
     print("\n     Verificando cooldown (14 dias)...")
     cpfs_cooldown = buscar_cpfs_cooldown(dias=14)
     if cpfs_cooldown:
-        df_main["_CPF_NORM"] = df_main["CPF"].apply(_normalizar_cpf)
+        col_cd = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo=None)
+        df_main["_CPF_NORM"] = df_main[col_cd].apply(_normalizar_cpf)
         mascara_cooldown = df_main["_CPF_NORM"].isin(cpfs_cooldown)
         total_cooldown   = mascara_cooldown.sum()
         if total_cooldown:

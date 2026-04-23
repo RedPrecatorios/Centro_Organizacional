@@ -402,6 +402,15 @@ def _val(row, col):
     return None if s in ("", "nan", "NaT", "None") else s
 
 
+def _val_cpf_cadastro(row) -> str:
+    """Chave alinhada ao P2/P3: com duas colunas CPF (CMP), preferir `cpf.1`."""
+    if "cpf.1" in row.index:
+        v = _val(row, "cpf.1")
+        if v:
+            return v
+    return _val(row, "CPF") or ""
+
+
 def _data(row, col):
     """Converte coluna para date ou None."""
     v = _val(row, col)
@@ -439,7 +448,7 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
     mapa_ids = {}
 
     for _, row in df.iterrows():
-        cpf             = _val(row, "CPF") or ""
+        cpf             = _val_cpf_cadastro(row)
         nome            = _val(row, "Requerente")
         data_nasc       = _data(row, "Data_de_Nascimento")
         numero_processo = _val(row, "Numero_de_Processo") or ""
@@ -520,7 +529,7 @@ def salvar_contatos(
 
     for i, row in df.iterrows():
         numero_processo = _val(row, "Numero_de_Processo") or ""
-        cpf             = _val(row, "CPF") or ""
+        cpf             = _val_cpf_cadastro(row)
         id_proc         = mapa_ids.get(numero_processo)
 
         if not id_proc:

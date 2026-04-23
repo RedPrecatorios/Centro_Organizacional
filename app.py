@@ -122,7 +122,8 @@ def _memoria_mysql_config() -> dict | None:
     Sem MEMORIA_MYSQL_DATABASE = desativado.
 
     Variáveis de ambiente: MEMORIA_MYSQL_HOST, MEMORIA_MYSQL_PORT, MEMORIA_MYSQL_DATABASE,
-    MEMORIA_MYSQL_USER, MEMORIA_MYSQL_PASSWORD, MEMORIA_MYSQL_CONNECT_TIMEOUT (segundos; padrão 1200).
+    MEMORIA_MYSQL_USER, MEMORIA_MYSQL_PASSWORD, MEMORIA_MYSQL_CONNECT_TIMEOUT (segundos; padrão 1200),
+    MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL (opcional: nome da coluna de data da última actualização; senão autodetecta).
     Credenciais no .env (nunca no código; use aspas se a password tiver # ou !).
     """
     name = (os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()
@@ -143,6 +144,41 @@ def _memoria_mysql_config() -> dict | None:
         "password": os.getenv("MEMORIA_MYSQL_PASSWORD", "") or "",
         "connect_timeout": connect_timeout,
     }
+
+
+def _memoria_calculo_ultima_atualizacao_field(cur) -> str | None:
+    """
+    Nome da coluna de data/hora da última actualização em `memoria_calculo`.
+    Pode forçar com MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL; senão tenta nomes comuns
+    (data_ultima_atualizacao, ultima_atualizacao, data_atualizacao, updated_at, …).
+    """
+    cur.execute("SHOW COLUMNS FROM `memoria_calculo`")
+    raw = cur.fetchall()
+    # Com cursor em modo dicionário, SHOW COLUMNS devolve {'Field': 'nome', 'Type': ...},
+    # não tuplas indexadas por 0.
+    fields = set()
+    for row in raw:
+        if isinstance(row, dict):
+            name = row.get("Field") or row.get("field")
+            if name is not None:
+                fields.add(str(name))
+        else:
+            fields.add(str(row[0]))
+    env = (os.getenv("MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL") or "").strip()
+    if env and re.match(r"^[a-zA-Z0-9_]+$", env) and env in fields:
+        return env
+    prefer = (
+        "data_ultima_atualizacao",
+        "ultima_atualizacao",
+        "data_atualizacao",
+        "updated_at",
+        "atualizado_em",
+        "data_modificacao",
+    )
+    for p in prefer:
+        if p in fields:
+            return p
+    return None
 
 
 def _memoria_row_to_api(row: dict) -> dict:
@@ -183,20 +219,51 @@ def memoria_calculo():
 @app.route("/api/memoria-calculo/buscar")
 def api_memoria_buscar():
     """
-    Pesquisa por nome do requerente (LIKE, sem injeção: parâmetro bind + escape de % e _).
-    Retorna linhas de `memoria_calculo` para a página carregar memória e propostas.
+    Dois modos (exclusivos):
+    - Nome: LIKE no requerente (mín. 2 caracteres; bind + escape de % e _).
+    - Processo + incidente: igualdade em TRIM de numero_de_processo e
+      TRIM de numero_do_incidente (incidente vazio = sem incidente na BD).
+    Não combinar parâmetros dos dois modos.
     """
-    q = (request.args.get("nome") or request.args.get("q") or "").strip()
-    if len(q) < 2:
+    nome = (request.args.get("nome") or request.args.get("q") or "").strip()
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+
+    if (proc or inc) and nome:
         return (
             jsonify(
                 {
                     "ok": False,
-                    "error": "Digite ao menos 2 caracteres no nome do requerente.",
+                    "error": "Use ou a pesquisa por nome, ou por processo e incidente — não ambas.",
                 }
             ),
             400,
         )
+    if inc and not proc:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Para pesquisar por incidente, indique também o nº do processo.",
+                }
+            ),
+            400,
+        )
+    if proc:
+        use_process = True
+    elif len(nome) >= 2:
+        use_process = False
+    else:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Digite ao menos 2 caracteres no nome, ou o nº do processo (e o incidente, se houver).",
+                }
+            ),
+            400,
+        )
+
     cfg = _memoria_mysql_config()
     if not cfg:
         return (
@@ -212,8 +279,44 @@ def api_memoria_buscar():
     def esc_like(s: str) -> str:
         return s.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
-    like_pat = f"%{esc_like(q)}%"
-    sql = """
+    if use_process:
+        where_sql = """
+        TRIM(COALESCE(numero_de_processo, '')) = %s
+        AND TRIM(COALESCE(numero_do_incidente, '')) = %s
+        """
+        params_exec: list = [proc, inc]
+        order_by = """
+            requerente ASC,
+            COALESCE(numero_de_processo, '') ASC,
+            COALESCE(numero_do_incidente, '') ASC,
+            id ASC
+        """
+    else:
+        like_pat = f"%{esc_like(nome)}%"
+        where_sql = """
+        requerente IS NOT NULL
+        AND TRIM(requerente) <> ''
+        AND requerente LIKE %s
+        """
+        params_exec = [like_pat]
+        order_by = """
+            requerente ASC,
+            COALESCE(numero_de_processo, '') ASC,
+            COALESCE(numero_do_incidente, '') ASC,
+            id ASC
+        """
+
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        ultima_f = _memoria_calculo_ultima_atualizacao_field(cur)
+        if ultima_f:
+            ultima_sql = f", `{ultima_f}` AS ultima_atualizacao"
+        else:
+            ultima_sql = ", NULL AS ultima_atualizacao"
+        sql = f"""
         SELECT
             id,
             id_precainfosnew,
@@ -228,22 +331,13 @@ def api_memoria_buscar():
             total_bruto,
             reserva_honorarios,
             total_liquido
+            {ultima_sql}
         FROM memoria_calculo
-        WHERE requerente IS NOT NULL
-          AND TRIM(requerente) <> ''
-          AND requerente LIKE %s
+        WHERE {where_sql}
         ORDER BY
-            requerente ASC,
-            COALESCE(numero_de_processo, '') ASC,
-            COALESCE(numero_do_incidente, '') ASC,
-            id ASC
+            {order_by}
     """
-    try:
-        conn = mysql.connector.connect(
-            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
-        )
-        cur = conn.cursor(dictionary=True)
-        cur.execute(sql, (like_pat,))
+        cur.execute(sql, tuple(params_exec))
         raw = cur.fetchall()
         cur.close()
         conn.close()
@@ -260,6 +354,7 @@ def api_memoria_buscar():
     return jsonify(
         {
             "ok": True,
+            "modo": "processo" if use_process else "nome",
             "results": [_memoria_row_to_api(r) for r in raw],
         }
     )
