@@ -492,14 +492,195 @@ def api_memoria_buscar():
             500,
         )
     dt_ms = int((perf_counter() - t0) * 1000)
-    print(f"[memoria-calculo] ok em {dt_ms}ms; results={len(raw)}; modo={'processo' if use_process else 'nome'}")
-    return jsonify(
-        {
-            "ok": True,
-            "modo": "processo" if use_process else "nome",
-            "results": [_memoria_row_to_api(r) for r in raw],
-        }
+    print(
+        f"[memoria-calculo] ok em {dt_ms}ms; results={len(raw)}; modo={'processo' if use_process else 'nome'}"
     )
+    results = [_memoria_row_to_api(r) for r in raw]
+    if results:
+        return jsonify(
+            {
+                "ok": True,
+                "modo": "processo" if use_process else "nome",
+                "source": "memoria_calculo",
+                "results": results,
+            }
+        )
+
+    # Fallback: se não houver memória, procura no precainfosnew (flaskdb).
+    # Se achou (principalmente por processo/incidente), o front pode auto-rodar o cálculo.
+    fcfg = _flask_mysql_config()
+    if not fcfg:
+        return jsonify(
+            {
+                "ok": True,
+                "modo": "processo" if use_process else "nome",
+                "source": "memoria_calculo",
+                "results": [],
+            }
+        )
+
+    try:
+        conn2 = mysql.connector.connect(
+            **fcfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur2 = conn2.cursor(dictionary=True)
+        cur2.execute("SHOW TABLES LIKE 'precainfosnew'")
+        if not cur2.fetchone():
+            return jsonify(
+                {
+                    "ok": True,
+                    "modo": "processo" if use_process else "nome",
+                    "source": "precainfosnew",
+                    "results": [],
+                }
+            )
+
+        cur2.execute("SHOW COLUMNS FROM `precainfosnew`")
+        raw_cols = cur2.fetchall() or []
+        fields: set[str] = set()
+        for r in raw_cols:
+            if isinstance(r, dict):
+                nm = r.get("Field") or r.get("field")
+                if nm:
+                    fields.add(str(nm))
+            else:
+                fields.add(str(r[0]))
+
+        f_req = _pick_field(fields, "requerente", "Requerente")
+        f_proc = _pick_field(fields, "numero_de_processo", "Numero_de_processo", "processo", "Processo")
+        f_inc = _pick_field(
+            fields,
+            "numero_do_incidente",
+            "Numero_do_incidente",
+            "numero_de_incidente",
+            "Numero_de_incidente",
+            "incidente",
+            "Incidente",
+        )
+        if not f_proc:
+            return jsonify(
+                {
+                    "ok": True,
+                    "modo": "processo" if use_process else "nome",
+                    "source": "precainfosnew",
+                    "results": [],
+                }
+            )
+
+        if use_process:
+            if f_inc:
+                cur2.execute(
+                    f"""
+                    SELECT id,
+                           {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
+                           `{f_proc}` AS numero_de_processo,
+                           `{f_inc}` AS numero_do_incidente
+                    FROM precainfosnew
+                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                      AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                    ORDER BY id DESC
+                    LIMIT 10
+                    """,
+                    (proc, inc),
+                )
+            else:
+                cur2.execute(
+                    f"""
+                    SELECT id,
+                           {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
+                           `{f_proc}` AS numero_de_processo,
+                           NULL AS numero_do_incidente
+                    FROM precainfosnew
+                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                    ORDER BY id DESC
+                    LIMIT 10
+                    """,
+                    (proc,),
+                )
+        else:
+            # Para pesquisa por nome, devolvemos resultados mas NÃO auto-rodamos cálculo
+            # (pode haver muitos casos).
+            if not f_req:
+                return jsonify(
+                    {
+                        "ok": True,
+                        "modo": "nome",
+                        "source": "precainfosnew",
+                        "results": [],
+                    }
+                )
+            like_pat = f"%{esc_like(nome)}%"
+            cur2.execute(
+                f"""
+                SELECT id,
+                       `{f_req}` AS requerente,
+                       {f"`{f_proc}` AS numero_de_processo" if f_proc else "NULL AS numero_de_processo"},
+                       {f"`{f_inc}` AS numero_do_incidente" if f_inc else "NULL AS numero_do_incidente"}
+                FROM precainfosnew
+                WHERE `{f_req}` IS NOT NULL
+                  AND TRIM(`{f_req}`) <> ''
+                  AND `{f_req}` LIKE %s
+                ORDER BY `{f_req}` ASC, id DESC
+                LIMIT 10
+                """,
+                (like_pat,),
+            )
+
+        rows = cur2.fetchall() or []
+        out_rows: list[dict] = []
+        for r in rows:
+            try:
+                pid = int(r.get("id")) if r.get("id") is not None else None
+            except (TypeError, ValueError):
+                pid = None
+            out_rows.append(
+                {
+                    "id": None,
+                    "id_precainfosnew": pid,
+                    "requerente": r.get("requerente"),
+                    "numero_de_processo": r.get("numero_de_processo"),
+                    "numero_do_incidente": r.get("numero_do_incidente"),
+                    "principal_bruto": 0,
+                    "juros": 0,
+                    "desc_saude_prev": 0,
+                    "desc_ir": 0,
+                    "percentual_honorarios": 30,
+                    "total_bruto": 0,
+                    "reserva_honorarios": 0,
+                    "total_liquido": 0,
+                    "ultima_atualizacao": None,
+                    "source": "precainfosnew",
+                    # auto-run apenas quando for processo/incidente e der match único
+                    "auto_update": bool(use_process and len(rows) == 1),
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "modo": "processo" if use_process else "nome",
+                "source": "precainfosnew",
+                "results": out_rows,
+            }
+        )
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] fallback precainfosnew falhou: {e}")
+        return jsonify(
+            {
+                "ok": True,
+                "modo": "processo" if use_process else "nome",
+                "source": "memoria_calculo",
+                "results": [],
+            }
+        )
+    finally:
+        try:
+            cur2.close()
+        except Exception:
+            pass
+        try:
+            conn2.close()
+        except Exception:
+            pass
 
 
 @app.route("/api/memoria-calculo/atualizar-calculo", methods=["POST"])

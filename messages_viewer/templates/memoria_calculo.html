@@ -497,8 +497,20 @@
       syncAtualizarCalculoButtonState(r);
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
-      setMsg('Memória carregada (id ' + (r.id != null ? r.id : '') + ').', false);
+      if (r.source === 'precainfosnew') {
+        setMsg('Caso encontrado no precainfosnew. A gerar memória automaticamente…', false);
+      } else {
+        setMsg('Memória carregada (id ' + (r.id != null ? r.id : '') + ').', false);
+      }
       recalc();
+
+      // Fallback automático: quando veio do precainfosnew e foi match único por processo/incidente,
+      // dispara o cálculo para preencher memoria_calculo.
+      if (r.auto_update && btnAtualizarCalculo && !btnAtualizarCalculo.disabled) {
+        setTimeout(function () {
+          try { btnAtualizarCalculo.click(); } catch (_) {}
+        }, 350);
+      }
     }
 
     function getModo() {
