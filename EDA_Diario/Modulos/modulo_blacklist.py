@@ -27,7 +27,9 @@ def _normalizar_cpf_cmp(cpf) -> str:
     dig = re.sub(r"\D", "", s)
     if not dig:
         return ""
-    return dig.zfill(11) if len(dig) <= 11 else dig
+    if len(dig) > 11:
+        dig = dig[-11:]
+    return dig.zfill(11)
 
 
 def _normalizar_tel_cmp(telefone) -> str:

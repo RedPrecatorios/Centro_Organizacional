@@ -31,7 +31,7 @@ from modulo_enriquecimento_contatos import processar_enriquecimento_contatos
 from modulo_enriquecimento_relacionados import processar_enriquecimento_relacionados
 from modulo_banco import (
     criar_banco_e_tabelas, registrar_execucao, salvar_processos,
-    salvar_contatos, carregar_blacklist, importar_blacklist_txt,
+    salvar_contatos, carregar_blacklist,
     buscar_cpfs_cooldown,
 )
 from modulo_blacklist import filtrar_registros_por_blacklist
@@ -365,9 +365,8 @@ def etapa1_enriquecer_com_p2(
     Telefones e emails sao separados em grupos de colunas distintos.
     Tudo processado em memoria. Salva apenas a intermediaria e o CSV de nao encontrados.
     """
-    print("\n[0/3] Sincronizando blacklist.txt com o banco...")
+    print("\n[0/3] Carregando blacklist do banco...")
     criar_banco_e_tabelas()
-    importar_blacklist_txt(caminho_blacklist_txt)
 
     print("\n[1/3] Processando planilha principal...")
     df_main = processar_planilha_principal(caminho_principal, modelo=modelo)
@@ -461,10 +460,7 @@ def etapa2_enriquecer_com_p3(
     Deve ser executada APOS a Etapa 1 e APOS emitir a planilha 3.
     Telefones e emails sao separados em grupos de colunas distintos.
     """
-    if caminho_blacklist_txt:
-        print("\n[0/3] Sincronizando blacklist.txt com o banco...")
-        criar_banco_e_tabelas()
-        importar_blacklist_txt(caminho_blacklist_txt)
+    criar_banco_e_tabelas()
 
     print("\n[1/3] Carregando planilha intermediaria...")
     df_main = pd.read_excel(caminho_intermediaria, dtype=str)

@@ -1,6 +1,7 @@
 import mysql.connector
 from mysql.connector import MySQLConnection
 from datetime import datetime
+import os
 import pandas as pd
 
 from modulo_blacklist import normalizar_valor_para_blacklist
@@ -8,13 +9,21 @@ from modulo_blacklist import normalizar_valor_para_blacklist
 # ─────────────────────────────────────────────
 # Configuracao da conexao
 # ─────────────────────────────────────────────
+def _env(name: str, default: str = "") -> str:
+    v = os.getenv(name)
+    return default if v is None else str(v)
+
+
 DB_CONFIG = {
-    "host":     "localhost",
-    "user":     "root",
-    "password": "",
-    "port":     3306,
+    "host": _env("EDA_MYSQL_HOST", "localhost").strip() or "localhost",
+    "user": _env("EDA_MYSQL_USER", "root").strip() or "root",
+    "password": _env("EDA_MYSQL_PASSWORD", ""),
+    "port": int(_env("EDA_MYSQL_PORT", "3306") or "3306"),
+    "connection_timeout": int(_env("EDA_MYSQL_CONNECT_TIMEOUT", "15") or "15"),
 }
-DB_NAME = "eda_diario"
+
+# Nome do schema (database) usado pelo EDA Diário
+DB_NAME = (_env("EDA_MYSQL_DATABASE", "plataforma_central").strip() or "plataforma_central")
 
 FORNECEDOR_P2 = "Lemitti"
 FORNECEDOR_P3 = "Assertiva"

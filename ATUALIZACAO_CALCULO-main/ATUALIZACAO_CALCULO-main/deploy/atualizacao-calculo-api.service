@@ -1,0 +1,25 @@
+[Unit]
+Description=API interna de actualização de cálculo (precatórios / planilha / memoria_calculo)
+Documentation=file:///opt/Centro_Organizacional/ATUALIZACAO_CALCULO-main/ATUALIZACAO_CALCULO-main/api_atualizacao_calculo.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ajuste User, caminhos e Python ao seu servidor:
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/Centro_Organizacional/ATUALIZACAO_CALCULO-main/ATUALIZACAO_CALCULO-main
+EnvironmentFile=-/opt/Centro_Organizacional/ATUALIZACAO_CALCULO-main/ATUALIZACAO_CALCULO-main/.env
+# CALCULO_ATUALIZACAO_API_HOST=127.0.0.1
+# CALCULO_ATUALIZACAO_API_PORT=5099
+# CALCULO_ATUALIZACAO_API_KEY=defina_um_segredo_partilhado_com_o_.env_da_plataforma
+# LibreOffice (www-data): perfil em MEMORIA_LIBREOFFICE_HOME no .env (ex. /var/lib/lo-calc) ou
+#   chown a calculation_automation/.lo_profile; o soffice precisa de HOME gravável.
+ExecStart=/opt/Centro_Organizacional/.venv/bin/python /opt/Centro_Organizacional/ATUALIZACAO_CALCULO-main/ATUALIZACAO_CALCULO-main/api_atualizacao_calculo.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

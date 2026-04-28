@@ -3,8 +3,15 @@ instance/
 
 # Ambiente e segredos
 .env
-.env.local
+.env.*
+!.env.example
+!**/.env.example
 *.pem
+*.json
+!**/*.json
+**/google_api/*.json
+**/token.json
+**/credentials.json
 
 # Python
 __pycache__/

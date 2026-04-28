@@ -243,6 +243,7 @@ def _endpoint_to_tab() -> str | None:
         "get_conversations": "conversas",
         "get_messages": "conversas",
         "api_memoria_buscar": "memoria_calculo",
+        "api_memoria_atualizar_calculo": "memoria_calculo",
     }
     t = m.get(ep)
     if t is not None:
@@ -521,6 +522,9 @@ def inject_plataforma_template_globals():
 def init_plataforma_auth(app) -> None:
     app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
     app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
+    _sec = (os.getenv("SESSION_COOKIE_SECURE") or "").strip().lower()
+    if _sec in ("1", "true", "yes", "on"):
+        app.config["SESSION_COOKIE_SECURE"] = True
     init_db()
     _bootstrap_admin_if_empty()
     app.context_processor(inject_plataforma_template_globals)

@@ -1,6 +1,6 @@
 """
 Monta a app Flask do EDA Diário (pasta separada) em /eda/ via WSGI.
-Configure EDA_DIARIO_PATH no .env; se vazio, usa o caminho padrão do desenvolvedor.
+Configure EDA_DIARIO_PATH no .env; se vazio, usa a pasta `EDA_Diario` do repositório.
 """
 
 from __future__ import annotations

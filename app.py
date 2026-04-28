@@ -1,7 +1,12 @@
+import json
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import mysql.connector
 import psycopg2
@@ -76,15 +81,11 @@ def inject_platform():
             internal = None
     if env_url:
         second_src = env_url
-    elif has_edi:
-        second_src = "/eda/"
     else:
         second_src = internal
     custom_label = (os.getenv("SECOND_TAB_LABEL") or "").strip()
     if custom_label:
         second_label = custom_label
-    elif has_edi:
-        second_label = "EDA Diário"
     else:
         second_label = "Outro módulo"
     return {
@@ -129,20 +130,25 @@ def _memoria_mysql_config() -> dict | None:
     name = (os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()
     if not name:
         return None
-    raw_to = (os.getenv("MEMORIA_MYSQL_CONNECT_TIMEOUT") or "1200").strip()
+    # Timeout de conexão: evita "loading infinito" quando o MySQL está inacessível.
+    # Pode ajustar via env, mas limitamos para não prender requests por minutos.
+    raw_to = (os.getenv("MEMORIA_MYSQL_CONNECT_TIMEOUT") or "10").strip()
     try:
         connect_timeout = int(raw_to)
     except ValueError:
-        connect_timeout = 1200
+        connect_timeout = 10
     if connect_timeout < 1:
-        connect_timeout = 1200
+        connect_timeout = 10
+    if connect_timeout > 30:
+        connect_timeout = 30
+    # mysql-connector-python: use `connection_timeout` (não `connect_timeout`).
     return {
         "host": (os.getenv("MEMORIA_MYSQL_HOST") or "127.0.0.1").strip(),
         "port": int(os.getenv("MEMORIA_MYSQL_PORT", "3306")),
         "database": name,
         "user": (os.getenv("MEMORIA_MYSQL_USER") or "root").strip(),
         "password": os.getenv("MEMORIA_MYSQL_PASSWORD", "") or "",
-        "connect_timeout": connect_timeout,
+        "connection_timeout": connect_timeout,
     }
 
 
@@ -198,6 +204,79 @@ def _memoria_row_to_api(row: dict) -> dict:
     return out
 
 
+def _bloquear_calculo_mes_atual_enabled() -> bool:
+    """
+    Flag simples para testes.
+
+    - BLOQUEAR_CALCULO=1/true/on/sim  -> activa bloqueio do mês actual
+    - BLOQUEAR_CALCULO=0/false/off/nao -> desactiva
+    Padrão: activo (1).
+    """
+    raw = (os.getenv("BLOQUEAR_CALCULO") or "1").strip().lower()
+    return raw not in ("0", "false", "off", "no", "nao", "não", "disabled")
+
+
+def _memoria_calculo_bloqueado_mes_atual(prec_id: int) -> tuple[bool, str | None]:
+    """
+    Bloqueio de segurança: se ``memoria_calculo`` já tiver sido actualizada no mês actual
+    para este ``id_precainfosnew``, evita rodar a automação novamente (cliques repetidos).
+
+    Returns
+    -------
+    (blocked, ultima_iso)
+        ``blocked=True`` quando a data de última actualização existe e é do mesmo mês/ano
+        do relógio do servidor; ``ultima_iso`` é string ISO para mensagem.
+    """
+    from datetime import datetime
+
+    if not _bloquear_calculo_mes_atual_enabled():
+        return False, None
+
+    cfg = _memoria_mysql_config()
+    if not cfg:
+        return False, None
+    try:
+        conn = mysql.connector.connect(**cfg)
+        cur = conn.cursor(dictionary=True)
+        ultima_f = _memoria_calculo_ultima_atualizacao_field(cur)
+        if not ultima_f:
+            return False, None
+        cur.execute(
+            f"SELECT `{ultima_f}` AS ultima_atualizacao FROM memoria_calculo WHERE id_precainfosnew = %s LIMIT 1",
+            (int(prec_id),),
+        )
+        row = cur.fetchone() or {}
+        ultima = row.get("ultima_atualizacao")
+        if not ultima:
+            return False, None
+        # mysql-connector pode devolver datetime ou string
+        if isinstance(ultima, str):
+            try:
+                ultima_dt = datetime.fromisoformat(ultima.replace("Z", "+00:00"))
+            except ValueError:
+                return False, ultima
+        else:
+            ultima_dt = ultima
+        now = datetime.now()
+        blocked = (ultima_dt.year == now.year) and (ultima_dt.month == now.month)
+        try:
+            ultima_iso = ultima_dt.isoformat()
+        except Exception:
+            ultima_iso = str(ultima_dt)
+        return blocked, ultima_iso
+    except Exception:
+        return False, None
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.route("/")
 def index():
     return render_template("capa.html")
@@ -213,6 +292,10 @@ def memoria_calculo():
     return render_template(
         "memoria_calculo.html",
         memoria_mysql_configured=bool((os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()),
+        calculo_atualizacao_configured=bool(
+            (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
+        ),
+        bloquear_calculo_mes_atual=_bloquear_calculo_mes_atual_enabled(),
     )
 
 
@@ -306,6 +389,7 @@ def api_memoria_buscar():
             id ASC
         """
 
+    t0 = perf_counter()
     try:
         conn = mysql.connector.connect(
             **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
@@ -342,15 +426,21 @@ def api_memoria_buscar():
         cur.close()
         conn.close()
     except mysql.connector.Error as e:
+        dt_ms = int((perf_counter() - t0) * 1000)
+        host = cfg.get("host")
+        port = cfg.get("port")
+        print(f"[memoria-calculo] erro em {dt_ms}ms ({host}:{port}): {e}")
         return (
             jsonify(
                 {
                     "ok": False,
-                    "error": f"Erro ao consultar o MySQL: {e}",
+                    "error": f"Erro ao consultar o MySQL ({host}:{port}): {e}",
                 }
             ),
             500,
         )
+    dt_ms = int((perf_counter() - t0) * 1000)
+    print(f"[memoria-calculo] ok em {dt_ms}ms; results={len(raw)}; modo={'processo' if use_process else 'nome'}")
     return jsonify(
         {
             "ok": True,
@@ -358,6 +448,117 @@ def api_memoria_buscar():
             "results": [_memoria_row_to_api(r) for r in raw],
         }
     )
+
+
+@app.route("/api/memoria-calculo/atualizar-calculo", methods=["POST"])
+def api_memoria_atualizar_calculo():
+    """
+    Encaminha para a API interna (systemd) que executa a automação de cálculo
+    (planilha, precainfosnew, memoria_calculo) — ver ``api_atualizacao_calculo.py`` e
+    ``CALCULO_ATUALIZACAO_API_URL`` no ``.env``.
+    """
+    data = request.get_json(silent=True) or {}
+    pid = data.get("id_precainfosnew")
+    if pid is None and data.get("id") is not None:
+        pid = data.get("id")
+    if pid is None:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Parâmetro obrigatório: id_precainfosnew (ou id) — id em precainfosnew.",
+                }
+            ),
+            400,
+        )
+    try:
+        prec_id = int(pid)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    if blocked:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Este cálculo já foi actualizado no mês actual. "
+                        + (f"Última actualização: {ultima_iso}." if ultima_iso else "")
+                    ),
+                }
+            ),
+            409,
+        )
+
+    base = (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
+    if not base:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "API de cálculo não configurada. Defina CALCULO_ATUALIZACAO_API_URL no .env da plataforma "
+                        "(ex.: http://127.0.0.1:5099) e o serviço interno (systemd)."
+                    ),
+                }
+            ),
+            503,
+        )
+    try:
+        timeout = int((os.getenv("CALCULO_ATUALIZACAO_API_TIMEOUT") or "600").strip())
+    except ValueError:
+        timeout = 600
+    if timeout < 1:
+        timeout = 600
+
+    url = base.rstrip("/") + "/atualizar"
+    body = json.dumps({"id_precainfosnew": prec_id}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
+    }
+    key = (os.getenv("CALCULO_ATUALIZACAO_API_KEY") or "").strip()
+    if key:
+        headers["X-API-Key"] = key
+    req = Request(url, data=body, method="POST", headers=headers)
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            code = resp.getcode()
+    except HTTPError as e:
+        raw = e.read()
+        code = e.code
+    except URLError as e:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Não foi possível contactar a API de cálculo ({url}): {e}",
+                }
+            ),
+            502,
+        )
+    try:
+        out = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Resposta inválida da API de cálculo (JSON esperado).",
+                }
+            ),
+            502,
+        )
+    if not isinstance(out, dict):
+        return (
+            jsonify({"ok": False, "error": "Resposta inválida da API de cálculo."}),
+            502,
+        )
+    if code in (200, 400, 403, 409, 500):
+        return jsonify(out), code
+    return jsonify(out), 502
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────
@@ -529,7 +730,7 @@ def get_messages():
         return jsonify({"error": str(e)}), 500
 
 
-# EDA Diário: montado em /eda/ (ver eda_integracao.py e variável EDA_DIARIO_PATH)
+# EDA Diário: montado em /eda/ (ver eda_integracao.py e variável plataforma_central_PATH)
 try:
     from eda_integracao import tentar_montar_eda
 
@@ -542,5 +743,30 @@ except Exception as _e:
 
 app.wsgi_app = wsgi_eda_session_guard(app, app.wsgi_app)
 
+# Atrás de Nginx / balanceador: cabeçalhos X-Forwarded-* passam a ser respeitados
+if (os.getenv("TRUSTED_PROXY") or "").strip().lower() in ("1", "true", "yes", "on"):
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_port=0,
+        x_prefix=1,
+    )
+
+# Em produção (REQUIRE_STRONG_SECRETS=1), exige FLASK_SECRET_KEY definido
+if (os.getenv("REQUIRE_STRONG_SECRETS") or "").strip().lower() in ("1", "true", "yes", "on"):
+    if not (os.getenv("FLASK_SECRET_KEY") or "").strip():
+        import sys
+
+        print(
+            "ERRO: defina FLASK_SECRET_KEY no ambiente (e REQUIRE_STRONG_SECRETS).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    _dbg = (os.getenv("FLASK_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
+    app.run(debug=_dbg, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

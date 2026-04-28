@@ -29,6 +29,11 @@
       <p class="memoria-skeleton-note" role="status" id="memoria-skeleton">
         <strong>Como funciona.</strong> Use <strong>ou</strong> o nome do requerente, <strong>ou</strong> o nº do processo com o nº do incidente (não os dois). Os totais e as sugestões de proposta só surgem após <strong>pesquisar e carregar</strong> (ou escolher entre vários, se existirem). Antes disso, tudo fica em zero.
       </p>
+      {% if not calculo_atualizacao_configured %}
+      <p class="memoria-skeleton-note" role="status" id="memoria-calcio-api-hint">
+        <strong>API de cálculo não configurada.</strong> Defina <code>CALCULO_ATUALIZACAO_API_URL</code> no <code>.env</code> da plataforma (ex.: <code>http://127.0.0.1:5099</code>, igual ao <code>CALCULO_ATUALIZACAO_API_HOST/PORT</code> do serviço interno) e arranque a unidade systemd; o botão <em>Atualizar Cálculo</em> fica inactivo até isso.
+      </p>
+      {% endif %}
       {% endif %}
 
       <div class="memoria-linha" role="group" aria-label="Pesquisa e memória de cálculo">
@@ -100,6 +105,7 @@
                 <span>%</span>
               </div>
               <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
+              <button type="button" class="memoria-btn-atualizar-calculo" id="memoria-btn-atualizar-calculo" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env (ex.: http://127.0.0.1:5099) e o serviço interno"{% endif %}>Atualizar Cálculo</button>
             </div>
 
             <table class="memoria-table" id="memoria-table">
@@ -191,7 +197,10 @@
   <script>
   (function () {
     var memoriaConfigured = {{ memoria_mysql_configured | tojson }};
+    var calculoAtualizacaoConfigured = {{ calculo_atualizacao_configured | tojson }};
+    var bloquearCalculoMesAtual = {{ bloquear_calculo_mes_atual | tojson }};
     var lastResults = [];
+    var idPrecainfosnewSelecionado = null;
     var temRegistoCarregado = false;
     var base = { principalBruto: 0, juros: 0, descSaudePrev: 0, descIR: 0 };
     var TAXA_PROPOSTA = [
@@ -219,6 +228,7 @@
     var metaProc = document.getElementById('memoria-meta-proc');
     var metaInc = document.getElementById('memoria-meta-inc');
     var metaAtual = document.getElementById('memoria-meta-atual');
+    var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
 
     function formatUltimaAtualizacao(v) {
       if (v == null || v === '') return '—';
@@ -235,6 +245,36 @@
     function round2(x) { return Math.round(x * 100) / 100; }
 
     function n(x) { var v = parseFloat(x); return isNaN(v) ? 0 : v; }
+
+    function isUpdatedThisMonth(isoVal) {
+      if (isoVal == null || isoVal === '') return false;
+      var d = new Date(isoVal);
+      if (isNaN(d.getTime())) return false;
+      var now = new Date();
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }
+
+    function syncAtualizarCalculoButtonState(row) {
+      if (!btnAtualizarCalculo) return;
+      // respeita bloqueio por config da API (server-side já desabilita via template)
+      if (!calculoAtualizacaoConfigured) return;
+      if (!bloquearCalculoMesAtual) {
+        btnAtualizarCalculo.disabled = false;
+        btnAtualizarCalculo.title = '';
+        return;
+      }
+      if (!row || !row.ultima_atualizacao) {
+        btnAtualizarCalculo.disabled = false;
+        return;
+      }
+      if (isUpdatedThisMonth(row.ultima_atualizacao)) {
+        btnAtualizarCalculo.disabled = true;
+        btnAtualizarCalculo.title = 'Já foi atualizado no mês atual. Aguarde o próximo mês ou force via admin.';
+      } else {
+        btnAtualizarCalculo.disabled = false;
+        btnAtualizarCalculo.title = '';
+      }
+    }
 
     function clearMsg() {
       if (!searchMsg) return;
@@ -288,12 +328,14 @@
 
     function resetMemoriaVazia() {
       temRegistoCarregado = false;
+      idPrecainfosnewSelecionado = null;
       base.principalBruto = 0;
       base.juros = 0;
       base.descSaudePrev = 0;
       base.descIR = 0;
       pctInput.value = '0';
       showCaseMeta(null);
+      syncAtualizarCalculoButtonState(null);
       recalc();
     }
 
@@ -316,6 +358,11 @@
     function applyRow(r) {
       if (!r) return;
       temRegistoCarregado = true;
+      idPrecainfosnewSelecionado = null;
+      if (r.id_precainfosnew != null && r.id_precainfosnew !== '') {
+        var p = parseInt(r.id_precainfosnew, 10);
+        if (!isNaN(p)) { idPrecainfosnewSelecionado = p; }
+      }
       base.principalBruto = n(r.principal_bruto);
       base.juros = n(r.juros);
       base.descSaudePrev = n(r.desc_saude_prev);
@@ -326,6 +373,7 @@
         pctInput.value = '30';
       }
       showCaseMeta(r);
+      syncAtualizarCalculoButtonState(r);
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
       setMsg('Memória carregada (id ' + (r.id != null ? r.id : '') + ').', false);
@@ -355,6 +403,8 @@
 
     function doSearch() {
       if (!memoriaConfigured) return;
+      if (searchBtn) searchBtn.disabled = true;
+      if (searchBtnProc) searchBtnProc.disabled = true;
       var modo = getModo();
       var u = new URLSearchParams();
       if (modo === 'processo') {
@@ -380,7 +430,13 @@
       escolherList.innerHTML = '';
       lastResults = [];
       var porNome = modo !== 'processo';
-      fetch('/api/memoria-calculo/buscar?' + u.toString())
+      var ctl = null;
+      var tmr = null;
+      try {
+        ctl = new AbortController();
+        tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 20000);
+      } catch (_) {}
+      fetch('/api/memoria-calculo/buscar?' + u.toString(), ctl ? { signal: ctl.signal } : undefined)
         .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
         .then(function (o) {
           if (!o.ok || !o.d.ok) {
@@ -432,8 +488,17 @@
           });
           escolher.removeAttribute('hidden');
         })
-        .catch(function () {
+        .catch(function (e) {
+          if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
+            setMsg('Tempo excedido (20s). Verifique a conexão com o banco de memória e tente novamente.', true);
+            return;
+          }
           setMsg('Falha de rede ou servidor.', true);
+        })
+        .finally(function () {
+          if (tmr) clearTimeout(tmr);
+          if (searchBtn) searchBtn.disabled = false;
+          if (searchBtnProc) searchBtnProc.disabled = false;
         });
     }
 
@@ -461,6 +526,60 @@
     });
     syncModePanels();
     recalc();
+
+    if (btnAtualizarCalculo) {
+      btnAtualizarCalculo.addEventListener('click', function () {
+        if (!memoriaConfigured) {
+          setMsg('MySQL (memoria) não configurado.', true);
+          return;
+        }
+        if (!calculoAtualizacaoConfigured) {
+          setMsg('Defina CALCULO_ATUALIZACAO_API_URL no .env e o serviço interno (systemd).', true);
+          return;
+        }
+        if (!temRegistoCarregado || idPrecainfosnewSelecionado == null) {
+          setMsg('Pesquise e carregue um caso (requerente ou processo) antes de actualizar o cálculo.', true);
+          return;
+        }
+        var prev = btnAtualizarCalculo.textContent;
+        btnAtualizarCalculo.disabled = true;
+        setMsg('A actualizar cálculo (pode levar 1–3 minutos)… Não feche a página.', false);
+        var ctl;
+        var tmr;
+        try {
+          ctl = new AbortController();
+          tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 600000);
+        } catch (_) {}
+        fetch('/api/memoria-calculo/atualizar-calculo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ id_precainfosnew: idPrecainfosnewSelecionado }),
+          signal: ctl ? ctl.signal : undefined
+        })
+          .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
+          .then(function (o) {
+            if (o.d && o.d.ok) {
+              setMsg((o.d.message) ? o.d.message : 'Cálculo actualizado com sucesso.', false);
+              setTimeout(function () { doSearch(); }, 500);
+            } else {
+              setMsg((o.d && o.d.error) ? o.d.error : 'Falha ao actualizar o cálculo.', true);
+            }
+          })
+          .catch(function (e) {
+            if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
+              setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
+              return;
+            }
+            setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
+          })
+          .finally(function () {
+            if (tmr) clearTimeout(tmr);
+            btnAtualizarCalculo.disabled = false;
+            btnAtualizarCalculo.textContent = prev;
+          });
+      });
+    }
   })();
   </script>
 </body>

@@ -75,7 +75,7 @@ app = Flask(
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
-app.secret_key = "eda_diario_secret"
+app.secret_key = "plataforma_central_secret"
 # Evita colidir com a sessão da plataforma quando o cookie é partilhado no mesmo host
 app.config.setdefault("SESSION_COOKIE_NAME", "eda_session")
 
@@ -202,7 +202,6 @@ def rodar_etapa1():
                 caminho_p2                  = str(p_p2),
                 caminho_saida_intermediaria = str(RESULTADOS / "INTERMEDIARIA.xlsx"),
                 caminho_csv_nao_encontrados = str(RESULTADOS / "cpfs_nao_encontrados_p2.csv"),
-                caminho_blacklist_txt       = str(BASE_DIR / "blacklist.txt"),
                 modelo                      = modelo,
             )
             _log("[OK] Etapa 1 concluida com sucesso.")
@@ -243,7 +242,6 @@ def rodar_etapa2():
                 caminho_intermediaria = str(p_intermediaria),
                 caminho_p3            = str(p_p3),
                 caminho_saida_final   = str(caminho_final),
-                caminho_blacklist_txt = str(BASE_DIR / "blacklist.txt"),
             )
             _log("[OK] Etapa 2 concluida com sucesso.")
         except Exception as exc:
@@ -323,6 +321,9 @@ def blacklist_adicionar():
 
     if not tipo or not valor:
         flash("Tipo e valor sao obrigatorios.", "error")
+        return redirect(url_for("blacklist"))
+    if tipo not in {"CPF", "NOME", "TELEFONE", "EMAIL"}:
+        flash("Tipo invalido. Use CPF, NOME, TELEFONE ou EMAIL.", "error")
         return redirect(url_for("blacklist"))
 
     criar_banco_e_tabelas()
@@ -521,10 +522,10 @@ def exportar_gerar():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def abrir_browser():
-    webbrowser.open("http://127.0.0.1:5000")
+    webbrowser.open("http://127.0.0.1:8002")
 
 
 if __name__ == "__main__":
     criar_banco_e_tabelas()
     threading.Timer(1.2, abrir_browser).start()
-    app.run(debug=False, port=5000)
+    app.run(debug=False, port=8002)

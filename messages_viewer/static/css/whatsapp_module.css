@@ -1071,6 +1071,28 @@ body.platform-body #app-toast {
   font-size: 14px;
   color: var(--muted);
 }
+.memoria-btn-atualizar-calculo {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #c41e1e;
+  background: #fff;
+  border: 1px solid #c41e1e;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.memoria-btn-atualizar-calculo:hover:not(:disabled) {
+  background: rgba(196, 30, 30, 0.08);
+}
+.memoria-btn-atualizar-calculo:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft, rgba(196, 30, 30, 0.25));
+}
+.memoria-btn-atualizar-calculo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .memoria-search {
   max-width: 640px;
