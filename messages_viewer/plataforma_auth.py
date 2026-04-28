@@ -244,6 +244,7 @@ def _endpoint_to_tab() -> str | None:
         "get_messages": "conversas",
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
+        "api_memoria_controle_coleta_status": "memoria_calculo",
     }
     t = m.get(ep)
     if t is not None:

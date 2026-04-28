@@ -204,6 +204,58 @@ def _memoria_row_to_api(row: dict) -> dict:
     return out
 
 
+def _flask_mysql_config() -> dict | None:
+    """
+    Conexão MySQL do banco da plataforma (ex.: flaskdb), onde existem tabelas como
+    `precainfosnew` e `controle_coleta_TJSP`.
+
+    Env:
+    - FLASK_MYSQL_HOST / FLASK_MYSQL_PORT / FLASK_MYSQL_DATABASE / FLASK_MYSQL_USER / FLASK_MYSQL_PASSWORD
+    - (opcional) FLASK_MYSQL_CONNECT_TIMEOUT
+    """
+    name = (os.getenv("FLASK_MYSQL_DATABASE") or "").strip().strip("'\"")
+    if not name:
+        return None
+    host = (os.getenv("FLASK_MYSQL_HOST") or "127.0.0.1").strip().strip("'\"")
+    user = (os.getenv("FLASK_MYSQL_USER") or "root").strip().strip("'\"")
+    password = (os.getenv("FLASK_MYSQL_PASSWORD") or "").strip().strip("'\"")
+    try:
+        port = int(str(os.getenv("FLASK_MYSQL_PORT") or "3306").strip())
+    except ValueError:
+        port = 3306
+    raw_to = (os.getenv("FLASK_MYSQL_CONNECT_TIMEOUT") or "10").strip()
+    try:
+        connection_timeout = int(raw_to)
+    except ValueError:
+        connection_timeout = 10
+    if connection_timeout < 1:
+        connection_timeout = 10
+    if connection_timeout > 30:
+        connection_timeout = 30
+    return {
+        "host": host,
+        "port": port,
+        "database": name,
+        "user": user,
+        "password": password,
+        "connection_timeout": connection_timeout,
+    }
+
+
+def _pick_field(fields: set[str], *candidates: str) -> str | None:
+    """Escolhe o 1º campo existente (case-insensitive)."""
+    if not fields:
+        return None
+    lc = {f.lower(): f for f in fields}
+    for c in candidates:
+        if c in fields:
+            return c
+        k = c.lower()
+        if k in lc:
+            return lc[k]
+    return None
+
+
 def _bloquear_calculo_mes_atual_enabled() -> bool:
     """
     Flag simples para testes.
@@ -559,6 +611,95 @@ def api_memoria_atualizar_calculo():
     if code in (200, 400, 403, 409, 500):
         return jsonify(out), code
     return jsonify(out), 502
+
+
+@app.route("/api/memoria-calculo/controle-coleta-status")
+def api_memoria_controle_coleta_status():
+    """
+    Consulta `controle_coleta_TJSP` no MySQL do flaskdb (FLASK_MYSQL_*),
+    por `numero_de_processo` e `numero_do_incidente`, retornando o `status`
+    (quando existir).
+    """
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    if not proc:
+        return jsonify({"ok": False, "error": "Obrigatório: numero_de_processo."}), 400
+
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return (
+            jsonify({"ok": False, "error": "MySQL do flaskdb não configurado (FLASK_MYSQL_*)."}),
+            503,
+        )
+    try:
+        conn = mysql.connector.connect(**cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci")
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'controle_coleta_TJSP'")
+        if not cur.fetchone():
+            return jsonify({"ok": True, "found": False, "status": None, "error": None})
+
+        cur.execute("SHOW COLUMNS FROM `controle_coleta_TJSP`")
+        raw_cols = cur.fetchall() or []
+        fields: set[str] = set()
+        for r in raw_cols:
+            if isinstance(r, dict):
+                nm = r.get("Field") or r.get("field")
+                if nm:
+                    fields.add(str(nm))
+            else:
+                fields.add(str(r[0]))
+
+        f_proc = _pick_field(fields, "numero_de_processo", "Numero_de_processo", "processo", "Processo")
+        f_inc = _pick_field(
+            fields,
+            "numero_do_incidente",
+            "Numero_do_incidente",
+            "numero_de_incidente",
+            "Numero_de_incidente",
+            "incidente",
+            "Incidente",
+        )
+        f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
+        if not f_proc or not f_status:
+            return jsonify({"ok": True, "found": False, "status": None, "error": None})
+
+        if f_inc:
+            cur.execute(
+                f"""
+                SELECT `{f_status}` AS status
+                FROM controle_coleta_TJSP
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                ORDER BY 1 DESC
+                LIMIT 1
+                """,
+                (proc, inc),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT `{f_status}` AS status
+                FROM controle_coleta_TJSP
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                ORDER BY 1 DESC
+                LIMIT 1
+                """,
+                (proc,),
+            )
+        row = cur.fetchone() or {}
+        status = row.get("status")
+        return jsonify({"ok": True, "found": bool(status is not None), "status": status})
+    except mysql.connector.Error as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────

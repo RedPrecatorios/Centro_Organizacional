@@ -194,6 +194,95 @@
     </main>
   </div>
 
+  <div class="memoria-modal-overlay" id="memoria-modal" hidden>
+    <div class="memoria-modal" role="dialog" aria-modal="false" aria-labelledby="memoria-modal-title">
+      <div class="memoria-modal-top">
+        <div class="memoria-modal-title" id="memoria-modal-title">Consulta</div>
+        <button type="button" class="memoria-modal-x" id="memoria-modal-x" aria-label="Fechar">×</button>
+      </div>
+      <div class="memoria-modal-body">
+        <div class="spin memoria-modal-spin" id="memoria-modal-spin" aria-hidden="true"></div>
+        <div class="memoria-modal-text" id="memoria-modal-text"></div>
+      </div>
+      <div class="memoria-modal-actions">
+        <button type="button" class="memoria-btn-buscar" id="memoria-modal-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .memoria-modal-overlay[hidden]{ display:none !important; }
+    .memoria-modal-overlay{
+      position:fixed;
+      inset:0;
+      /* não bloqueia a UI; só o painel recebe cliques */
+      pointer-events: none;
+      background: transparent;
+      display:flex;
+      align-items:flex-start;
+      justify-content:flex-end;
+      z-index: 260;
+      padding: 18px;
+    }
+    .memoria-modal{
+      pointer-events: auto;
+      width: min(520px, calc(100vw - 36px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow);
+      color: var(--text);
+    }
+    .memoria-modal-top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .memoria-modal-title{
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .memoria-modal-x{
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+    }
+    .memoria-modal-x:hover{ color: var(--text); }
+    .memoria-modal-body{
+      padding: 16px;
+      display:flex;
+      gap: 12px;
+      align-items:flex-start;
+    }
+    .memoria-modal-spin{
+      width: 18px;
+      height: 18px;
+      margin-top: 2px;
+      flex: 0 0 auto;
+    }
+    .memoria-modal-text{
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .memoria-modal-actions{
+      padding: 0 16px 16px;
+      display:flex;
+      justify-content:flex-end;
+      gap: 10px;
+    }
+  </style>
+
   <script>
   (function () {
     var memoriaConfigured = {{ memoria_mysql_configured | tojson }};
@@ -202,6 +291,7 @@
     var lastResults = [];
     var idPrecainfosnewSelecionado = null;
     var temRegistoCarregado = false;
+    var currentRow = null;
     var base = { principalBruto: 0, juros: 0, descSaudePrev: 0, descIR: 0 };
     var TAXA_PROPOSTA = [
       [0.35, 0.31],
@@ -229,6 +319,35 @@
     var metaInc = document.getElementById('memoria-meta-inc');
     var metaAtual = document.getElementById('memoria-meta-atual');
     var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
+    var modal = document.getElementById('memoria-modal');
+    var modalText = document.getElementById('memoria-modal-text');
+    var modalSpin = document.getElementById('memoria-modal-spin');
+    var modalClose = document.getElementById('memoria-modal-close');
+    var modalX = document.getElementById('memoria-modal-x');
+
+    var modalAutoHideT = null;
+    function showModal(msg, isLoading) {
+      if (!modal) return;
+      if (modalText) modalText.textContent = msg || '';
+      if (modalSpin) modalSpin.style.display = isLoading ? '' : 'none';
+      modal.removeAttribute('hidden');
+      if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
+      if (!isLoading) {
+        modalAutoHideT = setTimeout(function () { hideModal(); }, 7000);
+      }
+    }
+    function hideModal() {
+      if (!modal) return;
+      modal.setAttribute('hidden', '');
+      if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
+    }
+    function bindModalClose() {
+      if (modalClose) modalClose.addEventListener('click', hideModal);
+      if (modalX) modalX.addEventListener('click', hideModal);
+      document.addEventListener('keydown', function (e) {
+        if (e && e.key === 'Escape') hideModal();
+      });
+    }
 
     function formatUltimaAtualizacao(v) {
       if (v == null || v === '') return '—';
@@ -329,6 +448,7 @@
     function resetMemoriaVazia() {
       temRegistoCarregado = false;
       idPrecainfosnewSelecionado = null;
+      currentRow = null;
       base.principalBruto = 0;
       base.juros = 0;
       base.descSaudePrev = 0;
@@ -358,6 +478,7 @@
     function applyRow(r) {
       if (!r) return;
       temRegistoCarregado = true;
+      currentRow = r;
       idPrecainfosnewSelecionado = null;
       if (r.id_precainfosnew != null && r.id_precainfosnew !== '') {
         var p = parseInt(r.id_precainfosnew, 10);
@@ -563,7 +684,37 @@
               setMsg((o.d.message) ? o.d.message : 'Cálculo actualizado com sucesso.', false);
               setTimeout(function () { doSearch(); }, 500);
             } else {
-              setMsg((o.d && o.d.error) ? o.d.error : 'Falha ao actualizar o cálculo.', true);
+              var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao actualizar o cálculo.';
+              setMsg(err, true);
+
+              // Se não existe em precainfosnew, tenta buscar status no controle_coleta_TJSP
+              // usando processo/incidente do registo carregado (memoria_calculo).
+              if (err.indexOf('Não existe registo com id') >= 0 && currentRow && currentRow.numero_de_processo) {
+                try {
+                  var u = new URLSearchParams();
+                  u.set('numero_de_processo', String(currentRow.numero_de_processo || '').trim());
+                  u.set('numero_do_incidente', String(currentRow.numero_do_incidente || '').trim());
+                  showModal('Consultando controle_coleta_TJSP…', true);
+                  fetch('/api/memoria-calculo/controle-coleta-status?' + u.toString())
+                    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                    .then(function (o2) {
+                      if (!o2.ok || !o2.d || !o2.d.ok) {
+                        showModal(err + ' | Não foi possível consultar controle_coleta_TJSP.', false);
+                        return;
+                      }
+                      if (o2.d.found) {
+                        showModal('controle_coleta_TJSP.status: ' + String(o2.d.status), false);
+                        setMsg(err + ' | controle_coleta_TJSP.status: ' + String(o2.d.status), true);
+                      } else {
+                        showModal('controle_coleta_TJSP: não localizado.', false);
+                        setMsg(err + ' | controle_coleta_TJSP: não localizado.', true);
+                      }
+                    })
+                    .catch(function () {
+                      showModal(err + ' | Erro de rede ao consultar controle_coleta_TJSP.', false);
+                    });
+                } catch (_) {}
+              }
             }
           })
           .catch(function (e) {
@@ -580,6 +731,9 @@
           });
       });
     }
+    // Garantia: nunca iniciar aberto (cache/HTML antigo)
+    hideModal();
+    bindModalClose();
   })();
   </script>
 </body>
