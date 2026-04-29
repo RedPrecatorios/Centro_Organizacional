@@ -589,12 +589,45 @@
           }
           lastResults = o.d.results || [];
           if (lastResults.length === 0) {
-            setMsg(
-              porNome
-                ? 'Nenhum registo com esse requerente. Memória zerada.'
-                : 'Nenhum registo com este processo e incidente. Memória zerada.',
-              false
-            );
+            // Nada em memoria_calculo nem em precainfosnew: se for por processo/incidente,
+            // tenta mostrar status do controle_coleta_TJSP (quando existir).
+            if (!porNome) {
+              try {
+                var p2 = (inputProc && inputProc.value) ? String(inputProc.value).trim() : '';
+                var i2 = (inputInc && inputInc.value) ? String(inputInc.value).trim() : '';
+                if (p2) {
+                  showModal('Consultando controle_coleta_TJSP…', true);
+                  var u2 = new URLSearchParams();
+                  u2.set('numero_de_processo', p2);
+                  u2.set('numero_do_incidente', i2);
+                  fetch('/api/memoria-calculo/controle-coleta-status?' + u2.toString())
+                    .then(function (r2) { return r2.json().then(function (d2) { return { ok: r2.ok, d: d2 }; }); })
+                    .then(function (o2) {
+                      resetMemoriaVazia();
+                      if (!o2.ok || !o2.d || !o2.d.ok) {
+                        hideModal();
+                        setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
+                        return;
+                      }
+                      if (o2.d.found) {
+                        showModal('controle_coleta_TJSP.status: ' + String(o2.d.status), false);
+                        setMsg('Não localizado na memória/preca. Status no controle_coleta_TJSP: ' + String(o2.d.status), false);
+                      } else {
+                        showModal('controle_coleta_TJSP: não localizado.', false);
+                        setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
+                      }
+                    })
+                    .catch(function () {
+                      hideModal();
+                      resetMemoriaVazia();
+                      setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
+                    });
+                  return;
+                }
+              } catch (_) {}
+            }
+
+            setMsg(porNome ? 'Nenhum registo com esse requerente. Memória zerada.' : 'Nenhum registo com este processo e incidente. Memória zerada.', false);
             resetMemoriaVazia();
             return;
           }
