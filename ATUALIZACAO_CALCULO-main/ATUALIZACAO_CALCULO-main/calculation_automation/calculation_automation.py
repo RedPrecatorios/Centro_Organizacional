@@ -399,7 +399,8 @@ class CalculationAutomation:
                 str(self.main_dict["Requerente"]).strip(),
             )
             requerente = re.sub(r"\s+", " ", requerente)
-            output_name = f"{proc_id}_{requerente}_{current_date}.xlsm"
+            # Por enquanto, geramos apenas .xlsx (melhor compatibilidade com Google Sheets).
+            output_name = f"{proc_id}_{requerente}_{current_date}.xlsx"
             _calc_dir = os.path.dirname(os.path.abspath(__file__))
             output_dir = os.path.join(_calc_dir, "OUTPUT")
             os.makedirs(output_dir, exist_ok=True)
@@ -427,16 +428,16 @@ class CalculationAutomation:
             self._wb = None
             self._ws = None
 
+            # Saída é .xlsx, mas precisamos materializar fórmulas (O307–O313) antes de ler.
+            # O LibreOffice headless abre e recalcula, exportando um .xlsx “com valores”.
             recalc_xlsx, recalc_tmpdir = libreoffice_recalc_export_xlsx(self.output_path)
             read_path = (recalc_xlsx or self.output_path).strip()
             if memoria_recalc_wanted() and not recalc_xlsx:
                 raise RuntimeError(
-                    "O LibreOffice não produziu ficheiro .xlsx a partir do .xlsm — sem isso, "
-                    "O307:O313 ficam com 0,00 indevido (células com fórmula sem materializar) e a BD "
-                    "ficava mal preenchida. "
+                    "O LibreOffice não produziu ficheiro .xlsx recalculado — sem isso, "
+                    "O307:O313 podem ficar vazios/errados e a BD ficaria mal preenchida. "
                     "Resolva: (1) instale, ex.: `sudo apt install -y libreoffice-calc`; "
-                    "(2) teste: `sudo -u www-data soffice --version` e "
-                    "`sudo -u www-data soffice --headless --convert-to xlsx --outdir /tmp` num .xlsm; "
+                    "(2) teste `sudo -u www-data soffice --version`; "
                     "(3) no .env do projecto, se preciso, `MEMORIA_LIBREOFFICE_BIN=/usr/bin/soffice` "
                     "(ou o caminho de `command -v soffice`); (4) reinicie `atualizacao-calculo-api`. "
                     "Com `www-data`, defina também `MEMORIA_LIBREOFFICE_HOME` para um directório gravável "
@@ -505,7 +506,8 @@ class CalculationAutomation:
         t_edit_start = time.time()
         t_open = time.time()
         self._wb = load_workbook(
-            self.main_file_path, keep_vba=True, data_only=False, read_only=False
+            # Template é .xlsm; manter VBA não é necessário quando a saída é .xlsx.
+            self.main_file_path, keep_vba=False, data_only=False, read_only=False
         )
         self._ws = self._get_sheet(self._wb)
         print(f"\n\t[T] Template aberto (openpyxl): {time.time() - t_open:.2f}s")

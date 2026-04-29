@@ -219,8 +219,8 @@
       pointer-events: none;
       background: transparent;
       display:flex;
-      align-items:flex-start;
-      justify-content:flex-end;
+      align-items:center;
+      justify-content:center;
       z-index: 260;
       padding: 18px;
     }
@@ -292,6 +292,7 @@
     var idPrecainfosnewSelecionado = null;
     var temRegistoCarregado = false;
     var currentRow = null;
+    var autoUpdateDone = {};
     var base = { principalBruto: 0, juros: 0, descSaudePrev: 0, descIR: 0 };
     var TAXA_PROPOSTA = [
       [0.35, 0.31],
@@ -326,6 +327,7 @@
     var modalX = document.getElementById('memoria-modal-x');
 
     var modalAutoHideT = null;
+    var lastModalKind = '';
     function showModal(msg, isLoading) {
       if (!modal) return;
       if (modalText) modalText.textContent = msg || '';
@@ -340,6 +342,7 @@
       if (!modal) return;
       modal.setAttribute('hidden', '');
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
+      lastModalKind = '';
     }
     function bindModalClose() {
       if (modalClose) modalClose.addEventListener('click', hideModal);
@@ -498,7 +501,11 @@
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
       if (r.source === 'precainfosnew') {
-        setMsg('Caso encontrado no precainfosnew. A gerar memória automaticamente…', false);
+        if (r.auto_update) {
+          setMsg('Caso encontrado no precainfosnew. A gerar memória automaticamente (pode levar 1–3 minutos)…', false);
+        } else {
+          setMsg('Caso encontrado no precainfosnew. Clique em “Atualizar Cálculo” para gerar a memória.', false);
+        }
       } else {
         setMsg('Memória carregada (id ' + (r.id != null ? r.id : '') + ').', false);
       }
@@ -506,7 +513,11 @@
 
       // Fallback automático: quando veio do precainfosnew e foi match único por processo/incidente,
       // dispara o cálculo para preencher memoria_calculo.
-      if (r.auto_update && btnAtualizarCalculo && !btnAtualizarCalculo.disabled) {
+      var k = (r && r.id_precainfosnew != null) ? String(r.id_precainfosnew) : '';
+      if (r.auto_update && k && !autoUpdateDone[k] && btnAtualizarCalculo && !btnAtualizarCalculo.disabled) {
+        autoUpdateDone[k] = true;
+        lastModalKind = 'auto_update';
+        showModal('Gerando cálculo automaticamente (1–3 minutos)…', true);
         setTimeout(function () {
           try { btnAtualizarCalculo.click(); } catch (_) {}
         }, 350);
@@ -694,10 +705,16 @@
           .then(function (o) {
             if (o.d && o.d.ok) {
               setMsg((o.d.message) ? o.d.message : 'Cálculo actualizado com sucesso.', false);
+              if (lastModalKind === 'auto_update') {
+                showModal('Cálculo actualizado. Atualizando memória na tela…', false);
+              }
               setTimeout(function () { doSearch(); }, 500);
             } else {
               var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao actualizar o cálculo.';
               setMsg(err, true);
+              if (lastModalKind === 'auto_update') {
+                showModal('Falha ao gerar cálculo automaticamente. Verifique a mensagem na tela.', false);
+              }
 
               // Se não existe em precainfosnew, tenta buscar status no controle_coleta_TJSP
               // usando processo/incidente do registo carregado (memoria_calculo).
@@ -732,14 +749,27 @@
           .catch(function (e) {
             if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
               setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
+              if (lastModalKind === 'auto_update') {
+                showModal('Tempo excedido ao gerar cálculo automaticamente.', false);
+              }
               return;
             }
             setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
+            if (lastModalKind === 'auto_update') {
+              showModal('Erro de rede ao gerar cálculo automaticamente.', false);
+            }
           })
           .finally(function () {
             if (tmr) clearTimeout(tmr);
             btnAtualizarCalculo.disabled = false;
             btnAtualizarCalculo.textContent = prev;
+            if (lastModalKind === 'auto_update') {
+              // Se ainda estiver em loading, fecha para não ficar preso.
+              // (Quando showModal(..., false) foi chamado acima, auto-hide já cuida.)
+              if (modal && !modal.hasAttribute('hidden') && modalSpin && modalSpin.style.display !== 'none') {
+                hideModal();
+              }
+            }
           });
       });
     }

@@ -650,8 +650,8 @@ def api_memoria_buscar():
                     "total_liquido": 0,
                     "ultima_atualizacao": None,
                     "source": "precainfosnew",
-                    # auto-run apenas quando for processo/incidente e der match único
-                    "auto_update": bool(use_process and len(rows) == 1),
+                    # auto-run apenas quando der match único e houver id válido
+                    "auto_update": bool((len(rows) == 1) and (pid is not None)),
                 }
             )
         return jsonify(

@@ -191,6 +191,37 @@ def _mimetype(path: str) -> str:
     return t or "application/octet-stream"
 
 
+def _update_existing_enabled() -> bool:
+    """
+    Se activo, quando já existir um ficheiro com o mesmo nome na pasta destino,
+    faz overwrite via `files.update` em vez de criar um novo (evita duplicados).
+    """
+    raw = (os.getenv("GOOGLE_DRIVE_UPDATE_EXISTING") or "1").strip()
+    v = (raw.split("#", 1)[0].strip().split() or ["1"])[0].lower()
+    return v not in ("0", "false", "no", "off", "disabled", "nao", "não")
+
+
+def _find_existing_file_id(service: Any, *, parent_id: str, name: str) -> str | None:
+    shared_drive_id = _shared_drive_id_from_env()
+    safe_name = name.replace("'", "\\'")
+    q = f"'{parent_id}' in parents and name='{safe_name}' and trashed=false"
+    kwargs: dict[str, Any] = {
+        "q": q,
+        "fields": "files(id, name)",
+        "pageSize": 5,
+        "supportsAllDrives": True,
+        "includeItemsFromAllDrives": True,
+    }
+    if shared_drive_id:
+        kwargs["driveId"] = shared_drive_id
+        kwargs["corpora"] = "drive"
+    resp = service.files().list(**kwargs).execute()
+    files = resp.get("files") or []
+    if not files:
+        return None
+    return str(files[0].get("id"))
+
+
 def upload_saved_spreadsheet(file_path: str) -> Optional[str]:
     """
     Sobe o ficheiro (ex. ``.xlsm``) para a pasta configurada. Devolve ``webViewLink`` ou
@@ -237,23 +268,39 @@ def _upload_impl(file_path: str, parent_folder_id: str) -> str:
             dest_parent = parent_folder_id
     else:
         print("\n[google_drive] Pasta do dia desactivada; a enviar para parent.\n")
-    body: dict[str, Any] = {
-        "name": name,
-        "parents": [dest_parent],
-    }
-    media = MediaFileUpload(
-        file_path, mimetype=_mimetype(file_path), resumable=True
-    )
-    created = (
-        service.files()
-        .create(
-            body=body,
-            media_body=media,
-            fields="id, name, webViewLink, webContentLink",
-            supportsAllDrives=True,
+    body: dict[str, Any] = {"name": name, "parents": [dest_parent]}
+    media = MediaFileUpload(file_path, mimetype=_mimetype(file_path), resumable=True)
+
+    existing_id = None
+    if _update_existing_enabled():
+        try:
+            existing_id = _find_existing_file_id(service, parent_id=dest_parent, name=name)
+        except Exception:
+            existing_id = None
+
+    if existing_id:
+        created = (
+            service.files()
+            .update(
+                fileId=existing_id,
+                media_body=media,
+                fields="id, name, webViewLink, webContentLink",
+                supportsAllDrives=True,
+            )
+            .execute()
         )
-        .execute()
-    )
+        print(f"\n[google_drive] Overwrite: {name!r} (id={existing_id})\n")
+    else:
+        created = (
+            service.files()
+            .create(
+                body=body,
+                media_body=media,
+                fields="id, name, webViewLink, webContentLink",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
     link = created.get("webViewLink") or created.get("webContentLink")
     out = f"{created.get('id')}" if not link else link
     print(
