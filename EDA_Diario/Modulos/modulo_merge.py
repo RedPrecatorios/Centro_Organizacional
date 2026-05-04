@@ -13,6 +13,7 @@ Enriquecimento em duas etapas — mesmo fluxo para prc_tjsp, prc_cmp e prc_imp:
 """
 import os
 import re
+import unicodedata
 import pandas as pd
 
 
@@ -27,7 +28,11 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from modulo_planilha_principal import processar_planilha_principal
-from modulo_enriquecimento_contatos import processar_enriquecimento_contatos
+from modulo_enriquecimento_contatos import (
+    COLUNA_CPF as P2_COL_CPF,
+    COLUNA_NOME as P2_COL_NOME,
+    processar_enriquecimento_contatos,
+)
 from modulo_enriquecimento_relacionados import processar_enriquecimento_relacionados
 from modulo_banco import (
     criar_banco_e_tabelas, registrar_execucao, salvar_processos,
@@ -79,6 +84,34 @@ def _normalizar_cpf(cpf) -> str:
     return dig
 
 
+def _normalizar_nome_cruzamento(nome) -> str:
+    """
+    Nome canonico para cruzamento P2-so-NOME ↔ Requerente: maiúsculas, sem acentos,
+    espacos colapsados. Vazio se invalido.
+    """
+    if nome is None or (isinstance(nome, float) and pd.isna(nome)):
+        return ""
+    if isinstance(nome, bool):
+        return ""
+    s = str(nome).strip()
+    if not s or s.lower() in ("nan", "none", "nat"):
+        return ""
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return " ".join(s.upper().split())
+
+
+def _coluna_nome_na_principal(df: pd.DataFrame) -> str:
+    """Coluna de nome do requerente (ou sinonimo) na planilha principal."""
+    for cand in ("Requerente", "NOME", "Nome"):
+        if cand in df.columns:
+            return cand
+    raise ValueError(
+        "Para cruzamento por nome (planilha 2 sem CPF/CNPJ) a principal precisa de "
+        f"alguma das colunas: Requerente, NOME ou Nome. Presentes: {list(df.columns)!r}"
+    )
+
+
 def _linha_ja_enriquecida_p2(val) -> bool:
     """Coluna _ENRIQUECIDO apos regravar a intermediaria (bool, 0/1, str, etc.)."""
     if val is None:
@@ -123,17 +156,20 @@ def _coluna_cpf_cruzamento_enriquecimento(
 
 
 def _coletar_contatos(
-    df: pd.DataFrame, cpf_normalizado: str, col_cpf: str
+    df: pd.DataFrame, chave_normalizada: str, modo_merge_p2: str
 ) -> tuple[list[str], list[str]]:
     """
-    Retorna (telefones, emails) nao vazios de um CPF no DataFrame de enriquecimento.
-    Separa automaticamente colunas de email das de telefone pelo nome da coluna.
+    Retorna (telefones, emails) nao vazios para uma chave na planilha de enriquecimento.
+
+    modo_merge_p2: ``\"cpf\"`` usa ``_CPF_NORM``; ``\"nome\"`` usa ``_NOME_NORM``.
     """
-    linhas = df[df["_CPF_NORM"] == cpf_normalizado]
+    col_idx = "_CPF_NORM" if modo_merge_p2 == "cpf" else "_NOME_NORM"
+    linhas = df[df[col_idx] == chave_normalizada]
     if linhas.empty:
         return [], []
 
-    colunas_dados = [c for c in df.columns if c not in (col_cpf, "NOME", "_CPF_NORM")]
+    skip = {P2_COL_NOME, P2_COL_CPF, "_CPF_NORM", "_NOME_NORM"}
+    colunas_dados = [c for c in df.columns if c not in skip]
     telefones, emails = [], []
 
     for _, row in linhas.iterrows():
@@ -372,26 +408,46 @@ def etapa1_enriquecer_com_p2(
     df_main = processar_planilha_principal(caminho_principal, modelo=modelo)
 
     print("\n[2/3] Processando planilha 2 (contatos)...")
-    df_p2 = processar_enriquecimento_contatos(caminho_p2)
+    df_p2, modo_merge_p2 = processar_enriquecimento_contatos(caminho_p2)
 
     col_cpf_x = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo)
-    print(
-        f"\n[3/3] Cruzando CPFs com planilha 2 (chave: {col_cpf_x})..."
-    )
-    if col_cpf_x not in df_main.columns:
-        raise KeyError(
-            f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). Colunas: {list(df_main.columns)}"
+    if modo_merge_p2 == "cpf":
+        print(
+            f"\n[3/3] Cruzando com planilha 2 por documento (CPF principal: {col_cpf_x!r})..."
         )
-    df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
-    df_p2["_CPF_NORM"]   = df_p2["CPF/CNPJ"].apply(_normalizar_cpf)
+        if col_cpf_x not in df_main.columns:
+            raise KeyError(
+                f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). Colunas: {list(df_main.columns)}"
+            )
+        df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
+        df_p2["_CPF_NORM"] = df_p2[P2_COL_CPF].apply(_normalizar_cpf)
+    else:
+        col_nom = _coluna_nome_na_principal(df_main)
+        print(
+            f"\n[3/3] Cruzando com planilha 2 por NOME ({col_nom!r} × "
+            f"{P2_COL_NOME!r})..."
+        )
+        if col_cpf_x not in df_main.columns:
+            raise KeyError(
+                f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). "
+                "Continua necessaria na principal mesmo no cruzamento por nome "
+                "(CSV de nao encontrados e etapas seguintes)."
+                f" Colunas: {list(df_main.columns)}"
+            )
+        df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
+        df_main["_NOME_MERGE"] = df_main[col_nom].apply(_normalizar_nome_cruzamento)
+        df_p2["_NOME_NORM"] = df_p2[P2_COL_NOME].apply(_normalizar_nome_cruzamento)
 
     registros_tel    = []
     registros_email  = []
     cpfs_nao_encontrados = []
 
     for _, row in df_main.iterrows():
-        cpf = row["_CPF_NORM"]
-        fones, emails = _coletar_contatos(df_p2, cpf, "CPF/CNPJ")
+        if modo_merge_p2 == "cpf":
+            chave = row["_CPF_NORM"]
+        else:
+            chave = row["_NOME_MERGE"]
+        fones, emails = _coletar_contatos(df_p2, chave, modo_merge_p2)
 
         if fones or emails:
             registros_tel.append(_deduplicar(fones, is_red=True))
@@ -404,7 +460,10 @@ def etapa1_enriquecer_com_p2(
     pd.DataFrame(cpfs_nao_encontrados).to_csv(caminho_csv_nao_encontrados, index=False)
 
     df_main[COL_ENRIQUECIDO] = [bool(t or e) for t, e in zip(registros_tel, registros_email)]
-    df_main.drop(columns=["_CPF_NORM"], inplace=True)
+    _drop_aux = ["_CPF_NORM"]
+    if modo_merge_p2 == "nome":
+        _drop_aux.append("_NOME_MERGE")
+    df_main.drop(columns=_drop_aux, inplace=True)
 
     df_main, colunas_tel   = _preencher_colunas(df_main, registros_tel,   PREFIXO_TELEFONE)
     df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
@@ -508,7 +567,7 @@ def etapa2_enriquecer_com_p3(
         if _linha_ja_enriquecida_p2(row.get(COL_ENRIQUECIDO, False)):
             continue
 
-        fones, emails = _coletar_contatos(df_p3, row["_CPF_NORM"], "CPF")
+        fones, emails = _coletar_contatos(df_p3, row["_CPF_NORM"], "cpf")
         if fones or emails:
             registros_tel[pos]   = _deduplicar(fones,  is_red=False)
             registros_email[pos] = _deduplicar(emails, is_red=False)
@@ -523,6 +582,22 @@ def etapa2_enriquecer_com_p3(
 
     df_main, colunas_tel   = _preencher_colunas(df_main, registros_tel,   PREFIXO_TELEFONE)
     df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
+
+    # Metricas antes do cooldown (para o resumo final nao confundir 0 linhas com "sem dados")
+    n_pre_cd = len(df_main)
+    explosao_sms_pre_cd = sum(len(t) for t in registros_tel)
+    explosao_email_pre_cd = sum(len(e) for e in registros_email)
+    com_contato_pre_cd = sum(
+        1 for t, e in zip(registros_tel, registros_email) if t or e
+    )
+    enriquecidos_p2_pre_cd = sum(
+        1 for t, e in zip(registros_tel, registros_email)
+        if any(is_red for _, is_red in t + e)
+    )
+    enriquecidos_p3_pre_cd = sum(
+        1 for t, e in zip(registros_tel, registros_email)
+        if (t or e) and not any(is_red for _, is_red in t + e)
+    )
 
     # ── Cooldown — remove CPFs processados nos ultimos 14 dias ───────────────
     if _pular_cooldown_etapa2():
@@ -596,7 +671,7 @@ def etapa2_enriquecer_com_p3(
         if (t or e) and not any(is_red for _, is_red in t + e)
     )
 
-    taxa_enriquecimento = (total_enriquecidos / len(df_main) * 100) if len(df_main) else 0
+    taxa_enriquecimento = (total_enriquecidos / len(df_main) * 100) if len(df_main) else 0.0
 
     print(f"\n[OK] Planilha final salva em: {caminho_saida_final}")
 
@@ -607,24 +682,53 @@ def etapa2_enriquecer_com_p3(
     print(f"\n{sep}")
     print(f"  RESUMO DO PROCESSAMENTO DIARIO - {data}")
     print(sep)
-    print(f"  Total de registros          : {len(df_main)}")
-    print(f"  Enriquecidos (Lemitti P2)   : {enriquecidos_p2}")
-    print(f"  Enriquecidos (Assertiva P3) : {enriquecidos_p3_final}")
-    print(f"  Sem contato                 : {total_sem_contato}")
-    print(f"  Taxa de enriquecimento      : {taxa_enriquecimento:.1f}%")
+    print(f"  Linhas principais (pre-cooldown)     : {n_pre_cd}")
+    print(f"  Removidas por cooldown (< 14 dias) : {total_cooldown}")
+    print(f"  Linhas na planilha FINAL           : {len(df_main)}")
+    if len(df_main) == 0 and total_cooldown > 0:
+        print(
+            "  (*) Nenhuma linha exportada: todo o lote coincidiu com CPF ja "
+            "processado no periodo de cooldown da base."
+        )
+    elif len(df_main) == 0 and total_cooldown == 0:
+        print(
+            "  (*) Planilha vazia: verifique entrada/intermediaria (sem dados validos)."
+        )
+    print(f"  Com ao menos um contato (FINAL)   : {total_enriquecidos}")
+    if total_cooldown or n_pre_cd != len(df_main):
+        print(
+            f"  Com ao menos um contato (pre-CD)  : {com_contato_pre_cd} "
+            f"(referencia antes do cooldown)"
+        )
     print(f"  {div}")
-    print(f"  Cooldown (< 14 dias)        : {total_cooldown} removido(s)")
+    print(f"  Enriquecidos Lemitti P2 (FINAL)    : {enriquecidos_p2}")
+    print(f"  Enriquecidos Assertiva P3 (FINAL)  : {enriquecidos_p3_final}")
+    if total_cooldown or n_pre_cd != len(df_main):
+        print(f"  Enriquecidos P2 (pre-cooldown)     : {enriquecidos_p2_pre_cd}")
+        print(f"  Enriquecidos P3 (pre-cooldown)     : {enriquecidos_p3_pre_cd}")
+    print(f"  Sem contato na FINAL               : {total_sem_contato}")
+    print(f"  Taxa enriquecimento (sobre FINAL)  : {taxa_enriquecimento:.1f}%")
     print(f"  {div}")
-    print(f"  Linhas geradas - aba SMS    : {total_sms_gerados}")
-    print(f"  Linhas geradas - aba Emails : {total_email_gerado}")
+    print(f"  Linhas aba SMS (explosao, FINAL)   : {total_sms_gerados}")
+    print(f"  Linhas aba Emails (explosao, FINAL): {total_email_gerado}")
+    if total_cooldown or explosao_sms_pre_cd != total_sms_gerados:
+        print(
+            f"  Referencia explosao SMS (pre-CD)   : {explosao_sms_pre_cd} linhas"
+        )
+    if total_cooldown or explosao_email_pre_cd != total_email_gerado:
+        print(
+            f"  Referencia explosao Email (pre-CD) : {explosao_email_pre_cd} linhas"
+        )
     print(f"  {div}")
-    print(f"  Blacklist aplicada")
-    print(f"    Pessoas bloqueadas        : {p_bloq}")
-    print(f"    Telefones bloqueados      : {t_bloq}")
-    print(f"    Emails bloqueados         : {e_bloq}")
+    print("  Blacklist (MySQL EDA_MYSQL_DATABASE)")
+    print(f"    Pessoas bloqueadas           : {p_bloq}")
+    print(f"    Telefones bloqueados         : {t_bloq}")
+    print(f"    Emails bloqueados            : {e_bloq}")
     print(f"  {div}")
-    print(f"  Colunas de telefone         : {len(colunas_tel)}")
-    print(f"  Colunas de email            : {len(colunas_email)}")
+    print(f"  Colunas reservadas telefone    : {len(colunas_tel)}")
+    print(f"  Colunas reservadas email       : {len(colunas_email)}")
+    print("  (com planilha vazia, o Excel mantem a estrutura de colunas.)")
+    print(f"  {div}")
     print(f"  Vermelho = Lemitti (P2)     | Preto = Assertiva (P3)")
     print(f"{sep}\n")
 

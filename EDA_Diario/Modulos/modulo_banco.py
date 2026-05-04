@@ -3,6 +3,7 @@ from mysql.connector import MySQLConnection
 from datetime import datetime
 import os
 import pandas as pd
+import re
 
 from modulo_blacklist import normalizar_valor_para_blacklist
 
@@ -183,9 +184,11 @@ def carregar_blacklist() -> dict[str, set]:
             bl[tipo].add(nv)
 
     total = sum(len(v) for v in bl.values())
-    print(f"[BLACKLIST] {total} entradas ativas carregadas "
-          f"(CPF:{len(bl['CPF'])} | NOME:{len(bl['NOME'])} | "
-          f"TEL:{len(bl['TELEFONE'])} | EMAIL:{len(bl['EMAIL'])})")
+    print(
+        f"[BLACKLIST] {total} entradas ativas de `{DB_NAME}` "
+        f"(CPF:{len(bl['CPF'])} | NOME:{len(bl['NOME'])} | "
+        f"TEL:{len(bl['TELEFONE'])} | EMAIL:{len(bl['EMAIL'])})"
+    )
     return bl
 
 
@@ -411,14 +414,48 @@ def _val(row, col):
     return None if s in ("", "nan", "NaT", "None") else s
 
 
+def normalizar_cpf(valor) -> str:
+    """
+    Normaliza CPF para 11 digitos (somente numeros).
+    - Remove mascara (pontos/hifen/espacos).
+    - Trata casos comuns do Excel ('.0', notacao cientifica).
+    - Se vier com menos de 11 digitos, preenche com zeros a esquerda.
+    - Se vier com mais de 11, trunca para os 11 primeiros digitos.
+    """
+    if valor is None:
+        return ""
+
+    # Pandas/NumPy podem trazer NaN/NaT como float
+    try:
+        if pd.isna(valor):
+            return ""
+    except Exception:
+        pass
+
+    s = str(valor).strip()
+    if not s or s.lower() in ("nan", "nat", "none"):
+        return ""
+
+    digitos = "".join(re.findall(r"\d+", s))
+    if not digitos:
+        return ""
+
+    if len(digitos) < 11:
+        digitos = digitos.zfill(11)
+    elif len(digitos) > 11:
+        digitos = digitos[:11]
+
+    return digitos
+
+
 def _val_cpf_cadastro(row) -> str:
     """Chave alinhada ao P2/P3: com duas colunas CPF (CMP/IMP), preferir a segunda."""
     for col in ("CPF.1", "cpf.1"):
         if col in row.index:
             v = _val(row, col)
             if v:
-                return v
-    return _val(row, "CPF") or ""
+                return normalizar_cpf(v)
+    return normalizar_cpf(_val(row, "CPF") or "")
 
 
 def _data(row, col):
@@ -463,7 +500,7 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
         data_nasc       = _data(row, "Data_de_Nascimento")
         numero_processo = _val(row, "Numero_de_Processo") or ""
 
-        if not cpf or not numero_processo:
+        if not cpf or len(cpf) != 11 or not numero_processo:
             continue
 
         # ── Pessoa (upsert) — LAST_INSERT_ID(id) retorna o id mesmo no UPDATE ──
@@ -542,7 +579,7 @@ def salvar_contatos(
         cpf             = _val_cpf_cadastro(row)
         id_proc         = mapa_ids.get(numero_processo)
 
-        if not id_proc:
+        if not id_proc or not cpf or len(cpf) != 11:
             continue
 
         # ── Telefones ─────────────────────────────────────────────────────────
