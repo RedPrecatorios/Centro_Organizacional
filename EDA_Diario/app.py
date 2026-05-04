@@ -68,6 +68,7 @@ from modulo_banco import (
     adicionar_blacklist,
     conectar,
     exportar_por_periodo,
+    importar_blacklist_csv,
 )
 
 app = Flask(
@@ -78,6 +79,15 @@ app = Flask(
 app.secret_key = "plataforma_central_secret"
 # Evita colidir com a sessão da plataforma quando o cookie é partilhado no mesmo host
 app.config.setdefault("SESSION_COOKIE_NAME", "eda_session")
+app.config["MAX_CONTENT_LENGTH"] = max(
+    int(app.config.get("MAX_CONTENT_LENGTH") or 0), 25 * 1024 * 1024
+)
+
+
+@app.errorhandler(413)
+def _blacklist_upload_too_large(_exc=None):
+    flash("O ficheiro excedeu o limite de 25 MB.", "error")
+    return redirect(request.referrer or url_for("blacklist")), 413
 
 
 @app.context_processor
@@ -329,6 +339,65 @@ def blacklist_adicionar():
     criar_banco_e_tabelas()
     adicionar_blacklist(tipo, valor, motivo)
     flash(f"Adicionado à blacklist: [{tipo}] {valor}", "success")
+    return redirect(url_for("blacklist"))
+
+
+@app.route("/blacklist/importar_csv", methods=["POST"])
+def blacklist_importar_csv():
+    f = request.files.get("csv")
+    if f is None or f.filename.strip() == "":
+        flash("Selecione um ficheiro CSV.", "error")
+        return redirect(url_for("blacklist"))
+    nome = (f.filename or "").lower()
+    if not nome.endswith(".csv"):
+        flash("O ficheiro deve ter extensão .csv", "error")
+        return redirect(url_for("blacklist"))
+
+    criar_banco_e_tabelas()
+    buf = io.BytesIO(f.read())
+    try:
+        res = importar_blacklist_csv(buf)
+    except Exception as e:
+        flash(f"Erro ao ler o CSV: {e}", "error")
+        return redirect(url_for("blacklist"))
+
+    dbn = (os.getenv("EDA_MYSQL_DATABASE") or "plataforma_central").strip()
+
+    if not res.get("importados"):
+        if res.get("erros"):
+            for msg in res["erros"][:8]:
+                flash(msg, "error")
+        else:
+            flash(
+                "Nenhuma linha importada. Use colunas tipo e valor como na tabela blacklist; "
+                "tipos CPF, NOME, TELEFONE ou EMAIL.",
+                "warning",
+            )
+        return redirect(url_for("blacklist"))
+
+    ext = ""
+    ignore = res.get("colunas_ignoradas") or []
+    if ignore:
+        amostra = ", ".join(ignore[:12])
+        if len(ignore) > 12:
+            amostra += " …"
+        ext += f" Colunas extra ignoradas: {amostra}."
+
+    msg = (
+        f"CSV aplicado na base MySQL `{dbn}`: {res['importados']} linha(s) gravada(s) "
+        f"(upsert por tipo+valor)."
+    )
+    if res.get("ignorados"):
+        msg += f" {res['ignorados']} ignorada(s) (vazio ou tipo inválido)."
+    if res.get("pulados_ativo"):
+        msg += f" {res['pulados_ativo']} omitida(s) (ativo = 0 / falso)."
+    msg += ext
+    flash(msg, "success")
+
+    if res.get("erros"):
+        for msg_e in res["erros"][:8]:
+            flash(msg_e, "warning")
+
     return redirect(url_for("blacklist"))
 
 

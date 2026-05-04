@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import io
+from pathlib import Path
+
 import mysql.connector
 from mysql.connector import MySQLConnection
 from datetime import datetime
@@ -245,6 +250,175 @@ def adicionar_blacklist(tipo: str, valor: str, motivo: str = None) -> None:
     cur.close()
     conn.close()
     print(f"[BLACKLIST] Adicionado: tipo={tipo} | valor={valor}")
+
+
+_TIPOS_BL = frozenset({"CPF", "NOME", "TELEFONE", "EMAIL"})
+
+
+def _bl_csv_limpar_cell(v) -> str:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip()
+    if s.lower() in ("nan", "none", "nat"):
+        return ""
+    return s
+
+
+def _bl_csv_resolver_ativo(raw) -> tuple[bool | None, bool]:
+    """
+    Retorna (importar_linha?, pulou_explícito?)
+    Pulou_explícito: True quando ativo=false/0 (linha omitida pelo utilizador).
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return True, False
+    s = str(raw).strip().lower()
+    if s in ("", "1", "true", "t", "yes", "sim", "ativo"):
+        return True, False
+    if s in ("0", "false", "f", "no", "não", "nao", "inativo"):
+        return False, True
+    try:
+        n = float(s)
+        if n == 1:
+            return True, False
+        if n == 0:
+            return False, True
+    except ValueError:
+        pass
+    return True, False
+
+
+def _bl_csv_headers_map(columns: list) -> tuple[dict[str, str], list[str]]:
+    """
+    Associa cada coluna lógica (tipo/valor/motivo/ativo) ao nome original no CSV.
+    Colunas desconhecidas passam para avisos_ignorados (ex.: id, data_inclusao).
+    """
+    logic = {"tipo": None, "valor": None, "motivo": None, "ativo": None}
+    ignorar = {"id", "data_inclusao", "data_inclusão"}
+    avisos: list[str] = []
+    for c in columns:
+        orig = str(c).strip()
+        chave = orig.lower().replace(" ", "_")
+        if chave in ignorar:
+            continue
+        if chave == "tipo":
+            logic["tipo"] = orig
+        elif chave == "valor":
+            logic["valor"] = orig
+        elif chave == "motivo":
+            logic["motivo"] = orig
+        elif chave == "ativo":
+            logic["ativo"] = orig
+        else:
+            avisos.append(orig)
+    return logic, avisos
+
+
+def importar_blacklist_csv(
+    caminho_ou_buffer: str | Path | io.BytesIO,
+    *,
+    encoding: str = "utf-8-sig",
+) -> dict:
+    """
+    Importa linhas de um CSV com colunas alinhadas à tabela ``blacklist``.
+
+    Obrigatórias: ``tipo``, ``valor`` (nomes no ficheiro, case-insensitive).
+    Opcionais: ``motivo``, ``ativo`` (0/false = não importa a linha).
+
+    ``id`` e ``data_inclusao`` são ignorados se existirem.
+
+    Retorno: ``importados``, ``ignorados``, ``pulados_ativo``, ``erros`` (lista de str),
+    ``colunas_ignoradas`` (lista).
+    """
+    out: dict = {
+        "importados": 0,
+        "ignorados": 0,
+        "pulados_ativo": 0,
+        "erros": [],
+        "colunas_ignoradas": [],
+    }
+
+    if isinstance(caminho_ou_buffer, io.BytesIO):
+        caminho_ou_buffer.seek(0)
+        df = pd.read_csv(
+            caminho_ou_buffer,
+            sep=None,
+            engine="python",
+            dtype=str,
+            encoding=encoding,
+        )
+    else:
+        df = pd.read_csv(
+            Path(caminho_ou_buffer),
+            sep=None,
+            engine="python",
+            dtype=str,
+            encoding=encoding,
+        )
+
+    df.columns = [str(c).strip() for c in df.columns]
+    logic, extra_cols = _bl_csv_headers_map(list(df.columns))
+    out["colunas_ignoradas"] = extra_cols
+
+    if not logic["tipo"] or not logic["valor"]:
+        out["erros"].append(
+            "CSV precisa das colunas `tipo` e `valor` (como na tabela blacklist)."
+        )
+        return out
+
+    sql = """
+        INSERT INTO blacklist (tipo, valor, motivo, ativo)
+        VALUES (%s, %s, %s, 1)
+        ON DUPLICATE KEY UPDATE
+            ativo  = 1,
+            motivo = COALESCE(%s, motivo)
+    """
+
+    conn = conectar()
+    cur = conn.cursor()
+    try:
+        for num, (_, row) in enumerate(df.iterrows(), start=2):
+            tipo = _bl_csv_limpar_cell(row.get(logic["tipo"])).upper()
+            valor = _bl_csv_limpar_cell(row.get(logic["valor"]))
+            if not tipo and not valor:
+                continue
+            if logic.get("ativo"):
+                raw_at = row.get(logic["ativo"])
+                imp, explicit_skip = _bl_csv_resolver_ativo(raw_at)
+                if not imp:
+                    if explicit_skip:
+                        out["pulados_ativo"] += 1
+                    else:
+                        out["ignorados"] += 1
+                    continue
+
+            motivo = None
+            if logic.get("motivo"):
+                m = _bl_csv_limpar_cell(row.get(logic["motivo"]))
+                motivo = m or None
+
+            if not tipo or not valor:
+                out["ignorados"] += 1
+                continue
+            if tipo not in _TIPOS_BL:
+                out["ignorados"] += 1
+                err = f"Linha {num}: tipo inválido `{tipo}` (use CPF, NOME, TELEFONE ou EMAIL)."
+                if len(out["erros"]) < 40:
+                    out["erros"].append(err)
+                continue
+
+            cur.execute(sql, (tipo, valor, motivo, motivo))
+            out["importados"] += 1
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    print(
+        f"[BLACKLIST] CSV: {out['importados']} aplicados | "
+        f"{out['ignorados']} ignorados | "
+        f"{out['pulados_ativo']} com ativo=0"
+    )
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════════

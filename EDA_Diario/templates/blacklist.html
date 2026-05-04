@@ -33,6 +33,60 @@
     </form>
   </div>
 
+  <div class="eda-form-bar" style="margin-top:1.25rem;border-top:1px solid rgba(148,163,184,0.2);padding-top:1.25rem;">
+    <div style="width:100%;">
+      <h2 class="eda-h1" style="font-size:1.05rem;margin:0 0 12px 0;">Importar CSV</h2>
+
+      <div class="eda-csv-help" role="region" aria-label="Formato do CSV para blacklist">
+        <h3 class="eda-csv-help__title">Como deve ser o ficheiro CSV</h3>
+        <p class="eda-csv-help__hint">
+          A primeira linha é sempre o <strong>cabeçalho</strong>, com os mesmos nomes de coluna que na tabela MySQL
+          <code class="eda-mono" style="font-size:11px;">blacklist</code> usa para inserções.
+          O destino dos dados é a base configurada em <span class="eda-mono" style="font-size:11px;">EDA_MYSQL_DATABASE</span>
+          (ex.: <strong>plataforma_central</strong>).
+        </p>
+        <ul>
+          <li><strong>tipo</strong> — obrigatório: um de <span class="eda-mono" style="font-size:11px;">CPF</span>,
+            <span class="eda-mono" style="font-size:11px;">NOME</span>,
+            <span class="eda-mono" style="font-size:11px;">TELEFONE</span>,
+            <span class="eda-mono" style="font-size:11px;">EMAIL</span> (maiúsculas recomendadas).</li>
+          <li><strong>valor</strong> — obrigatório: texto a bloquear (CPF só dígitos ou com pontuação; será normalizado no fluxo).</li>
+          <li><strong>motivo</strong> — opcional: texto livre.</li>
+          <li><strong>ativo</strong> — opcional: <span class="eda-mono" style="font-size:11px;">1</span> /
+            <span class="eda-mono" style="font-size:11px;">true</span> / vazio importa;
+            <span class="eda-mono" style="font-size:11px;">0</span> /
+            <span class="eda-mono" style="font-size:11px;">false</span> ignora essa linha.</li>
+        </ul>
+        <p class="eda-csv-help__hint" style="margin-bottom:8px;">
+          Colunas <span class="eda-mono" style="font-size:11px;">id</span> e
+          <span class="eda-mono" style="font-size:11px;">data_inclusao</span>, se vierem dum export SQL, são <strong>ignoradas</strong>.
+          Outras colunas extra também são ignoradas (apenas aviso após importar).
+          Separador <span class="eda-mono" style="font-size:11px;">,</span> ou
+          <span class="eda-mono" style="font-size:11px;">;</span> é detetado automaticamente.
+          Ficheiros UTF-8 ou com BOM são aceites.
+        </p>
+        <p class="eda-csv-help__hint" style="margin-bottom:6px;"><strong>Exemplo</strong></p>
+        <pre class="eda-csv-help__code">tipo,valor,motivo,ativo
+EMAIL,contacto.livre@gmail.com,Solicitou remoção,1
+CPF,12345678901,,1
+NOME,JOSÉ SILVA EXPORTADO,Blacklist operacional,
+TELEFONE,11988776655,Apenas este número bloqueado,1</pre>
+        <p class="eda-csv-help__caption">
+          Linhas com o mesmo par <span class="eda-mono" style="font-size:11px;">tipo</span> +
+          <span class="eda-mono" style="font-size:11px;">valor</span> fazem atualização (<em>reactiva</em> e mantém/atualiza motivo conforme envio).
+        </p>
+      </div>
+
+      <form action="{{ url_for('blacklist_importar_csv') }}" method="POST" enctype="multipart/form-data" class="eda-form-row" style="align-items:flex-end;gap:0.75rem;flex-wrap:wrap;">
+        <div class="eda-field eda-field--grow">
+          <label class="eda-label" for="csv_blacklist">Ficheiro .csv</label>
+          <input type="file" name="csv" id="csv_blacklist" required accept=".csv,text/csv" class="eda-input" style="padding:0.35rem;width:100%;max-width:28rem;" />
+        </div>
+        <button type="submit" class="eda-btn eda-btn-secondary" style="align-self:flex-end;">Importar CSV</button>
+      </form>
+    </div>
+  </div>
+
   <div class="eda-table-shell">
     <form method="GET" action="{{ url_for('blacklist') }}" class="eda-form-inline">
       <input type="text" name="q" value="{{ busca }}" placeholder="Buscar por valor…" class="eda-input" />
@@ -84,7 +138,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
         </div>
         <p>Nenhuma entrada na blacklist</p>
-        <p class="eda-empty-sub">Use o formulário acima para adicionar</p>
+        <p class="eda-empty-sub">Use o formulário acima ou importe um CSV</p>
       </div>
     {% endif %}
 
