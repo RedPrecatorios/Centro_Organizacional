@@ -1,6 +1,73 @@
 import pandas as pd
 import re
 
+
+def _excel_col_letras_para_indice(letras: str) -> int:
+    """Índice 0-based da coluna tipo Excel (A, Z, AA, BA, BB...)."""
+    n = 0
+    for c in str(letras).strip().upper():
+        if not ("A" <= c <= "Z"):
+            raise ValueError(f"Letra de coluna invalida em {letras!r}: {c!r}")
+        n = n * 26 + (ord(c) - ord("A") + 1)
+    return n - 1
+
+
+def _celula_csv_para_digitos(val: object) -> str:
+    """Converte célula do CSV Lemitti para string só com dígitos (alinhado a DDD+FONE)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    if s.endswith(".0"):
+        core = s[:-2].lstrip("-")
+        if core.isdigit():
+            s = s[:-2]
+    try:
+        return str(int(float(s.replace(",", "."))))
+    except (ValueError, TypeError):
+        pass
+    dig = re.sub(r"\D", "", s)
+    return dig
+
+
+def ler_serie_telefone_concat_colunas_excel(
+    caminho_entrada: str,
+    col_a_letras: str = "BA",
+    col_b_letras: str = "BB",
+) -> pd.Series:
+    """
+    Lê o mesmo CSV da Lemitti (`processar_enriquecimento_contatos`), por posição
+    de coluna estilo Excel, e devolve uma série por linha com BA concatenado com BB.
+
+    Export «largo» Lemitti costuma usar colunas físicas BA (DDD) e BB (fone).
+    Se o ficheiro tiver menos colunas, devolve série vazia por linha.
+    """
+    df = pd.read_csv(
+        caminho_entrada,
+        sep=None,
+        engine="python",
+        dtype=str,
+        encoding="utf-8-sig",
+    )
+    n = df.shape[1]
+    try:
+        ia = _excel_col_letras_para_indice(col_a_letras)
+        ib = _excel_col_letras_para_indice(col_b_letras)
+    except ValueError:
+        return pd.Series([""] * len(df), dtype=object)
+
+    if ia >= n or ib >= n:
+        return pd.Series([""] * len(df), dtype=object)
+
+    out: list[str] = []
+    for i in range(len(df)):
+        a = _celula_csv_para_digitos(df.iat[i, ia])
+        b = _celula_csv_para_digitos(df.iat[i, ib])
+        cat = (a + b).strip()
+        out.append(cat if cat else "")
+    return pd.Series(out, dtype=object, index=df.index)
+
 # ─────────────────────────────────────────────
 # Nomes base das colunas fixas a manter
 # ─────────────────────────────────────────────

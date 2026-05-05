@@ -299,6 +299,37 @@ def download(arquivo):
     return send_file(str(caminho), as_attachment=True)
 
 
+@app.route("/download/hsm_lemitti")
+def download_hsm_lemitti():
+    modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if modelo not in _E_MODELOS:
+        modelo = "prc_tjsp"
+    p_principal = ENTRADA / "principal.xlsx"
+    p_p2 = ENTRADA / "enriquecimento_lemitti.csv"
+    if not p_principal.is_file() or not p_p2.is_file():
+        flash("Envie a planilha principal e a Lemitti antes de baixar o HSM.", "error")
+        return redirect(url_for("index"))
+    try:
+        from modulo_merge import exportar_bytes_prc_lemitti_hsm
+
+        data = exportar_bytes_prc_lemitti_hsm(
+            str(p_principal), str(p_p2), modelo=modelo
+        )
+    except Exception as exc:
+        flash(f"Nao foi possivel gerar o ficheiro HSM: {exc}", "error")
+        return redirect(url_for("index"))
+
+    nome = f"PRC_{_sufixo_arquivo_por_modelo(modelo)}_HSM_Lemitti.xlsx"
+    return send_file(
+        io.BytesIO(data),
+        as_attachment=True,
+        download_name=nome,
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+
+
 # ── Blacklist ─────────────────────────────────────────────────────────────────
 
 @app.route("/blacklist")

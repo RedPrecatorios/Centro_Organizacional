@@ -11,6 +11,7 @@ Enriquecimento em duas etapas — mesmo fluxo para prc_tjsp, prc_cmp e prc_imp:
   O `modelo` só afecta a leitura da principal. CMP e IMP usam 2.ª coluna CPF
   no cruzamento; TJSP tipicamente só `CPF`.
 """
+import io
 import os
 import re
 import unicodedata
@@ -19,18 +20,45 @@ import pandas as pd
 
 def _pular_cooldown_etapa2() -> bool:
     """
-    Se EDA_SKIP_COOLDOWN=1|true|yes|on|sim, a etapa 2 nao remove linhas por cooldown
-    (util em testes). Variavel de ambiente; pode vir do .env na raiz do projecto.
+    Cooldown desligado se:
+      - EDA_SKIP_COOLDOWN=1|true|yes|on|sim
+      - EDA_COOLDOWN_DIAS=0 (ou negativo)
     """
     v = (os.environ.get("EDA_SKIP_COOLDOWN") or "").strip().lower()
-    return v in ("1", "true", "yes", "on", "sim")
+    if v in ("1", "true", "yes", "on", "sim"):
+        return True
+    try:
+        d = int((os.environ.get("EDA_COOLDOWN_DIAS") or "14").strip())
+    except ValueError:
+        d = 14
+    return d <= 0
+
+
+def _dias_cooldown_etapa2() -> int:
+    """Janela em dias (padrao 14). Com EDA_COOLDOWN_DIAS=0 o filtro e ignorado via _pular_cooldown_etapa2."""
+    try:
+        d = int((os.environ.get("EDA_COOLDOWN_DIAS") or "14").strip())
+    except ValueError:
+        d = 14
+    return max(1, d) if d > 0 else 14
+
+
+def _cooldown_permitir_planilha_totalmente_filtrada() -> bool:
+    """
+    Se true, remove mesmo quando *todos* os registros estao em cooldown (planilha vazia).
+    Por defeito e *false*: evita FINAL vazio em reprocessamentos dentro da janela.
+    Env: EDA_COOLDOWN_PERMITIR_PLANILHA_VAZIA=1|true|yes|on|sim
+    """
+    z = (os.environ.get("EDA_COOLDOWN_PERMITIR_PLANILHA_VAZIA") or "").strip().lower()
+    return z in ("1", "true", "yes", "on", "sim")
 from openpyxl import load_workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 
 from modulo_planilha_principal import processar_planilha_principal
 from modulo_enriquecimento_contatos import (
     COLUNA_CPF as P2_COL_CPF,
     COLUNA_NOME as P2_COL_NOME,
+    ler_serie_telefone_concat_colunas_excel,
     processar_enriquecimento_contatos,
 )
 from modulo_enriquecimento_relacionados import processar_enriquecimento_relacionados
@@ -39,14 +67,17 @@ from modulo_banco import (
     salvar_contatos, carregar_blacklist,
     buscar_cpfs_cooldown,
 )
-from modulo_blacklist import filtrar_registros_por_blacklist
+from modulo_blacklist import filtrar_hsm_por_blacklist, filtrar_registros_por_blacklist
 
 # ─────────────────────────────────────────────
 # Prefixos das colunas geradas na planilha final
 # ─────────────────────────────────────────────
 PREFIXO_TELEFONE = "TELEFONE"
 PREFIXO_EMAIL    = "EMAIL"
+PREFIXO_HSM_LEMITTI = "TELEFONE_HSM"
 COL_ENRIQUECIDO  = "_ENRIQUECIDO"
+# Aba onde ficam os dados tabulares (evita ler "sms"/"Emails" se estiverem 1.º no Excel)
+ABA_PLANILHA_PRINCIPAL = "Principal"
 
 # Detecta colunas de email nas planilhas de enriquecimento
 PADRAO_EMAIL_COL = re.compile(r"EMAIL", re.IGNORECASE)
@@ -123,11 +154,42 @@ def _linha_ja_enriquecida_p2(val) -> bool:
     if isinstance(val, (int, float)):
         return int(val) != 0
     t = str(val).strip().lower()
-    if t in ("true", "1", "yes", "verdadeiro", "t"):
+    if t in ("true", "1", "yes", "verdadeiro", "t", "1.0"):
         return True
-    if t in ("false", "0", "no", "falso", "f", ""):
+    if t in ("false", "0", "no", "falso", "f", "", "0.0"):
         return False
     return False
+
+
+def _aba_parece_planilha_dados_principal(df: pd.DataFrame) -> bool:
+    """Distingue a folha tabular das abas de explosao."""
+    cols = list(df.columns)
+    if COL_ENRIQUECIDO in cols:
+        return True
+    return any(str(c).startswith(f"{PREFIXO_TELEFONE}_") for c in cols)
+
+
+def carregar_planilha_principal_de_workbook(caminho: str) -> pd.DataFrame:
+    """
+    Le a intermediaria/final garantindo os dados principais — nunca a primeira
+    folha apenas por ordem (ex.: sms a frente por reordenacao manual no Excel).
+    """
+    xl = pd.ExcelFile(caminho)
+    nomes_ok = xl.sheet_names
+    for nome in (ABA_PLANILHA_PRINCIPAL, "Sheet1"):
+        if nome in nomes_ok:
+            df = pd.read_excel(caminho, sheet_name=nome, dtype=str)
+            if _aba_parece_planilha_dados_principal(df) or len(df) > 0:
+                return df
+    for nome in nomes_ok:
+        if nome.lower() in ("sms", "emails"):
+            continue
+        df = pd.read_excel(caminho, sheet_name=nome, dtype=str)
+        if _aba_parece_planilha_dados_principal(df):
+            return df
+    if nomes_ok:
+        return pd.read_excel(caminho, sheet_name=nomes_ok[0], dtype=str)
+    raise ValueError(f"Workbook sem folhas: {caminho!r}")
 
 
 def _nome_coluna_cpf_vinculo_enriquecimento(df: pd.DataFrame) -> str | None:
@@ -183,6 +245,72 @@ def _coletar_contatos(
                 telefones.append(val)
 
     return telefones, emails
+
+
+def _coletar_hsm_lemitti(
+    df_p2: pd.DataFrame, chave_normalizada: str, modo_merge_p2: str
+) -> list[tuple[str, bool]]:
+    """Telefones HSM vindos só da concatenação das colunas Excel BA+BB (série `_HSM_BA_BB`)."""
+    col_idx = "_CPF_NORM" if modo_merge_p2 == "cpf" else "_NOME_NORM"
+    linhas = df_p2[df_p2[col_idx] == chave_normalizada]
+    if linhas.empty:
+        return []
+    hsms: list[str] = []
+    for _, row in linhas.iterrows():
+        v = row.get("_HSM_BA_BB")
+        s = str(v).strip() if pd.notna(v) else ""
+        if s and s.lower() != "nan":
+            hsms.append(s)
+    return _deduplicar(hsms, is_red=True)
+
+
+def _aplicar_destaque_hsm_na_planilha(
+    ws, colunas_tel: list[str], colunas_hsm: list[str]
+) -> None:
+    """Realça em amarelo e fonte forte as colunas HSM e as células de TELEFONE_* iguais ao HSM."""
+    cab = {cell.value: cell.column for cell in ws[1]}
+    fill = PatternFill(start_color="FFF59D", end_color="FFF59D", fill_type="solid")
+    fonte_h = Font(bold=True, color="0D47A1")
+    col_hsm = [cab[c] for c in colunas_hsm if c in cab]
+    col_tel = [cab[c] for c in colunas_tel if c in cab]
+
+    def apenas_digitos(x) -> str:
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            return ""
+        return re.sub(r"\D", "", str(x).strip())
+
+    for r in range(2, ws.max_row + 1):
+        alvo: set[str] = set()
+        for ci in col_hsm:
+            cell = ws.cell(row=r, column=ci)
+            d = apenas_digitos(cell.value)
+            if not d:
+                continue
+            alvo.add(d)
+            if d.startswith("55") and len(d) > 2:
+                alvo.add(d[2:])
+            if not d.startswith("55") and len(d) >= 8:
+                alvo.add("55" + d)
+
+        for ci in col_hsm:
+            cell = ws.cell(row=r, column=ci)
+            if cell.value is not None and str(cell.value).strip():
+                cell.fill = fill
+                cell.font = fonte_h
+
+        if not alvo:
+            continue
+        for ci in col_tel:
+            cell = ws.cell(row=r, column=ci)
+            d = apenas_digitos(cell.value)
+            if not d:
+                continue
+            ok = d in alvo or (
+                d.startswith("55") and len(d) > 2 and d[2:] in alvo
+            ) or ("55" + d) in alvo
+            if ok:
+                cell.fill = fill
+                cell.font = fonte_h
 
 
 def _formatar_contato_55(telefone) -> str:
@@ -262,6 +390,7 @@ def _preencher_colunas(
     df: pd.DataFrame, registros: list[list[tuple]], prefixo: str
 ) -> tuple[pd.DataFrame, list[str]]:
     """Adiciona colunas PREFIXO_1, PREFIXO_2, ... ao DataFrame com os valores."""
+    df.reset_index(drop=True, inplace=True)
     max_itens = max((len(r) for r in registros), default=0)
     colunas   = [f"{prefixo}_{i+1}" for i in range(max_itens)]
 
@@ -269,9 +398,17 @@ def _preencher_colunas(
         if col not in df.columns:
             df[col] = pd.NA
 
-    for i, itens in enumerate(registros):
+    n_df = len(df)
+    if len(registros) != n_df:
+        raise ValueError(
+            f"_preencher_colunas ({prefixo}): DataFrame tem {n_df} linhas, "
+            f"registros tem {len(registros)}."
+        )
+
+    for pos, itens in enumerate(registros):
         for j, (val, _) in enumerate(itens):
-            df.at[i, colunas[j]] = val
+            col = colunas[j]
+            df.iloc[pos, df.columns.get_loc(col)] = val
 
     return df, colunas
 
@@ -363,14 +500,25 @@ def _salvar_com_cores(
     registros_tel: list, colunas_tel: list,
     registros_email: list, colunas_email: list,
     caminho: str,
+    colunas_hsm: list | None = None,
 ) -> None:
     """Salva o DataFrame em Excel com cores e cria as abas 'sms' e 'Emails'."""
-    df.to_excel(caminho, index=False)
+    df.to_excel(caminho, index=False, sheet_name=ABA_PLANILHA_PRINCIPAL)
     wb = load_workbook(caminho)
-    _aplicar_cores(wb.active, registros_tel, colunas_tel, registros_email, colunas_email)
+    ws = wb[ABA_PLANILHA_PRINCIPAL]
+    _aplicar_cores(ws, registros_tel, colunas_tel, registros_email, colunas_email)
 
-    # Colunas base = todas exceto as de telefone e email
-    colunas_base = [c for c in df.columns if not c.startswith(f"{PREFIXO_TELEFONE}_") and not c.startswith(f"{PREFIXO_EMAIL}_")]
+    chsm = colunas_hsm or []
+    if chsm:
+        _aplicar_destaque_hsm_na_planilha(ws, colunas_tel, chsm)
+
+    # Colunas base = todas exceto telefone, email e HSM Lemitti
+    colunas_base = [
+        c for c in df.columns
+        if not c.startswith(f"{PREFIXO_TELEFONE}_")
+        and not c.startswith(f"{PREFIXO_EMAIL}_")
+        and not c.startswith(f"{PREFIXO_HSM_LEMITTI}_")
+    ]
 
     print(f"\n     Gerando abas de explosao...")
     _criar_aba_explosao(
@@ -380,6 +528,103 @@ def _salvar_com_cores(
     _criar_aba_explosao(wb, df[colunas_base + colunas_email], colunas_email, registros_email, nome_aba="Emails", nome_coluna="EMAIL")
 
     wb.save(caminho)
+
+
+def exportar_bytes_prc_lemitti_hsm(
+    caminho_principal: str,
+    caminho_p2: str,
+    modelo: str = "prc_tjsp",
+) -> bytes:
+    """
+    Uma folha Excel: planilha principal + telefones Lemitti (DDD+FONE) + colunas
+    ``TELEFONE_HSM_*`` (concatenação colunas Excel BA+BB do CSV Lemitti).
+    Células HSM e qualquer ``TELEFONE_*`` com o mesmo número são realçadas.
+    """
+    criar_banco_e_tabelas()
+
+    df_main = processar_planilha_principal(caminho_principal, modelo=modelo)
+    df_p2, modo_merge_p2 = processar_enriquecimento_contatos(caminho_p2)
+
+    serie_hsm = ler_serie_telefone_concat_colunas_excel(caminho_p2)
+    df_p2 = df_p2.reset_index(drop=True)
+    serie_hsm = serie_hsm.reset_index(drop=True)
+    if len(serie_hsm) != len(df_p2):
+        if len(serie_hsm) > len(df_p2):
+            serie_hsm = serie_hsm.iloc[: len(df_p2)].reset_index(drop=True)
+        else:
+            serie_hsm = pd.concat(
+                [
+                    serie_hsm,
+                    pd.Series([""] * (len(df_p2) - len(serie_hsm)), dtype=object),
+                ],
+                ignore_index=True,
+            )
+    df_p2["_HSM_BA_BB"] = serie_hsm.astype(str).fillna("").values
+
+    col_cpf_x = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo)
+    if modo_merge_p2 == "cpf":
+        if col_cpf_x not in df_main.columns:
+            raise KeyError(
+                f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). Colunas: {list(df_main.columns)}"
+            )
+        df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
+        df_p2["_CPF_NORM"] = df_p2[P2_COL_CPF].apply(_normalizar_cpf)
+    else:
+        col_nom = _coluna_nome_na_principal(df_main)
+        if col_cpf_x not in df_main.columns:
+            raise KeyError(
+                f"Coluna de CPF inexistente: {col_cpf_x!r} (modelo={modelo!r}). "
+                "Continua necessaria na principal mesmo no cruzamento por nome. "
+                f"Colunas: {list(df_main.columns)}"
+            )
+        df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
+        df_main["_NOME_MERGE"] = df_main[col_nom].apply(_normalizar_nome_cruzamento)
+        df_p2["_NOME_NORM"] = df_p2[P2_COL_NOME].apply(_normalizar_nome_cruzamento)
+
+    registros_tel: list = []
+    registros_email: list = []
+    registros_hsm: list = []
+    df_p2_somente_contatos = df_p2.drop(columns=["_HSM_BA_BB"], errors="ignore")
+
+    for _, row in df_main.iterrows():
+        chave = row["_CPF_NORM"] if modo_merge_p2 == "cpf" else row["_NOME_MERGE"]
+        fones, emails = _coletar_contatos(df_p2_somente_contatos, chave, modo_merge_p2)
+        hsm_linha = _coletar_hsm_lemitti(df_p2, chave, modo_merge_p2)
+
+        if fones or emails:
+            registros_tel.append(_deduplicar(fones, is_red=True))
+            registros_email.append(_deduplicar(emails, is_red=True))
+        else:
+            registros_tel.append([])
+            registros_email.append([])
+        registros_hsm.append(hsm_linha if hsm_linha else [])
+
+    bl = carregar_blacklist()
+    registros_tel, registros_email, *_rest = filtrar_registros_por_blacklist(
+        df_main, registros_tel, registros_email, bl
+    )
+    registros_hsm = filtrar_hsm_por_blacklist(df_main, registros_hsm, bl)
+
+    _drop_aux = ["_CPF_NORM"]
+    if modo_merge_p2 == "nome":
+        _drop_aux.append("_NOME_MERGE")
+    df_main.drop(columns=_drop_aux, inplace=True)
+
+    df_main, colunas_tel = _preencher_colunas(df_main, registros_tel, PREFIXO_TELEFONE)
+    df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
+    df_main, colunas_hsm = _preencher_colunas(df_main, registros_hsm, PREFIXO_HSM_LEMITTI)
+
+    buf = io.BytesIO()
+    df_main.to_excel(buf, index=False)
+    buf.seek(0)
+    wb = load_workbook(buf)
+    ws = wb.active
+    _aplicar_cores(ws, registros_tel, colunas_tel, registros_email, colunas_email)
+    _aplicar_destaque_hsm_na_planilha(ws, colunas_tel, colunas_hsm)
+
+    saida = io.BytesIO()
+    wb.save(saida)
+    return saida.getvalue()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -438,8 +683,26 @@ def etapa1_enriquecer_com_p2(
         df_main["_NOME_MERGE"] = df_main[col_nom].apply(_normalizar_nome_cruzamento)
         df_p2["_NOME_NORM"] = df_p2[P2_COL_NOME].apply(_normalizar_nome_cruzamento)
 
-    registros_tel    = []
-    registros_email  = []
+    serie_hsm = ler_serie_telefone_concat_colunas_excel(caminho_p2)
+    df_p2 = df_p2.reset_index(drop=True)
+    serie_hsm = serie_hsm.reset_index(drop=True)
+    if len(serie_hsm) != len(df_p2):
+        if len(serie_hsm) > len(df_p2):
+            serie_hsm = serie_hsm.iloc[: len(df_p2)].reset_index(drop=True)
+        else:
+            serie_hsm = pd.concat(
+                [
+                    serie_hsm,
+                    pd.Series([""] * (len(df_p2) - len(serie_hsm)), dtype=object),
+                ],
+                ignore_index=True,
+            )
+    df_p2["_HSM_BA_BB"] = serie_hsm.astype(str).fillna("").values
+    df_p2_somente_contatos = df_p2.drop(columns=["_HSM_BA_BB"], errors="ignore")
+
+    registros_tel        = []
+    registros_email      = []
+    registros_hsm: list[list[tuple[str, bool]]] = []
     cpfs_nao_encontrados = []
 
     for _, row in df_main.iterrows():
@@ -447,7 +710,9 @@ def etapa1_enriquecer_com_p2(
             chave = row["_CPF_NORM"]
         else:
             chave = row["_NOME_MERGE"]
-        fones, emails = _coletar_contatos(df_p2, chave, modo_merge_p2)
+        fones, emails = _coletar_contatos(df_p2_somente_contatos, chave, modo_merge_p2)
+        hsm_linha = _coletar_hsm_lemitti(df_p2, chave, modo_merge_p2)
+        registros_hsm.append(hsm_linha if hsm_linha else [])
 
         if fones or emails:
             registros_tel.append(_deduplicar(fones, is_red=True))
@@ -465,22 +730,32 @@ def etapa1_enriquecer_com_p2(
         _drop_aux.append("_NOME_MERGE")
     df_main.drop(columns=_drop_aux, inplace=True)
 
-    df_main, colunas_tel   = _preencher_colunas(df_main, registros_tel,   PREFIXO_TELEFONE)
-    df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
-
-    # ── Blacklist — filtra antes de gerar as abas ─────────────────────────────
+    # ── Blacklist antes de gravar TELEFONE / EMAIL / TELEFONE_HSM (valores === listas filtradas)
     print("\n     Aplicando blacklist...")
     bl = carregar_blacklist()
     registros_tel, registros_email, p_bloq, t_bloq, e_bloq, bl_detalhes = filtrar_registros_por_blacklist(
         df_main, registros_tel, registros_email, bl
     )
+    registros_hsm = filtrar_hsm_por_blacklist(df_main, registros_hsm, bl)
     print(
         f"     Blacklist: {p_bloq} pessoa(s) sem contato | "
         f"{t_bloq} telefone(s) | {e_bloq} email(s) removido(s)."
     )
     _emitir_relatorio_blacklist(bl_detalhes, os.path.dirname(caminho_saida_intermediaria))
 
-    _salvar_com_cores(df_main, registros_tel, colunas_tel, registros_email, colunas_email, caminho_saida_intermediaria)
+    df_main, colunas_tel = _preencher_colunas(df_main, registros_tel, PREFIXO_TELEFONE)
+    df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
+    df_main, colunas_hsm = _preencher_colunas(df_main, registros_hsm, PREFIXO_HSM_LEMITTI)
+
+    _salvar_com_cores(
+        df_main,
+        registros_tel,
+        colunas_tel,
+        registros_email,
+        colunas_email,
+        caminho_saida_intermediaria,
+        colunas_hsm=colunas_hsm,
+    )
 
     # ── Banco de dados — apenas log da execucao, sem incrementar contadores ──
     # Counts e ultimo_processamento so sao atualizados no disparo final (etapa2)
@@ -522,7 +797,8 @@ def etapa2_enriquecer_com_p3(
     criar_banco_e_tabelas()
 
     print("\n[1/3] Carregando planilha intermediaria...")
-    df_main = pd.read_excel(caminho_intermediaria, dtype=str)
+    df_main = carregar_planilha_principal_de_workbook(caminho_intermediaria)
+    df_main.columns = pd.Index([str(c).strip() for c in df_main.columns])
     print(f"     Linhas carregadas: {len(df_main)}")
 
     print("\n[2/3] Processando planilha 3 (relacionados)...")
@@ -539,12 +815,16 @@ def etapa2_enriquecer_com_p3(
     df_main["_CPF_NORM"] = df_main[col_cpf_x].apply(_normalizar_cpf)
     df_p3["_CPF_NORM"]   = df_p3["CPF"].apply(_normalizar_cpf)
 
-    colunas_tel_exist   = [c for c in df_main.columns if c.startswith(f"{PREFIXO_TELEFONE}_")]
-    colunas_email_exist = [c for c in df_main.columns if c.startswith(f"{PREFIXO_EMAIL}_")]
+    colunas_tel_exist   = [c for c in df_main.columns if str(c).startswith(f"{PREFIXO_TELEFONE}_")]
+    colunas_email_exist = [c for c in df_main.columns if str(c).startswith(f"{PREFIXO_EMAIL}_")]
+    colunas_hsm_exist   = [
+        c for c in df_main.columns if str(c).startswith(f"{PREFIXO_HSM_LEMITTI}_")
+    ]
 
-    # Reconstroi registros preservando dados da etapa 1 (vermelho)
-    registros_tel   = []
-    registros_email = []
+    # Reconstroi registros preservando dados da etapa 1 (vermelho) + HSM (Lemitti)
+    registros_tel: list[list[tuple[str, bool]]]   = []
+    registros_email: list[list[tuple[str, bool]]] = []
+    registros_hsm: list[list[tuple[str, bool]]]   = []
 
     for _, row in df_main.iterrows():
         tel_row = []
@@ -561,6 +841,13 @@ def etapa2_enriquecer_com_p3(
                 email_row.append((val, True))
         registros_email.append(email_row)
 
+        hsm_row = []
+        for col in colunas_hsm_exist:
+            val = str(row[col]).strip() if pd.notna(row[col]) and str(row[col]).strip() != "nan" else ""
+            if val:
+                hsm_row.append((val, True))
+        registros_hsm.append(hsm_row)
+
     enriquecidos_p3 = 0
     for pos in range(len(df_main)):
         row = df_main.iloc[pos]
@@ -576,12 +863,13 @@ def etapa2_enriquecer_com_p3(
     print(f"     CPFs enriquecidos via P3: {enriquecidos_p3}")
 
     df_main.drop(
-        columns=["_CPF_NORM", COL_ENRIQUECIDO] + colunas_tel_exist + colunas_email_exist,
-        inplace=True, errors="ignore"
+        columns=["_CPF_NORM", COL_ENRIQUECIDO]
+        + colunas_tel_exist
+        + colunas_email_exist
+        + colunas_hsm_exist,
+        inplace=True,
+        errors="ignore",
     )
-
-    df_main, colunas_tel   = _preencher_colunas(df_main, registros_tel,   PREFIXO_TELEFONE)
-    df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
 
     # Metricas antes do cooldown (para o resumo final nao confundir 0 linhas com "sem dados")
     n_pre_cd = len(df_main)
@@ -604,8 +892,9 @@ def etapa2_enriquecer_com_p3(
         total_cooldown = 0
         print("\n     Cooldown: desativado (env EDA_SKIP_COOLDOWN=1, etc.). Nenhuma linha removida.")
     else:
-        print("\n     Verificando cooldown (14 dias)...")
-        cpfs_cooldown = buscar_cpfs_cooldown(dias=14)
+        dias_cd = _dias_cooldown_etapa2()
+        print(f"\n     Verificando cooldown ({dias_cd} dias)...")
+        cpfs_cooldown = buscar_cpfs_cooldown(dias=dias_cd)
         if cpfs_cooldown:
             col_cd = _coluna_cpf_cruzamento_enriquecimento(df_main, modelo=None)
             if col_cd not in df_main.columns:
@@ -613,15 +902,34 @@ def etapa2_enriquecer_com_p3(
                     f"Coluna de CPF inexistente no cooldown: {col_cd!r}. Colunas: {list(df_main.columns)}"
                 )
             df_main["_CPF_NORM"] = df_main[col_cd].apply(_normalizar_cpf)
-            mascara_cooldown = df_main["_CPF_NORM"].isin(cpfs_cooldown)
-            total_cooldown   = int(mascara_cooldown.sum())
-            if total_cooldown:
-                idx_manter        = df_main.index[~mascara_cooldown].tolist()
-                registros_tel     = [registros_tel[i]   for i in idx_manter]
-                registros_email   = [registros_email[i] for i in idx_manter]
-                df_main           = df_main[~mascara_cooldown].reset_index(drop=True)
+            mascara_cd_arr = df_main["_CPF_NORM"].isin(cpfs_cooldown).to_numpy()
+            n_match = int(mascara_cd_arr.sum())
+            n_total = len(df_main)
+            total_cooldown = 0
+            cooldown_bloqueou_todos = (
+                n_match >= n_total and n_total > 0 and bool(mascara_cd_arr.all())
+            )
+            if cooldown_bloqueou_todos and not _cooldown_permitir_planilha_totalmente_filtrada():
+                total_cooldown = 0
                 print(
-                    f"     Cooldown: {total_cooldown} registro(s) removido(s) da planilha final."
+                    "     Cooldown: todos os registros coincidiriam com a janela; "
+                    "o lote seria inteiromente removido e o FINAL ficaria vazio. "
+                    "Mantendo todas as linhas nesta execucao. "
+                    "Para desativar o filtro: EDA_SKIP_COOLDOWN=1 ou EDA_COOLDOWN_DIAS=0; "
+                    "para permitir FINAL vazio: EDA_COOLDOWN_PERMITIR_PLANILHA_VAZIA=1."
+                )
+            elif n_match:
+                pos_manter      = [
+                    i for i in range(n_total) if not bool(mascara_cd_arr[i])
+                ]
+                removed = n_match
+                registros_tel   = [registros_tel[i] for i in pos_manter]
+                registros_email = [registros_email[i] for i in pos_manter]
+                registros_hsm   = [registros_hsm[i] for i in pos_manter]
+                df_main         = df_main.iloc[pos_manter].reset_index(drop=True)
+                total_cooldown = removed
+                print(
+                    f"     Cooldown: {removed} registro(s) removido(s) da planilha final."
                 )
             else:
                 print("     Cooldown: nenhum registro em cooldown.")
@@ -636,13 +944,26 @@ def etapa2_enriquecer_com_p3(
     registros_tel, registros_email, p_bloq, t_bloq, e_bloq, bl_detalhes = filtrar_registros_por_blacklist(
         df_main, registros_tel, registros_email, bl
     )
+    registros_hsm = filtrar_hsm_por_blacklist(df_main, registros_hsm, bl)
     print(
         f"     Blacklist: {p_bloq} pessoa(s) sem contato | "
         f"{t_bloq} telefone(s) | {e_bloq} email(s) removido(s)."
     )
     _emitir_relatorio_blacklist(bl_detalhes, os.path.dirname(caminho_saida_final))
 
-    _salvar_com_cores(df_main, registros_tel, colunas_tel, registros_email, colunas_email, caminho_saida_final)
+    df_main, colunas_tel   = _preencher_colunas(df_main, registros_tel,   PREFIXO_TELEFONE)
+    df_main, colunas_email = _preencher_colunas(df_main, registros_email, PREFIXO_EMAIL)
+    df_main, colunas_hsm   = _preencher_colunas(df_main, registros_hsm,   PREFIXO_HSM_LEMITTI)
+
+    _salvar_com_cores(
+        df_main,
+        registros_tel,
+        colunas_tel,
+        registros_email,
+        colunas_email,
+        caminho_saida_final,
+        colunas_hsm=colunas_hsm,
+    )
 
     # ── Banco de dados ────────────────────────────────────────────────────────
     print("\n     Salvando no banco de dados...")

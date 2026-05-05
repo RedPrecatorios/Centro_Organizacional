@@ -225,3 +225,48 @@ def filtrar_registros_por_blacklist(
         email_filtrado.append(email_limpo)
 
     return tel_filtrado, email_filtrado, pessoas_bloq, tel_bloq, email_bloq, detalhes
+
+
+def filtrar_hsm_por_blacklist(
+    df: pd.DataFrame,
+    registros_hsm: list[list[tuple]],
+    bl: dict[str, set],
+) -> list[list[tuple]]:
+    """
+    Mesmas regras que telefone em `filtrar_registros_por_blacklist`, mas só para valores HSM (BA+BB).
+    Lista de lista de tuples (valor, is_red), alinhado a `df.iloc[pos]`.
+    """
+    resultado: list[list[tuple]] = []
+
+    def _cpf_para_regra(r) -> str:
+        for col in ("CPF.1", "cpf.1"):
+            if col in r.index:
+                v = r.get(col)
+                if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                    s = str(v).strip()
+                    if s and s.lower() != "nan":
+                        return s
+        return r.get("CPF")
+
+    n = len(df)
+    if len(registros_hsm) != n:
+        raise ValueError(
+            f"[BLACKLIST HSM] Inconsistencia: df tem {n} linhas, registros_hsm {len(registros_hsm)}."
+        )
+
+    for pos in range(n):
+        row = df.iloc[pos]
+        motivo_p = _motivo_bloqueio_pessoa(
+            _cpf_para_regra(row), row.get("Requerente"), bl
+        )
+        if motivo_p:
+            resultado.append([])
+            continue
+        linha_limpa = []
+        for telefone, is_red in registros_hsm[pos]:
+            if _telefone_bloqueado(telefone, bl["TELEFONE"]):
+                continue
+            linha_limpa.append((telefone, is_red))
+        resultado.append(linha_limpa)
+
+    return resultado
