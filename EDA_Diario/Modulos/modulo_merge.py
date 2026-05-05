@@ -78,6 +78,7 @@ PREFIXO_HSM_LEMITTI = "TELEFONE_HSM"
 COL_ENRIQUECIDO  = "_ENRIQUECIDO"
 # Aba onde ficam os dados tabulares (evita ler "sms"/"Emails" se estiverem 1.º no Excel)
 ABA_PLANILHA_PRINCIPAL = "Principal"
+ABA_DISPARO_HSM = "Disparo_HSM"
 
 # Detecta colunas de email nas planilhas de enriquecimento
 PADRAO_EMAIL_COL = re.compile(r"EMAIL", re.IGNORECASE)
@@ -182,7 +183,7 @@ def carregar_planilha_principal_de_workbook(caminho: str) -> pd.DataFrame:
             if _aba_parece_planilha_dados_principal(df) or len(df) > 0:
                 return df
     for nome in nomes_ok:
-        if nome.lower() in ("sms", "emails"):
+        if nome.lower() in ("sms", "emails") or nome == ABA_DISPARO_HSM:
             continue
         df = pd.read_excel(caminho, sheet_name=nome, dtype=str)
         if _aba_parece_planilha_dados_principal(df):
@@ -348,6 +349,86 @@ def _formatar_nome_sms(requerente) -> str:
     return " ".join([primeira] + meio + [ultima])
 
 
+def _coluna_nome_disparo(df: pd.DataFrame) -> str | None:
+    for cand in ("Requerente", "NOME", "Nome"):
+        if cand in df.columns:
+            return cand
+    return None
+
+
+def _coluna_processo_disparo(df: pd.DataFrame) -> str | None:
+    if "Numero_de_Processo" in df.columns:
+        return "Numero_de_Processo"
+    if "Processo" in df.columns:
+        return "Processo"
+    return None
+
+
+def _coluna_incidente_disparo(df: pd.DataFrame) -> str | None:
+    for cand in ("Numero_do_Incidente", "Incidente"):
+        if cand in df.columns:
+            return cand
+    return None
+
+
+def _valor_cel_excel_py(v):
+    """None para celula vazia / NaN; senao valor bruto."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    return v
+
+
+def _criar_aba_disparo_hsm(
+    wb,
+    df: pd.DataFrame,
+    registros_hsm: list[list[tuple]],
+) -> None:
+    """
+    Explosao por telefone HSM (BA+BB): Telefone HSM + Nome + Numero de Processo + Incidente.
+    """
+    n = len(df)
+    if len(registros_hsm) != n:
+        print(
+            "     [AVISO] Aba Disparo_HSM omitida: inconsistencia entre DataFrame e registros_hsm."
+        )
+        return
+    if sum(len(r) for r in registros_hsm) == 0:
+        print("     Aba 'Disparo_HSM': omitida (nenhum telefone HSM).")
+        return
+
+    nome_c = _coluna_nome_disparo(df)
+    proc_c = _coluna_processo_disparo(df)
+    inc_c = _coluna_incidente_disparo(df)
+
+    ws = wb.create_sheet(title=ABA_DISPARO_HSM)
+    headers = ["Telefone HSM", "Nome", "Numero de Processo", "Incidente"]
+    for col_idx, h in enumerate(headers, start=1):
+        ws.cell(row=1, column=col_idx, value=h)
+
+    fill = PatternFill(start_color="FFF59D", end_color="FFF59D", fill_type="solid")
+    fonte_h = Font(bold=True, color="0D47A1")
+
+    row_excel = 2
+    for df_idx, (_, row) in enumerate(df.iterrows()):
+        for valor, _ in registros_hsm[df_idx]:
+            sval = str(valor).strip() if valor is not None else ""
+            if not sval or sval.lower() == "nan":
+                continue
+            c_tel = ws.cell(row=row_excel, column=1, value=sval)
+            c_tel.fill = fill
+            c_tel.font = fonte_h
+
+            nome_v = _valor_cel_excel_py(row[nome_c]) if nome_c else None
+            proc_v = _valor_cel_excel_py(row[proc_c]) if proc_c else None
+            inc_v = _valor_cel_excel_py(row[inc_c]) if inc_c else None
+            ws.cell(row=row_excel, column=2, value=nome_v)
+            ws.cell(row=row_excel, column=3, value=proc_v)
+            ws.cell(row=row_excel, column=4, value=inc_v)
+            row_excel += 1
+
+    print(f"     Aba 'Disparo_HSM': {row_excel - 2} linha(s).")
+
+
 def _emitir_relatorio_blacklist(detalhes: list[dict], pasta_resultados: str) -> None:
     """Grava CSV e lista um resumo no terminal."""
     os.makedirs(pasta_resultados, exist_ok=True)
@@ -501,8 +582,9 @@ def _salvar_com_cores(
     registros_email: list, colunas_email: list,
     caminho: str,
     colunas_hsm: list | None = None,
+    registros_hsm: list | None = None,
 ) -> None:
-    """Salva o DataFrame em Excel com cores e cria as abas 'sms' e 'Emails'."""
+    """Salva o DataFrame em Excel com cores e cria as abas 'sms', 'Emails' e 'Disparo_HSM'."""
     df.to_excel(caminho, index=False, sheet_name=ABA_PLANILHA_PRINCIPAL)
     wb = load_workbook(caminho)
     ws = wb[ABA_PLANILHA_PRINCIPAL]
@@ -526,6 +608,9 @@ def _salvar_com_cores(
         nome_aba="sms", nome_coluna="TELEFONE", sms_extras=True,
     )
     _criar_aba_explosao(wb, df[colunas_base + colunas_email], colunas_email, registros_email, nome_aba="Emails", nome_coluna="EMAIL")
+
+    if registros_hsm is not None:
+        _criar_aba_disparo_hsm(wb, df, registros_hsm)
 
     wb.save(caminho)
 
@@ -755,6 +840,7 @@ def etapa1_enriquecer_com_p2(
         colunas_email,
         caminho_saida_intermediaria,
         colunas_hsm=colunas_hsm,
+        registros_hsm=registros_hsm,
     )
 
     # ── Banco de dados — apenas log da execucao, sem incrementar contadores ──
@@ -963,6 +1049,7 @@ def etapa2_enriquecer_com_p3(
         colunas_email,
         caminho_saida_final,
         colunas_hsm=colunas_hsm,
+        registros_hsm=registros_hsm,
     )
 
     # ── Banco de dados ────────────────────────────────────────────────────────
