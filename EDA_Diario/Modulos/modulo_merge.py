@@ -64,7 +64,7 @@ from modulo_enriquecimento_contatos import (
 from modulo_enriquecimento_relacionados import processar_enriquecimento_relacionados
 from modulo_banco import (
     criar_banco_e_tabelas, registrar_execucao, salvar_processos,
-    salvar_contatos, carregar_blacklist,
+    salvar_contatos, salvar_disparo_hsm, carregar_blacklist,
     buscar_cpfs_cooldown,
 )
 from modulo_blacklist import filtrar_hsm_por_blacklist, filtrar_registros_por_blacklist
@@ -1064,6 +1064,7 @@ def etapa2_enriquecer_com_p3(
     )
     mapa_ids = salvar_processos(df_main, id_execucao)
     salvar_contatos(df_main, registros_tel, registros_email, mapa_ids, id_execucao)
+    salvar_disparo_hsm(df_main, registros_hsm, mapa_ids, id_execucao)
 
     total_sem_contato  = len(df_main) - total_enriquecidos
     total_sms_gerados  = sum(len(t) for t in registros_tel)

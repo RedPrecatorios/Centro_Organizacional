@@ -139,6 +139,24 @@ def criar_banco_e_tabelas() -> None:
         CONSTRAINT fk_email_exe FOREIGN KEY (id_execucao)          REFERENCES execucoes(id)
     ) ENGINE=InnoDB;
 
+    CREATE TABLE IF NOT EXISTS disparo_hsm (
+        id                   INT AUTO_INCREMENT PRIMARY KEY,
+        id_processo_juridico INT          NOT NULL,
+        id_execucao          INT          NOT NULL,
+        cpf                  VARCHAR(11)  NOT NULL,
+        telefone_hsm         VARCHAR(30)  NOT NULL,
+        fornecedor           VARCHAR(30)  NOT NULL COMMENT 'Lemitti',
+        nome                 VARCHAR(300),
+        numero_processo      VARCHAR(100),
+        numero_incidente     VARCHAR(100),
+        primeira_aparicao    DATETIME     NOT NULL,
+        ultimo_processamento DATETIME     NOT NULL,
+        count_aparicoes      INT DEFAULT 1,
+        UNIQUE KEY uq_disparo_hsm (id_processo_juridico, telefone_hsm),
+        CONSTRAINT fk_disparo_hsm_pj  FOREIGN KEY (id_processo_juridico) REFERENCES processos_juridicos(id),
+        CONSTRAINT fk_disparo_hsm_exe FOREIGN KEY (id_execucao)          REFERENCES execucoes(id)
+    ) ENGINE=InnoDB;
+
     CREATE TABLE IF NOT EXISTS blacklist (
         id             INT AUTO_INCREMENT PRIMARY KEY,
         tipo           ENUM('CPF','NOME','TELEFONE','EMAIL') NOT NULL COMMENT 'Escopo do bloqueio',
@@ -790,3 +808,67 @@ def salvar_contatos(
     cur.close()
     conn.close()
     print(f"[DB] Contatos salvos: {total_tel} telefones | {total_email} emails.")
+
+
+def salvar_disparo_hsm(
+    df: pd.DataFrame,
+    registros_hsm: list,
+    mapa_ids: dict,
+    id_execucao: int,
+) -> None:
+    """
+    Insere/upserta telefones HSM (BA+BB Lemitti) na tabela `disparo_hsm`.
+    Uma linha por (processo_juridico, telefone_hsm).
+    """
+    conn = conectar()
+    cur  = conn.cursor(buffered=True)
+    agora = datetime.now()
+
+    total = 0
+
+    def _nome(row) -> str | None:
+        return _val(row, "Requerente") or _val(row, "NOME") or _val(row, "Nome")
+
+    def _proc(row) -> str:
+        return _val(row, "Numero_de_Processo") or _val(row, "Processo") or ""
+
+    def _inc(row) -> str | None:
+        return _val(row, "Numero_do_Incidente") or _val(row, "Incidente")
+
+    for i, row in df.iterrows():
+        numero_processo = _proc(row)
+        cpf             = _val_cpf_cadastro(row)
+        id_proc         = mapa_ids.get(numero_processo)
+
+        if not id_proc or not cpf or len(cpf) != 11 or not numero_processo:
+            continue
+
+        for telefone_hsm, _is_red in registros_hsm[i]:
+            tel = _val({"x": telefone_hsm}, "x")
+            if not tel:
+                continue
+            cur.execute("""
+                INSERT INTO disparo_hsm (
+                    id_processo_juridico, id_execucao, cpf, telefone_hsm, fornecedor,
+                    nome, numero_processo, numero_incidente,
+                    primeira_aparicao, ultimo_processamento, count_aparicoes
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                ON DUPLICATE KEY UPDATE
+                    ultimo_processamento = %s,
+                    count_aparicoes      = count_aparicoes + 1,
+                    id_execucao          = %s,
+                    nome                 = COALESCE(%s, nome),
+                    numero_incidente     = COALESCE(%s, numero_incidente)
+            """, (
+                id_proc, id_execucao, cpf, tel, FORNECEDOR_P2,
+                _nome(row), numero_processo, _inc(row),
+                agora, agora,
+                agora, id_execucao, _nome(row), _inc(row),
+            ))
+            total += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"[DB] Disparo_HSM salvo: {total} telefone(s).")
