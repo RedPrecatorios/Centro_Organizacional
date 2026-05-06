@@ -39,5 +39,13 @@ Thumbs.db
 *.log
 .pytest_cache/
 
+# Dump SQL grande (preferir migrações em deploy/migrations/)
+deploy/eda_diario.sql
+
+# Campanha: listas/execuções locais (usar *.example.toml / *.example.csv)
+campanha/logs/
+campanha/state/
+campanha/recipients.csv
+
 #folders
 *.sql/

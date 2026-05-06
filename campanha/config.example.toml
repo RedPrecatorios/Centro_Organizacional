@@ -1,0 +1,81 @@
+[project]
+# Identificação do projeto (aparece nos logs)
+name = "Minha Empresa"
+
+[db.mysql]
+# Usado para ler a blacklist (`blacklist`) e, se `[campaign_emails_log].enabled`, atualizar `emails`.
+# Se existirem variáveis CAMPANHA_MYSQL_* ou EDA_MYSQL_* no `.env`, elas sobrescrevem esta seção em tempo de execução.
+host = "localhost"
+port = 3306
+user = "root"
+password = ""
+database = "eda_diario"
+
+[blacklist]
+# Se true, aplica a blacklist do MySQL (tabela `blacklist`, somente ativo=1).
+use_db = true
+# Arquivo opcional com emails para bloquear (1 email por linha). Útil para bloqueios temporários.
+extra_email_file = "campanha/blacklist_emails_extra.txt"
+
+# Atualiza a tabela `emails` (mesmo schema [db.mysql]) nas linhas cujo campo `email` coincide com o destinatário da campanha.
+[campaign_emails_log]
+enabled = false
+
+[sending]
+# Se true, NÃO envia: apenas simula (gera logs e mostra o que seria enviado).
+dry_run = true
+# Método de envio:
+# - "smtp": usa smtp_host/smtp_user/smtp_password por domínio (um login por domínio)
+# - "mailgun": usa Mailgun API (recomendado quando você tem muitos domínios)
+method = "smtp"
+# Quantos emails por domínio por minuto (rate limit simples).
+per_domain_per_minute = 60
+# Timeout de conexão SMTP (segundos)
+smtp_timeout_seconds = 30
+# Quantas tentativas em falhas transitórias
+max_retries = 3
+# Onde as respostas do cliente devem ir (cabeçalho Reply-To). O From continua sendo o domínio da campanha.
+# reply_to = "atendimento@suaempresa.com.br"
+
+[mailgun]
+# Usado quando sending.method = "mailgun"
+# Chave: defina MAILGUN_API_KEY no .env (recomendado) ou api_key abaixo só na máquina local.
+# api_key = ""
+# region = "us" # "us" ou "eu"
+
+[content]
+# Assunto da campanha
+subject = "[Minha Empresa] Aviso importante"
+# Template de corpo em HTML e texto (o texto é usado como fallback).
+html_template = "campanha/templates/default.html"
+text_template = "campanha/templates/default.txt"
+
+# Variáveis globais opcionais que podem ser usadas no template ({{var}}).
+[content.vars]
+company_name = "Minha Empresa"
+support_email = "suporte@minhaempresa.com.br"
+
+# Lista de domínios/remetentes disponíveis para disparo.
+# O sistema alterna entre eles (round-robin) para dividir o volume.
+[[domains]]
+name = "dominio1"
+from_name = "Minha Empresa"
+from_email = "contato@dominio1.com.br"
+# Opcional: sobrescreve [sending].reply_to só para este remetente
+# reply_to = "outro@suaempresa.com.br"
+smtp_host = "smtp.dominio1.com.br"
+smtp_port = 587
+smtp_user = "contato@dominio1.com.br"
+smtp_password = "SENHA_AQUI"
+smtp_starttls = true
+
+[[domains]]
+name = "dominio2"
+from_name = "Minha Empresa"
+from_email = "contato@dominio2.com.br"
+smtp_host = "smtp.dominio2.com.br"
+smtp_port = 587
+smtp_user = "contato@dominio2.com.br"
+smtp_password = "SENHA_AQUI"
+smtp_starttls = true
+

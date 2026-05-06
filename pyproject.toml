@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "centro-organizacional-local"
+version = "0.0.0"
+description = "Pacote workspace: expõe `campanha` para `python -m campanha.cli` sem PYTHONPATH."
+requires-python = ">=3.10"
+dependencies = [
+    "mysql-connector-python>=9.0,<11",
+    "python-dotenv>=1.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+
+[project.scripts]
+campanha-cli = "campanha.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["campanha"]

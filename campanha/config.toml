@@ -1,0 +1,77 @@
+[project]
+name = "Red Precatórios"
+
+[db.mysql]
+# Credenciais reais via .env (EDA_MYSQL_* ou CAMPANHA_MYSQL_*); estes valores são fallback quando não há env.
+host = "localhost"
+port = 3306
+user = "root"
+password = ""
+database = "eda_diario"
+
+[blacklist]
+use_db = true
+extra_email_file = "campanha/blacklist_emails_extra.txt"
+
+# Grava log de disparo nas linhas da tabela `emails` quando o email coincide com o destinatário.
+[campaign_emails_log]
+enabled = true
+
+[sending]
+# true = só simula (não chama Mailgun). false = envia de verdade.
+dry_run = false
+method = "mailgun"
+per_domain_per_minute = 60
+smtp_timeout_seconds = 30
+max_retries = 3
+reply_to = "contato@redprecatorios.com.br"
+
+[mailgun]
+# Chave apenas no .env: MAILGUN_API_KEY=c... (não commite aqui).
+api_key = ""
+# "us" se o painel for US; "eu" se for EU (precisa bater com a região da conta).
+region = "us"
+
+[content]
+subject = "Antecipação do Crédito Jurídico"
+html_template = "campanha/templates/default.html"
+text_template = "campanha/templates/default.txt"
+
+[content.vars]
+company_name = "RED PRECATÓRIOS TESTE"
+support_email = "contato@redprecatorios.com.br"
+
+# Cada bloco = um remetente. Com Mailgun: from_email DEVE ser do domínio VERIFICADO no Mailgun.
+# Pode repetir vários [[domains]] para round-robin (só os que estiverem aqui entram no rodízio).
+[[domains]]
+name = "comunicared49"
+from_name = "RED PRECATÓRIOS"
+from_email = "contato@comunicared49.online"
+# Com method = "mailgun" não precisa preencher SMTP abaixo.
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+smtp_starttls = true
+
+[[domains]]
+name = "comunicared48"
+from_name = "RED PRECATÓRIOS"
+from_email = "contato@comunicared13.online"
+# Com method = "mailgun" não precisa preencher SMTP abaixo.
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+smtp_starttls = true
+
+[[domains]]
+name = "comunicared47"
+from_name = "RED PRECATÓRIOS"
+from_email = "contato@comunicared14.online"
+# Com method = "mailgun" não precisa preencher SMTP abaixo.
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+smtp_starttls = true
