@@ -108,10 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_single.add_argument("--domain", default="", help="Força usar um domínio específico (name do [[domains]])")
     p_single.set_defaults(func=cmd_send_single)
 
-    p_bulk = sub.add_parser("send-bulk", help="Dispara para base CSV (name,email) alternando domínios")
+    p_bulk = sub.add_parser("send-bulk", help="Dispara para base CSV (Email,nome,processo) alternando domínios")
     p_bulk.add_argument("--config", default="campanha/config.toml")
     p_bulk.add_argument("--campaign-id", default="")
-    p_bulk.add_argument("--recipients", required=True, help="CSV com colunas name,email")
+    p_bulk.add_argument("--recipients", required=True, help="CSV com colunas Email,nome,processo (aceita também name,email)")
     p_bulk.set_defaults(func=cmd_send_bulk)
 
     return p

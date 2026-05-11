@@ -47,16 +47,16 @@ Importante:
 
 ---
 
-## 3) Como editar “nome e email” (destinatários)
+## 3) Como editar “Email, nome e processo” (destinatários)
 
 Para disparo em base, crie um CSV com cabeçalho.
 
-Você pode colocar **colunas extras** além de `name,email` (por exemplo `credor`, `processo`, etc.). Essas colunas extras viram variáveis disponíveis nos templates como `{{credor}}`, `{{processo}}`, etc.
+O template atual esperado é **`Email,nome,processo`** (case-insensitive). Você pode colocar **colunas extras** além disso (por exemplo `credor`, etc.). Essas colunas extras viram variáveis disponíveis nos templates como `{{credor}}`, `{{processo}}`, etc.
 
 ```csv
-name,email,credor,processo
-Maria Silva,maria@cliente.com.br,Maria Silva,0000000-00.0000.0.00.0000
-João Souza,joao@cliente.com.br,João Souza,1111111-11.1111.1.11.1111
+Email,nome,processo
+maria@cliente.com.br,Maria Silva,0000000-00.0000.0.00.0000
+joao@cliente.com.br,João Souza,1111111-11.1111.1.11.1111
 ```
 
 Você pode usar o exemplo: `campanha/recipients.example.csv`.
@@ -213,3 +213,4 @@ Variáveis disponíveis (substituição simples `{{var}}`):
 - Faça `send-single` para confirmar entrega real.
 - Só então rode `send-bulk`.
 
+## EXECUÇÃO: python3 -m campanha.cli send-bulk --config campanha/config.toml --recipients campanha/recipients.csv

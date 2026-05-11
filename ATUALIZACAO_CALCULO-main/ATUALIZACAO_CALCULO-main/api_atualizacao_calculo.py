@@ -3,7 +3,8 @@
 API HTTP **interna** (localhost) para actualização de cálculo por ``id_precainfosnew``.
 
 - ``GET /health`` — verificação (systemd, balanceador)
-- ``POST /atualizar`` — corpo JSON ``{{"id_precainfosnew": <int>}}`` (ou ``"id"``)
+- ``POST /atualizar`` — corpo JSON ``{"id_precainfosnew": <int>, "feito_por": "<opcional>"}`` (ou ``"id"``)
+  Se ``feito_por`` vier vazio ou omitido, assume-se **automação** (robô / chamada sem utilizador).
 
 Ambiente (``.env`` na mesma pasta que este ficheiro ou no cwd):
 - ``CALCULO_ATUALIZACAO_API_HOST`` (padrão ``127.0.0.1``)
@@ -51,13 +52,13 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
         return None
 
 
-def _run_atualizacao(prec_id: int) -> dict[str, Any]:
+def _run_atualizacao(prec_id: int, feito_por: str | None = None) -> dict[str, Any]:
     from datetime import datetime
 
     from manager.manager import Manager
 
     m = Manager(datetime.now())
-    return m.run_atualizacao_calculo(prec_id)
+    return m.run_atualizacao_calculo(prec_id, feito_por=feito_por)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -115,6 +116,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"ok": False, "error": "id_precainfosnew inválido."})
             return
 
+        raw_fp = data.get("feito_por")
+        if raw_fp is not None and raw_fp != "" and not isinstance(raw_fp, str):
+            raw_fp = str(raw_fp)
+        feito_por = (raw_fp.strip()[:200] if isinstance(raw_fp, str) and raw_fp.strip() else None)
+
         if not _job_lock.acquire(blocking=False):
             self._send(
                 409,
@@ -125,7 +131,7 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         try:
-            out = _run_atualizacao(prec_id)
+            out = _run_atualizacao(prec_id, feito_por=feito_por)
         except Exception as e:
             traceback.print_exc()
             self._send(500, {"ok": False, "error": str(e)})

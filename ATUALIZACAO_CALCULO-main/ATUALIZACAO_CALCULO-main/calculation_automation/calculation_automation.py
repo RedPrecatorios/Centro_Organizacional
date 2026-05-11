@@ -99,7 +99,7 @@ class CalculationAutomation:
         _calc_dir = os.path.dirname(os.path.abspath(__file__))
         self.main_file_path = os.path.join(
             _calc_dir,
-            "Planilha de Cálculos V31 (Pós PEC 66) 01042026 (1).xlsm",
+            "Planilha de Cálculos V31 (Pós PEC 66) 05052026.xlsm",
         )
 
         self.municipais_list = [

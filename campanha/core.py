@@ -218,6 +218,8 @@ class CampaignConfig:
     domains: list[DomainSender]
     # Caminho absoluto do TOML; usado para resolver caminhos relativos mesmo fora da raiz do repo.
     source_config_path: str = ""
+    # Se true, grava `campanha/logs/<campaign_id>.jsonl`. Se false, não cria arquivo de log.
+    jsonl_log_enabled: bool = True
 
 
 def _env_strip(key: str) -> str | None:
@@ -340,6 +342,13 @@ def load_config_toml(path: str) -> CampaignConfig:
     log_em = data.get("campaign_emails_log", {}) or {}
     campaign_emails_log = CampaignEmailsLogConfig(enabled=bool(log_em.get("enabled", False)))
 
+    logging_raw = data.get("logging", {}) or {}
+    jsonl_log_enabled = logging_raw.get("jsonl_log_enabled")
+    if jsonl_log_enabled is None:
+        # Padrão: se você já grava no banco, evita duplicar em arquivo.
+        jsonl_log_enabled = not campaign_emails_log.enabled
+    jsonl_log_enabled = bool(jsonl_log_enabled)
+
     sending_raw = data.get("sending", {})
     rt = sending_raw.get("reply_to")
     reply_to_global = str(rt).strip() if rt is not None and str(rt).strip() else None
@@ -413,6 +422,7 @@ def load_config_toml(path: str) -> CampaignConfig:
         content=content,
         domains=domains,
         source_config_path=str(abs_cfg),
+        jsonl_log_enabled=jsonl_log_enabled,
     )
 
 
@@ -424,20 +434,32 @@ def load_recipients_csv(path: str) -> list[Recipient]:
     with p.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = (row.get("name") or "").strip()
-            email = (row.get("email") or "").strip()
+            # Aceita cabeçalhos no padrão atual da operação: Email, nome, processo
+            # e também compatibilidade retro: name,email.
+            row_norm: dict[str, str] = {}
+            for k, v in row.items():
+                if not k:
+                    continue
+                kk = str(k).strip().lower()
+                vv = "" if v is None else str(v).strip()
+                row_norm[kk] = vv
+
+            email = (row_norm.get("email") or row_norm.get("e-mail") or "").strip()
+            name = (row_norm.get("nome") or row_norm.get("name") or "").strip()
             if not email:
                 continue
             fields: dict[str, str] = {}
             for k, v in row.items():
                 if not k:
                     continue
-                kk = str(k).strip()
-                if kk.lower() in ("name", "email"):
+                kk_raw = str(k).strip()
+                kk = kk_raw.lower()
+                if kk in ("name", "nome", "email", "e-mail"):
                     continue
                 vv = "" if v is None else str(v).strip()
                 if vv:
-                    fields[kk] = vv
+                    # Mantém a chave original para usar no template como {{processo}}, {{credor}}, etc.
+                    fields[kk_raw] = vv
             out.append(Recipient(name=name or email, email=email, fields=fields))
     return out
 
@@ -487,6 +509,11 @@ class JsonlLogger:
         event = dict(event)
         event.setdefault("ts", _utc_now_iso())
         self.path.open("a", encoding="utf-8").write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+class NullLogger:
+    def write(self, event: dict) -> None:
+        return
 
 
 def _idempotency_key(campaign_id: str, recipient_email: str, subject: str) -> str:
@@ -636,7 +663,7 @@ def run_campaign(
         log_dir = _resolve_writable_relative_path_behind_config(cfg_path, log_dir)
         sent_keys_file = _resolve_writable_relative_path_behind_config(cfg_path, sent_keys_file)
 
-    logger = JsonlLogger(str(Path(log_dir) / f"{campaign_id}.jsonl"))
+    logger = JsonlLogger(str(Path(log_dir) / f"{campaign_id}.jsonl")) if cfg.jsonl_log_enabled else NullLogger()
 
     blocked = load_blacklist_emails(cfg.mysql, cfg.blacklist.use_db, cfg.blacklist.extra_email_file)
     sent_keys = _load_sent_keys(sent_keys_file)
@@ -750,6 +777,9 @@ def run_campaign(
                     "subject": cfg.content.subject,
                     "name": r.name,
                     "email": r.email,
+                    # Compatibilidade com templates antigos que usam {{credor}} no saudação.
+                    # No CSV atual, o equivalente é a coluna "nome".
+                    "credor": r.name,
                 }
             )
             vars_.update(r.fields)

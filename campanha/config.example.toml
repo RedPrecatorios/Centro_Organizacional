@@ -21,6 +21,11 @@ extra_email_file = "campanha/blacklist_emails_extra.txt"
 [campaign_emails_log]
 enabled = false
 
+[logging]
+# Se true, grava `campanha/logs/<campaign_id>.jsonl`. Se false, não cria arquivo (útil quando você já grava no banco).
+# Default: quando [campaign_emails_log].enabled=true, o default vira false automaticamente.
+jsonl_log_enabled = true
+
 [sending]
 # Se true, NÃO envia: apenas simula (gera logs e mostra o que seria enviado).
 dry_run = true

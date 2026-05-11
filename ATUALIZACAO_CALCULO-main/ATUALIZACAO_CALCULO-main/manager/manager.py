@@ -111,15 +111,17 @@ class Manager:
         except ValueError:
             return 0.0
 
-    def run_atualizacao_calculo(self, prec_id: int) -> dict:
+    def run_atualizacao_calculo(self, prec_id: int, feito_por: str | None = None) -> dict:
         """
         Actualização de cálculo para **um** ``id`` de ``precainfosnew`` (o mesmo
         que ``id_precainfosnew`` na tabela ``memoria_calculo``) — p.ex. API Flask
         a partir do botão «Atualizar Cálculo».
+
+        ``feito_por``: guardado em ``memoria_calculo.feito_por`` (username ou "automação").
         """
         from manager.run_single_calculo import execute_atualizacao_calculo
 
-        return execute_atualizacao_calculo(self, prec_id)
+        return execute_atualizacao_calculo(self, prec_id, feito_por=feito_por)
 
     def run(self):
         try:

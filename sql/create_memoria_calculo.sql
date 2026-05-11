@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS `memoria_calculo` (
     COMMENT 'Valor da reserva de honorários em R$ (tipicamente negativo no extrato).',
   `total_liquido`            DECIMAL(18, 2) NULL,
 
+  `feito_por`                VARCHAR(200) NULL
+    COMMENT 'Utilizador da plataforma (username) ou "automação" quando pelo robô/API sem utilizador.',
+
   `criado_em`                TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `atualizado_em`            TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 

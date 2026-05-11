@@ -18,9 +18,9 @@ Mapeamento célula → coluna MySQL
 - **O310** → ``desc_saude_prev`` (magnitude geralmente positiva na BD)
 - **O311** → ``desc_ir`` (magnitude geralmente positiva na BD)
 - **O312** → **valor monetário** da reserva de honorários → ``reserva_honorarios`` (pode ser negativo; ex. ``-R$ 63.346,23``)
-- **O313** → ``total_liquido``; V31: ``=O309+O310+O311+O312``. O UPSERT grava a **soma** com
-  **O309** (total bruto) obrigatório; parcelas O310–O312 em ``None`` contam como **0** na
-  soma (p.ex. O311 sem cache). Leitura usa ``read_only=False`` para células unidas.
+- **O313** → ``total_liquido`` (valor **directo** da célula). Se O313 não puder ser lido
+  (vazio/cache), usa-se só então o fallback ``O309+O310+O311+O312`` com O310–O312 em ``None``
+  tratados como 0. Leitura usa ``read_only=False`` para células unidas.
 
 A coluna ``percentual_honorarios`` na BD (DEC ``30.00`` = 30 %), não a célula de valor; usa-se
 ``MEMORIA_HONORARIOS_PERCENT`` no ``.env`` (padrão **30.0**), alinhada ao rótulo “30 %” do Excel.
@@ -341,6 +341,12 @@ def _ensure_percent_0_100(v: float) -> float:
     return round(v, 2)
 
 
+def _normalize_feito_por(raw: str | None) -> str:
+    """Username ou texto curto; vazio ⇒ 'automação'."""
+    s = (raw or "").strip()
+    return s[:200] if s else "automação"
+
+
 def _memoria_mysql_connect_timeout() -> int:
     raw = (os.getenv("MEMORIA_MYSQL_CONNECT_TIMEOUT") or "120").strip()
     try:
@@ -418,13 +424,37 @@ def _apply_total_liquido_soma_O309_312(
     merged: dict[str, float | None], *, print_ok: bool
 ) -> None:
     """
-    Fórmula V31: **O313** = ``=O309+O310+O311+O312``.
+    **total_liquido** na BD = valor lido de **O313** sempre que a célula for legível.
 
-    O **O309** (``total_bruto``) tem de existir. Para **O310:O312**, se a leitura devolver
-    ``None`` (cache, ``#N/A`` ou célula unida sem valor nesse canto), usa-se **0** no
-    somatório (equivalente a “sem desconto” / parcela a zero), o que o Libre/openpyxl por
-    vezes não materializa no mesmo sítio do Excel.
+    Fallback (LibreOffice/cache sem materializar O313): se O313 for ``None`` ou não for
+    número, e existir **O309** (``total_bruto``), calcula-se ``O309+O310+O311+O312`` com
+    O310–O312 em ``None`` → 0.
     """
+    o313_lido = merged.get("total_liquido")
+    if o313_lido is not None:
+        try:
+            o313_f = float(o313_lido)
+            merged["total_liquido"] = o313_f
+            if print_ok:
+                tb = merged.get("total_bruto")
+                if tb is not None:
+                    ds = merged.get("desc_saude_prev") or 0.0
+                    di = merged.get("desc_ir") or 0.0
+                    rh = merged.get("reserva_honorarios") or 0.0
+                    try:
+                        soma = float(tb) + float(ds) + float(di) + float(rh)
+                        if abs(o313_f - soma) > 0.02:
+                            print(
+                                "\n\t[memoria_calculo] total_liquido: O313 = "
+                                f"{o313_f:,.2f}; soma O309+O310+O311+O312 = {soma:,.2f} "
+                                "(divergência informativa; gravado o valor de O313).\n"
+                            )
+                    except (TypeError, ValueError):
+                        pass
+            return
+        except (TypeError, ValueError):
+            pass
+
     tb = merged.get("total_bruto")
     if tb is None:
         return
@@ -446,43 +476,29 @@ def _apply_total_liquido_soma_O309_312(
         soma = float(tb) + p310 + p311 + p312
     except (TypeError, ValueError):
         return
-    o313_antes = merged.get("total_liquido")
     merged["total_liquido"] = soma
     faltou = [x for x in (a310, a311, a312) if x is not None]
     if not print_ok:
         return
     if faltou:
         print(
-            "\n\t[memoria_calculo] total_liquido: "
-            f"{' '.join(faltou)} sem valor; tratados como 0 na soma (O313 = O309+O310+O311+O312). "
-            f"Resultado: {soma:,.2f}.\n"
-        )
-    elif o313_antes is None:
-        print(
-            "\n\t[memoria_calculo] total_liquido: O313 vazio/erro; "
-            f"usada soma O309+O310+O311+O312 = {soma:,.2f} (regra V31).\n"
+            "\n\t[memoria_calculo] total_liquido: O313 vazio/ilegível; "
+            f"{' '.join(faltou)} sem valor na leitura (0 na soma). "
+            f"Fallback O309+O310+O311+O312 = {soma:,.2f}.\n"
         )
     else:
-        try:
-            a = float(o313_antes)
-            if abs(a - soma) > 0.02:
-                print(
-                    "\n\t[memoria_calculo] total_liquido: O313 tinha "
-                    f"{a:,.2f}; gravada a soma O309+…+O312 = {soma:,.2f}.\n"
-                )
-        except (TypeError, ValueError):
-            print(
-                f"\n\t[memoria_calculo] total_liquido: O313 ilegível; "
-                f"usada soma O309+O310+O311+O312 = {soma:,.2f}.\n"
-            )
+        print(
+            "\n\t[memoria_calculo] total_liquido: O313 vazio/ilegível; "
+            f"fallback O309+O310+O311+O312 = {soma:,.2f}.\n"
+        )
 
 
 def load_merged_memoria_valores(
     file_path: str, sheet_name: str, *, print_ok: bool = True
 ) -> dict[str, float | None]:
     """
-    Lê O307:O313 (com merge data_only + raw) e define ``total_liquido`` pela soma
-    O309+O310+O311+O312 (O310–O312 em ``None`` = 0 na soma se O309 existir).
+    Lê O307:O313 (merge data_only + raw). ``total_liquido`` = **O313**; se O313 faltar,
+    fallback soma O309+O310+O311+O312.
     """
     r_do = read_memoria_valores_da_planilha(file_path, sheet_name, data_only=True)
     r_raw = read_memoria_valores_da_planilha(file_path, sheet_name, data_only=False)
@@ -507,6 +523,7 @@ def sync_memoria_calculo_to_db(
     read_memoria_path: str | None = None,
     precomputed_merged: dict[str, float | None] | None = None,
     print_ok: bool = True,
+    feito_por: str | None = None,
 ) -> bool:
     """
     UPSERT: identificação a partir de ``main_dict``; **valores monetários** só
@@ -514,6 +531,9 @@ def sync_memoria_calculo_to_db(
     ``read_memoria_path`` para um ``.xlsx`` recalculado pelo LibreOffice). Se
     ``precomputed_merged`` for passado, usa-o em vez de reler a planilha (ex.: o mesmo
     dicionário já usado para O313 / ``Calculo_Atualizado``).
+
+    ``feito_por``: se ``None``, usa ``main_dict.get("feito_por")``; normalizado para
+    string curta ou **automação**.
     """
     targets = _build_memoria_db_targets()
     if not targets:
@@ -568,6 +588,12 @@ def sync_memoria_calculo_to_db(
     reserva = _valor_para_coluna_db("reserva_honorarios", merged.get("reserva_honorarios"))
     tliq = _valor_para_coluna_db("total_liquido", merged.get("total_liquido"))
     pct = _ensure_percent_0_100(_default_honorarios_percent())
+    if feito_por is not None:
+        fp_txt = _normalize_feito_por(feito_por)
+    else:
+        fp_txt = _normalize_feito_por(
+            main_dict.get("feito_por") if isinstance(main_dict, dict) else None
+        )
 
     if print_ok and max(abs(pb), abs(juros), abs(tb), abs(tliq), abs(reserva)) < 1e-9:
         print(
@@ -595,9 +621,10 @@ def sync_memoria_calculo_to_db(
             percentual_honorarios,
             total_bruto,
             reserva_honorarios,
-            total_liquido
+            total_liquido,
+            feito_por
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON DUPLICATE KEY UPDATE
             requerente = VALUES(requerente),
@@ -610,7 +637,12 @@ def sync_memoria_calculo_to_db(
             percentual_honorarios = VALUES(percentual_honorarios),
             total_bruto = VALUES(total_bruto),
             reserva_honorarios = VALUES(reserva_honorarios),
-            total_liquido = VALUES(total_liquido);
+            total_liquido = VALUES(total_liquido),
+            feito_por = VALUES(feito_por),
+            -- ON UPDATE CURRENT_TIMESTAMP só dispara se uma coluna mudar de valor;
+            -- como recálculos costumam dar números idênticos, forçamos NOW(6) aqui
+            -- para reflectir a "hora do último disparo" na UI da plataforma.
+            atualizado_em = NOW(6);
     """
     row = (
         pid,
@@ -625,6 +657,7 @@ def sync_memoria_calculo_to_db(
         round(tb, 2),
         round(reserva, 2),
         round(tliq, 2),
+        fp_txt,
     )
 
     ct = _memoria_mysql_connect_timeout()

@@ -55,6 +55,7 @@ except ImportError:
 
 from messages_viewer.plataforma_auth import (
     auth_bp,
+    current_user,
     init_plataforma_auth,
     plataforma_before_request,
     wsgi_eda_session_guard,
@@ -339,6 +340,15 @@ def conversas():
     return render_template("conversas.html")
 
 
+def _memoria_feito_por_plataforma() -> str:
+    """Quem disparou pela UI da plataforma (sessão); fallback 'automação'."""
+    u = current_user()
+    if not u:
+        return "automação"
+    name = str(u.get("username") or "").strip()
+    return name[:200] if name else "automação"
+
+
 @app.route("/memoria-calculo")
 def memoria_calculo():
     return render_template(
@@ -466,7 +476,8 @@ def api_memoria_buscar():
             percentual_honorarios,
             total_bruto,
             reserva_honorarios,
-            total_liquido
+            total_liquido,
+            feito_por
             {ultima_sql}
         FROM memoria_calculo
         WHERE {where_sql}
@@ -746,7 +757,12 @@ def api_memoria_atualizar_calculo():
         timeout = 600
 
     url = base.rstrip("/") + "/atualizar"
-    body = json.dumps({"id_precainfosnew": prec_id}).encode("utf-8")
+    body = json.dumps(
+        {
+            "id_precainfosnew": prec_id,
+            "feito_por": _memoria_feito_por_plataforma(),
+        }
+    ).encode("utf-8")
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "Accept": "application/json",

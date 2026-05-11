@@ -16,7 +16,7 @@ from calculation_automation.calculation_automation import CalculationAutomation
 from general_functions.general_functions import format_dict_values
 
 
-def execute_atualizacao_calculo(mgr, prec_id: int) -> dict[str, Any]:
+def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = None) -> dict[str, Any]:
     """
     Executa a actualização de cálculo para **um** ``id`` de ``precainfosnew`` (o mesmo que
     ``id_precainfosnew`` em ``memoria_calculo``).
@@ -241,6 +241,8 @@ def execute_atualizacao_calculo(mgr, prec_id: int) -> dict[str, Any]:
             "Numero_de_Meses": meses_validados,
             "id": rec_id,
         }
+        _fp = (feito_por or "").strip()[:200] if feito_por else ""
+        main_dict["feito_por"] = _fp if _fp else "automação"
 
         try:
             main_dict["SPPREV"] = float(format_dict_values(spprev))
