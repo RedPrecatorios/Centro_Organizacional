@@ -1081,6 +1081,7 @@ from campanha.api_dominios import (
     GoDaddyError,
     adicionar_dominio_completo,
     listar_dominios,
+    mailgun_list_domains,
     remover_dominio,
     verificar_dominio,
 )
@@ -1360,6 +1361,68 @@ def api_campanha_migrar_toml():
         "total_toml": len(domains),
         "inseridos": inseridos,
         "ignorados_ou_atualizados": ignorados,
+    })
+
+
+@app.route("/api/campanha/sincronizar-mailgun", methods=["POST"], endpoint="api_campanha_sincronizar_mailgun")
+def api_campanha_sincronizar_mailgun():
+    """Busca todos os dominios da conta Mailgun e insere os que faltam no banco."""
+    try:
+        mg_domains = mailgun_list_domains()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Erro ao consultar Mailgun: {e}"}), 502
+
+    if not mg_domains:
+        return jsonify({"ok": False, "error": "Nenhum dominio encontrado na conta Mailgun."}), 404
+
+    db_cfg, db_name = _camp_db()
+    conn = mysql.connector.connect(**db_cfg, database=db_name)
+    cur = conn.cursor(dictionary=True)
+
+    cur.execute("SELECT dominio FROM campanha_dominios WHERE ativo = 1")
+    ja_cadastrados = {r["dominio"] for r in cur.fetchall()}
+
+    inseridos = 0
+    atualizados = 0
+    for mg in mg_domains:
+        dominio = (mg.get("name") or "").strip()
+        if not dominio:
+            continue
+        state = (mg.get("state") or "unknown").lower()
+        mg_state = "active" if state == "active" else "pending"
+
+        nome = dominio.replace(".", "_").replace("-", "_")
+        from_email = f"contato@{dominio}"
+        from_name = "RED PRECATORIOS"
+
+        if dominio in ja_cadastrados:
+            cur.execute(
+                "UPDATE campanha_dominios SET mailgun_state = %s WHERE dominio = %s AND ativo = 1",
+                (mg_state, dominio),
+            )
+            atualizados += 1
+        else:
+            cur.execute(
+                """INSERT INTO campanha_dominios
+                   (nome, dominio, from_name, from_email, mailgun_state, dns_configured, ativo)
+                   VALUES (%s, %s, %s, %s, %s, %s, 1)
+                   ON DUPLICATE KEY UPDATE
+                       mailgun_state = VALUES(mailgun_state),
+                       ativo = 1""",
+                (nome, dominio, from_name, from_email, mg_state, 1 if mg_state == "active" else 0),
+            )
+            inseridos += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "total_mailgun": len(mg_domains),
+        "inseridos": inseridos,
+        "atualizados": atualizados,
+        "ja_cadastrados": len(ja_cadastrados),
     })
 
 

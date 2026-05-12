@@ -34,6 +34,7 @@
         <div class="camp-section-header">
           <h2>Dominios Cadastrados</h2>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+            <button type="button" class="camp-btn camp-btn-secondary" id="btn-sync-mailgun" title="Buscar todos os dominios da conta Mailgun e importar os que faltam">Sincronizar com Mailgun</button>
             <button type="button" class="camp-btn camp-btn-secondary" id="btn-migrar-toml" title="Importar dominios do arquivo campanha/config.toml para o banco">Importar do config.toml</button>
             <button type="button" class="camp-btn camp-btn-primary" id="btn-add-dominio">+ Adicionar Dominio</button>
           </div>
@@ -364,6 +365,21 @@
       loadDominios();
     }).catch(e => alert('Erro: '+e));
   };
+
+  document.getElementById('btn-sync-mailgun').addEventListener('click', () => {
+    if (!confirm('Buscar todos os dominios da conta Mailgun e importar os que nao estao cadastrados na plataforma?')) return;
+    const btn = document.getElementById('btn-sync-mailgun');
+    btn.disabled = true; btn.textContent = 'Sincronizando...';
+    fetch('/api/campanha/sincronizar-mailgun', { method:'POST' }).then(r=>r.json()).then(d => {
+      btn.disabled = false; btn.textContent = 'Sincronizar com Mailgun';
+      if (d.ok) {
+        alert('Sincronizacao concluida!\n\nTotal no Mailgun: ' + d.total_mailgun + '\nNovos inseridos: ' + d.inseridos + '\nAtualizados (status): ' + d.atualizados);
+        loadDominios();
+      } else {
+        alert('Erro: ' + (d.error || 'Falha na sincronizacao'));
+      }
+    }).catch(e => { btn.disabled = false; btn.textContent = 'Sincronizar com Mailgun'; alert('Erro: ' + e); });
+  });
 
   document.getElementById('btn-migrar-toml').addEventListener('click', () => {
     if (!confirm('Importar todos os dominios do campanha/config.toml para o banco de dados?\n\nDominios ja existentes serao atualizados.')) return;

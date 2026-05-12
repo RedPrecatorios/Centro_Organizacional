@@ -262,6 +262,7 @@ def _endpoint_to_tab() -> str | None:
         "api_campanha_historico_detalhe": "campanha",
         "api_campanha_destinatarios_preview": "campanha",
         "api_campanha_migrar_toml": "campanha",
+        "api_campanha_sincronizar_mailgun": "campanha",
     }
     t = m.get(ep)
     if t is not None:
