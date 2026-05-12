@@ -34,6 +34,7 @@ TAB_KEYS: tuple[tuple[str, str], ...] = (
         "2.º módulo (aba extra na página Conversas + rota /embedded/)",
     ),
     ("memoria_calculo", "Memória de cálculo (menu lateral)"),
+    ("campanha", "Campanha (disparo de e-mails, domínios)"),
     ("eda", "EDA Diário (link no menu, se o módulo estiver activo)"),
 )
 
@@ -164,6 +165,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("index", "index"),
         ("conversas", "conversas"),
         ("memoria_calculo", "memoria_calculo"),
+        ("campanha", "campanha_page"),
         ("outro_modulo", "embedded.index"),
     ]
     for tab, endpoint in order:
@@ -188,6 +190,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "memoria_calculo"
     if path.startswith("/embedded"):
         return "outro_modulo"
+    if path.startswith("/campanha"):
+        return "campanha"
     if path.startswith("/eda"):
         return "eda"
     if path.startswith("/auth"):
@@ -245,6 +249,19 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
         "api_memoria_controle_coleta_status": "memoria_calculo",
+        "campanha_page": "campanha",
+        "api_campanha_dominios": "campanha",
+        "api_campanha_dominios_add": "campanha",
+        "api_campanha_dominios_delete": "campanha",
+        "api_campanha_dominios_verify": "campanha",
+        "api_campanha_disparar": "campanha",
+        "api_campanha_disparar_unico": "campanha",
+        "api_campanha_status": "campanha",
+        "api_campanha_cancelar": "campanha",
+        "api_campanha_historico": "campanha",
+        "api_campanha_historico_detalhe": "campanha",
+        "api_campanha_destinatarios_preview": "campanha",
+        "api_campanha_migrar_toml": "campanha",
     }
     t = m.get(ep)
     if t is not None:

@@ -1545,3 +1545,384 @@ body.platform-body #app-toast {
 .admin-pass { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .admin-pass .auth-input { max-width: 14rem; }
 .admin-note { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CAMPANHA — sub-abas, formularios, tabelas, barra de progresso, dashboard
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.camp-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin: 0 0 1.5rem;
+  padding: 0 1rem;
+}
+.camp-tab {
+  background: none;
+  border: none;
+  padding: 0.65rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .15s, border-color .15s;
+}
+.camp-tab:hover { color: var(--text); }
+.camp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.camp-panel { padding: 0 1rem; }
+.camp-panel[hidden] { display: none !important; }
+
+.camp-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.camp-section-header h2,
+.camp-section-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* Botoes */
+.camp-btn {
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  background: var(--surface);
+  color: var(--text);
+}
+.camp-btn:hover { background: var(--bg-chat); }
+.camp-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.camp-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.camp-btn-secondary {
+  background: var(--accent-ghost);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.camp-btn-secondary:hover { background: var(--accent-soft); }
+.camp-btn-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.camp-btn-danger:hover { background: #fdd; }
+.camp-btn-ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+.camp-btn-ghost:hover { background: var(--bg-chat); }
+.camp-btn-lg { padding: 0.6rem 2rem; font-size: 0.95rem; }
+.camp-btn-xs { padding: 0.2rem 0.6rem; font-size: 0.78rem; }
+
+/* Form card */
+.camp-form-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+.camp-form-card h3 { margin: 0 0 0.75rem; font-size: 1rem; }
+
+.camp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.camp-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.camp-field label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.camp-field input,
+.camp-field select {
+  font-family: inherit;
+  font-size: 0.88rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s;
+}
+.camp-field input:focus,
+.camp-field select:focus { border-color: var(--accent); }
+.camp-field input[type="file"] {
+  padding: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.camp-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Messages */
+.camp-msg {
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--r);
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
+.camp-msg-ok { background: var(--accent-soft); color: #065f46; }
+.camp-msg-err { background: var(--danger-bg); color: var(--danger); }
+
+/* Loading */
+.camp-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+.camp-spin {
+  width: 20px; height: 20px;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: camp-spin-kf .7s linear infinite;
+}
+@keyframes camp-spin-kf { to { transform: rotate(360deg); } }
+
+.camp-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+/* Tables */
+.camp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+.camp-table th {
+  background: var(--surface-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.camp-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.camp-table tr:last-child td { border-bottom: none; }
+.camp-table-sm { font-size: 0.82rem; }
+.camp-table-sm th, .camp-table-sm td { padding: 0.35rem 0.55rem; }
+.camp-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
+/* Badges */
+.camp-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.camp-badge-ok { background: var(--accent-soft); color: #065f46; }
+.camp-badge-warn { background: #fef9c3; color: #854d0e; }
+.camp-badge-err { background: var(--danger-bg); color: var(--danger); }
+
+/* Toggle row (CSV / Base) */
+.camp-toggle-row {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  width: fit-content;
+}
+.camp-toggle {
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.45rem 1.2rem;
+  border: none;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.camp-toggle + .camp-toggle { border-left: 1px solid var(--border); }
+.camp-toggle.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.camp-source-panel { margin-bottom: 1rem; }
+
+.camp-preview {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.camp-preview p {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.camp-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.25rem 0;
+}
+
+/* Progress bar */
+.camp-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.camp-progress-bar {
+  flex: 1;
+  height: 18px;
+  background: var(--bg-chat);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.camp-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #34d399);
+  border-radius: 999px;
+  transition: width .4s ease;
+}
+.camp-progress-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 3.5em;
+  text-align: right;
+}
+
+/* Stats row */
+.camp-stats-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.camp-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 0.75rem 1.25rem;
+  min-width: 90px;
+  box-shadow: var(--shadow-sm);
+}
+.camp-stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.camp-stat-danger { color: var(--danger); }
+.camp-stat-warn { color: #ca8a04; }
+.camp-stat-muted { color: var(--muted); }
+.camp-stat-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.15rem;
+}
+
+/* Log */
+.camp-log-wrap { margin-top: 0.5rem; }
+.camp-log-wrap h3 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+.camp-log {
+  max-height: 300px;
+  overflow-y: auto;
+  background: #0f172a;
+  color: #94a3b8;
+  font-family: 'Fira Mono', 'Consolas', monospace;
+  font-size: 0.78rem;
+  padding: 0.75rem;
+  border-radius: var(--r);
+  line-height: 1.6;
+}
+.camp-log-line { white-space: pre-wrap; word-break: break-all; }
+
+/* Dashboard cards */
+.camp-dash-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.camp-dash-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+.camp-dash-card-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.camp-dash-card-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .camp-tabs { overflow-x: auto; }
+  .camp-form-grid { grid-template-columns: 1fr; }
+  .camp-stats-row { gap: 0.5rem; }
+  .camp-stat { min-width: 70px; padding: 0.5rem 0.75rem; }
+  .camp-stat-value { font-size: 1.15rem; }
+  .camp-dash-cards { grid-template-columns: 1fr 1fr; }
+}

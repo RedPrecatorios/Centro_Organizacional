@@ -38,6 +38,9 @@ sys.path.insert(0, str(MODULOS))
 
 ENTRADA.mkdir(exist_ok=True)
 RESULTADOS.mkdir(exist_ok=True)
+# CSVs de discagem para "Relatório corrigido" (não misturar com Lemitti/Assertiva)
+RELATORIO_DIARIO_ENTRADA = ENTRADA / "relatorio_diario"
+RELATORIO_DIARIO_ENTRADA.mkdir(exist_ok=True)
 
 # Modelos PRC: mesmo fluxo de enriquecimento (Lemitti -> Assertiva); muda template da principal e mapeamento.
 _E_MODELOS = frozenset({"prc_tjsp", "prc_cmp", "prc_imp"})
@@ -535,6 +538,121 @@ def _listar_execucoes() -> list[dict]:
     except Exception as e:
         print(f"[ERRO execucoes] {e}")
         return []
+
+
+# ── Relatório corrigido (CSV de discagem → Excel com abas) ───────────────────
+
+@app.route("/relatorio-corrigido")
+def relatorio_corrigido():
+    """Painel: CSV → Excel com abas Telefone_Recado / Sem Interesse_Remover / Outros."""
+    csv_recente = None
+    data_recente = None
+    try:
+        from modulo_relatorio_corrigido import obter_csv_mais_recente
+
+        cr = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
+        csv_recente = cr.name
+        data_recente = _data_arquivo(cr)
+    except FileNotFoundError:
+        pass
+    return render_template(
+        "relatorio_corrigido.html",
+        csv_recente=csv_recente,
+        data_recente=data_recente,
+    )
+
+
+@app.route("/relatorio-corrigido/gerar", methods=["POST"])
+def relatorio_corrigido_gerar():
+    from modulo_relatorio_corrigido import gerar_relatorio_com_blacklist, obter_csv_mais_recente
+
+    f = request.files.get("csv")
+    if f is not None and (f.filename or "").strip():
+        nome = f.filename.strip()
+        if not nome.lower().endswith(".csv"):
+            flash("O ficheiro deve ter extensão .csv", "error")
+            return redirect(url_for("relatorio_corrigido"))
+        destino = RELATORIO_DIARIO_ENTRADA / Path(nome).name
+        f.save(str(destino))
+        caminho = destino
+    else:
+        try:
+            caminho = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
+        except FileNotFoundError:
+            flash(
+                "Nenhum CSV na pasta. Envie um ficheiro ou copie um .csv para "
+                f"`{RELATORIO_DIARIO_ENTRADA.name}`.",
+                "error",
+            )
+            return redirect(url_for("relatorio_corrigido"))
+
+    criar_banco_e_tabelas()
+    try:
+        data, stats_bl = gerar_relatorio_com_blacklist(caminho)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("relatorio_corrigido"))
+    except Exception as exc:
+        flash(f"Erro ao gerar o Excel: {exc}", "error")
+        return redirect(url_for("relatorio_corrigido"))
+
+    resp = send_file(
+        io.BytesIO(data),
+        as_attachment=True,
+        download_name="relatorio_corrigido.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    # Resumo para o JavaScript após o download (mesmo origem; não precisa CORS expose)
+    resp.headers["X-Relatorio-Blacklist"] = (
+        f"tel_recado={stats_bl['bl_telefone_recado']};"
+        f"recado_sem_tel={stats_bl['bl_recado_sem_tel']};"
+        f"si_tel={stats_bl['bl_sem_interesse_tel']};"
+        f"si_nome={stats_bl['bl_sem_interesse_nome']};"
+        f"si_sem_tel={stats_bl['bl_sem_interesse_sem_tel']}"
+    )
+    return resp
+
+
+@app.route("/relatorio-corrigido/exportar", methods=["POST"])
+def relatorio_corrigido_exportar():
+    """Gera o Excel formatado (com colunas MOTIVO/Resultado) sem gravar na blacklist."""
+    from modulo_relatorio_corrigido import gerar_excel_somente, obter_csv_mais_recente
+
+    f = request.files.get("csv")
+    if f is not None and (f.filename or "").strip():
+        nome = f.filename.strip()
+        if not nome.lower().endswith(".csv"):
+            flash("O ficheiro deve ter extensão .csv", "error")
+            return redirect(url_for("relatorio_corrigido"))
+        destino = RELATORIO_DIARIO_ENTRADA / Path(nome).name
+        f.save(str(destino))
+        caminho = destino
+    else:
+        try:
+            caminho = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
+        except FileNotFoundError:
+            flash(
+                "Nenhum CSV na pasta. Envie um ficheiro ou copie um .csv para "
+                f"`{RELATORIO_DIARIO_ENTRADA.name}`.",
+                "error",
+            )
+            return redirect(url_for("relatorio_corrigido"))
+
+    try:
+        data = gerar_excel_somente(caminho)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("relatorio_corrigido"))
+    except Exception as exc:
+        flash(f"Erro ao gerar o Excel: {exc}", "error")
+        return redirect(url_for("relatorio_corrigido"))
+
+    return send_file(
+        io.BytesIO(data),
+        as_attachment=True,
+        download_name="relatorio_corrigido.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 # ── Exportacao por periodo ────────────────────────────────────────────────────

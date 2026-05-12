@@ -1068,7 +1068,302 @@ def get_messages():
         return jsonify({"error": str(e)}), 500
 
 
-# EDA Diário: montado em /eda/ (ver eda_integracao.py e variável plataforma_central_PATH)
+# ══════════════════════════════════════════════════════════════════════════════
+# CAMPANHA — Disparo de e-mails, gestao de dominios
+# ══════════════════════════════════════════════════════════════════════════════
+
+import csv
+import io
+import uuid
+
+from campanha.api_dominios import (
+    MailgunError,
+    GoDaddyError,
+    adicionar_dominio_completo,
+    listar_dominios,
+    remover_dominio,
+    verificar_dominio,
+)
+from campanha.api_disparo import (
+    buscar_destinatarios_base,
+    cancelar_disparo,
+    iniciar_disparo,
+    obter_historico,
+    obter_historico_detalhe,
+    obter_status,
+)
+from campanha.core import Recipient
+
+
+def _camp_db():
+    """Retorna (db_config_dict, db_name) para as funcoes de dominio."""
+    host = (os.getenv("EDA_MYSQL_HOST") or "localhost").strip()
+    port = int(os.getenv("EDA_MYSQL_PORT", "3306") or "3306")
+    user = (os.getenv("EDA_MYSQL_USER") or "root").strip()
+    password = os.getenv("EDA_MYSQL_PASSWORD", "") or ""
+    db_name = (os.getenv("EDA_MYSQL_DATABASE") or "plataforma_central").strip()
+    timeout = int(os.getenv("EDA_MYSQL_CONNECT_TIMEOUT", "15") or "15")
+    return {
+        "host": host, "port": port, "user": user,
+        "password": password, "connection_timeout": timeout,
+    }, db_name
+
+
+@app.route("/campanha")
+def campanha_page():
+    return render_template("campanha.html")
+
+
+# ── Dominios ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/campanha/dominios", methods=["GET"], endpoint="api_campanha_dominios")
+def api_campanha_dominios_list():
+    try:
+        cfg, db = _camp_db()
+        return jsonify({"ok": True, "dominios": listar_dominios(cfg, db)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/dominios", methods=["POST"], endpoint="api_campanha_dominios_add")
+def api_campanha_dominios_add():
+    data = request.get_json(silent=True) or {}
+    nome = (data.get("nome") or "").strip()
+    dominio = (data.get("dominio") or "").strip()
+    from_name = (data.get("from_name") or "RED PRECATORIOS").strip()
+    from_email = (data.get("from_email") or "").strip()
+    reply_to = (data.get("reply_to") or "").strip() or None
+    if not nome or not dominio or not from_email:
+        return jsonify({"ok": False, "error": "nome, dominio e from_email sao obrigatorios."}), 400
+    try:
+        cfg, db = _camp_db()
+        result = adicionar_dominio_completo(dominio, nome, from_name, from_email, reply_to, cfg, db)
+        return jsonify(result)
+    except MailgunError as e:
+        return jsonify({"ok": False, "error": f"Mailgun: {e.detail}"}), 502
+    except GoDaddyError as e:
+        return jsonify({"ok": False, "error": f"GoDaddy: {e.detail}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/dominios/<int:dom_id>", methods=["DELETE"], endpoint="api_campanha_dominios_delete")
+def api_campanha_dominios_delete(dom_id):
+    try:
+        cfg, db = _camp_db()
+        result = remover_dominio(dom_id, cfg, db)
+        code = 200 if result.get("ok") else 404
+        return jsonify(result), code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/dominios/<int:dom_id>/verificar", methods=["POST"], endpoint="api_campanha_dominios_verify")
+def api_campanha_dominios_verify(dom_id):
+    try:
+        cfg, db = _camp_db()
+        conn = mysql.connector.connect(**cfg, database=db)
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT dominio FROM campanha_dominios WHERE id = %s", (dom_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return jsonify({"ok": False, "error": "Dominio nao encontrado."}), 404
+        result = verificar_dominio(row["dominio"], cfg, db)
+        return jsonify(result)
+    except MailgunError as e:
+        return jsonify({"ok": False, "error": f"Mailgun: {e.detail}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Disparo ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/campanha/disparar", methods=["POST"], endpoint="api_campanha_disparar")
+def api_campanha_disparar():
+    u = current_user()
+    criado_por = u.get("username", "?") if u else "?"
+    campaign_id = f"camp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+    origem = "csv"
+    filtros = None
+    recipients: list[Recipient] = []
+
+    if request.files.get("csv"):
+        f = request.files["csv"]
+        raw_text = f.stream.read().decode("utf-8-sig", errors="replace")
+        delim = ";" if ";" in raw_text.split("\n", 1)[0] else ","
+        stream = io.StringIO(raw_text)
+        reader = csv.DictReader(stream, delimiter=delim)
+        for row in reader:
+            email = (row.get("email") or row.get("Email") or row.get("EMAIL") or "").strip()
+            name = (row.get("nome") or row.get("Nome") or row.get("name") or row.get("Name") or "").strip()
+            if email:
+                recipients.append(Recipient(email=email, name=name, fields=dict(row)))
+        origem = "csv"
+    else:
+        data = request.get_json(silent=True) or {}
+        filtros = data.get("filtros", {})
+        rows = buscar_destinatarios_base(**filtros)
+        for r in rows:
+            recipients.append(Recipient(
+                email=r["email"], name=r.get("nome", ""),
+                fields={"processo": r.get("processo", "")},
+            ))
+        origem = "base"
+
+    assunto = (request.form.get("assunto") or (request.get_json(silent=True) or {}).get("assunto") or "").strip()
+    if not assunto:
+        assunto = "Comunicado Importante"
+    if not recipients:
+        return jsonify({"ok": False, "error": "Nenhum destinatario encontrado."}), 400
+
+    result = iniciar_disparo(recipients, campaign_id, assunto, origem, filtros, criado_por)
+    code = 200 if result.get("ok") else 409
+    return jsonify(result), code
+
+
+@app.route("/api/campanha/disparar-unico", methods=["POST"], endpoint="api_campanha_disparar_unico")
+def api_campanha_disparar_unico():
+    u = current_user()
+    criado_por = u.get("username", "?") if u else "?"
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip()
+    nome = (data.get("nome") or "").strip()
+    assunto = (data.get("assunto") or "Comunicado Importante").strip()
+    if not email:
+        return jsonify({"ok": False, "error": "Campo email e obrigatorio."}), 400
+    campaign_id = f"unico_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    recipients = [Recipient(email=email, name=nome, fields={})]
+    result = iniciar_disparo(recipients, campaign_id, assunto, "unico", None, criado_por)
+    code = 200 if result.get("ok") else 409
+    return jsonify(result), code
+
+
+@app.route("/api/campanha/status", methods=["GET"], endpoint="api_campanha_status")
+def api_campanha_status():
+    return jsonify(obter_status())
+
+
+@app.route("/api/campanha/cancelar", methods=["POST"], endpoint="api_campanha_cancelar")
+def api_campanha_cancelar():
+    result = cancelar_disparo()
+    return jsonify(result)
+
+
+# ── Dashboard / Historico ─────────────────────────────────────────────────────
+
+@app.route("/api/campanha/historico", methods=["GET"], endpoint="api_campanha_historico")
+def api_campanha_historico():
+    try:
+        return jsonify({"ok": True, "campanhas": obter_historico()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/historico/<campaign_id>", methods=["GET"], endpoint="api_campanha_historico_detalhe")
+def api_campanha_historico_detalhe_route(campaign_id):
+    try:
+        row = obter_historico_detalhe(campaign_id)
+        if not row:
+            return jsonify({"ok": False, "error": "Campanha nao encontrada."}), 404
+        return jsonify({"ok": True, "campanha": row})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Destinatarios (preview da base) ──────────────────────────────────────────
+
+@app.route("/api/campanha/destinatarios-preview", methods=["GET"], endpoint="api_campanha_destinatarios_preview")
+def api_campanha_destinatarios_preview():
+    try:
+        filtros = {
+            "periodo_entrada_inicio": request.args.get("periodo_entrada_inicio"),
+            "periodo_entrada_fim": request.args.get("periodo_entrada_fim"),
+            "periodo_disparo_inicio": request.args.get("periodo_disparo_inicio"),
+            "periodo_disparo_fim": request.args.get("periodo_disparo_fim"),
+            "status_disparo": request.args.get("status_disparo"),
+            "fornecedor": request.args.get("fornecedor"),
+        }
+        filtros = {k: v for k, v in filtros.items() if v}
+        rows = buscar_destinatarios_base(**filtros)
+        return jsonify({"ok": True, "total": len(rows), "preview": rows[:50]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ── Migracao de dominios do config.toml → MySQL ──────────────────────────────
+
+@app.route("/api/campanha/migrar-toml", methods=["POST"], endpoint="api_campanha_migrar_toml")
+def api_campanha_migrar_toml():
+    """Le os dominios do campanha/config.toml e insere na tabela campanha_dominios."""
+    import sys
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    toml_path = _PROJECT_ROOT / "campanha" / "config.toml"
+    if not toml_path.exists():
+        return jsonify({"ok": False, "error": "config.toml nao encontrado."}), 404
+
+    try:
+        with open(toml_path, "rb") as f:
+            cfg = tomllib.load(f)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Erro ao ler TOML: {e}"}), 500
+
+    domains = cfg.get("domains", [])
+    if not domains:
+        return jsonify({"ok": False, "error": "Nenhum dominio encontrado no config.toml."}), 400
+
+    db_cfg, db_name = _camp_db()
+    conn = mysql.connector.connect(**db_cfg, database=db_name)
+    cur = conn.cursor()
+
+    inseridos = 0
+    ignorados = 0
+    for d in domains:
+        nome = (d.get("name") or "").strip()
+        from_email = (d.get("from_email") or "").strip()
+        from_name = (d.get("from_name") or "RED PRECATORIOS").strip()
+        if not nome or not from_email:
+            continue
+        dominio = from_email.split("@", 1)[1] if "@" in from_email else ""
+        if not dominio:
+            continue
+        try:
+            cur.execute(
+                """INSERT INTO campanha_dominios
+                   (nome, dominio, from_name, from_email, reply_to, mailgun_state, dns_configured, ativo)
+                   VALUES (%s, %s, %s, %s, %s, 'active', 1, 1)
+                   ON DUPLICATE KEY UPDATE
+                       from_name = VALUES(from_name),
+                       from_email = VALUES(from_email),
+                       dominio = VALUES(dominio)""",
+                (nome, dominio, from_name, from_email, d.get("reply_to") or None),
+            )
+            if cur.rowcount == 1:
+                inseridos += 1
+            else:
+                ignorados += 1
+        except Exception:
+            ignorados += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "total_toml": len(domains),
+        "inseridos": inseridos,
+        "ignorados_ou_atualizados": ignorados,
+    })
+
+
+# EDA Diario: montado em /eda/ (ver eda_integracao.py e variavel plataforma_central_PATH)
 try:
     from eda_integracao import tentar_montar_eda
 

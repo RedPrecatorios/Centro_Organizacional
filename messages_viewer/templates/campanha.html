@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campanha — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Campanha</h1>
+        <p class="dash-sub">Gestao de dominios, disparo de e-mails e monitoramento de campanhas.</p>
+      </div>
+    </header>
+
+    <nav class="camp-tabs" role="tablist" aria-label="Sub-abas da Campanha">
+      <button type="button" class="camp-tab active" data-tab="dominios" role="tab" aria-selected="true">Dominios</button>
+      <button type="button" class="camp-tab" data-tab="disparar" role="tab" aria-selected="false">Disparar</button>
+      <button type="button" class="camp-tab" data-tab="monitoramento" role="tab" aria-selected="false">Monitoramento</button>
+      <button type="button" class="camp-tab" data-tab="dashboard" role="tab" aria-selected="false">Dashboard</button>
+    </nav>
+
+    <main class="dash-content">
+
+      <!-- ═══ SUB-ABA: DOMINIOS ═══ -->
+      <section class="camp-panel active" id="panel-dominios" role="tabpanel">
+        <div class="camp-section-header">
+          <h2>Dominios Cadastrados</h2>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+            <button type="button" class="camp-btn camp-btn-secondary" id="btn-migrar-toml" title="Importar dominios do arquivo campanha/config.toml para o banco">Importar do config.toml</button>
+            <button type="button" class="camp-btn camp-btn-primary" id="btn-add-dominio">+ Adicionar Dominio</button>
+          </div>
+        </div>
+
+        <div id="form-add-dominio" class="camp-form-card" style="display:none">
+          <h3>Novo Dominio</h3>
+          <div class="camp-form-grid">
+            <div class="camp-field">
+              <label for="dom-nome">Nome (chave)</label>
+              <input type="text" id="dom-nome" placeholder="comunicared50" />
+            </div>
+            <div class="camp-field">
+              <label for="dom-dominio">Dominio</label>
+              <input type="text" id="dom-dominio" placeholder="comunicared50.online" />
+            </div>
+            <div class="camp-field">
+              <label for="dom-from-name">From Name</label>
+              <input type="text" id="dom-from-name" placeholder="RED PRECATORIOS" value="RED PRECATORIOS" />
+            </div>
+            <div class="camp-field">
+              <label for="dom-from-email">From Email</label>
+              <input type="email" id="dom-from-email" placeholder="contato@comunicared50.online" />
+            </div>
+            <div class="camp-field">
+              <label for="dom-reply-to">Reply-To (opcional)</label>
+              <input type="email" id="dom-reply-to" placeholder="" />
+            </div>
+          </div>
+          <div class="camp-form-actions">
+            <button type="button" class="camp-btn camp-btn-primary" id="btn-save-dominio">Salvar</button>
+            <button type="button" class="camp-btn camp-btn-ghost" id="btn-cancel-dominio">Cancelar</button>
+          </div>
+          <div id="dom-form-msg" class="camp-msg" style="display:none"></div>
+        </div>
+
+        <div id="dominios-loading" class="camp-loading"><div class="camp-spin"></div> Carregando dominios...</div>
+        <table class="camp-table" id="dominios-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Nome</th><th>Dominio</th><th>From</th><th>Mailgun</th><th>DNS</th><th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody id="dominios-tbody"></tbody>
+        </table>
+        <p id="dominios-empty" class="camp-empty" style="display:none">Nenhum dominio cadastrado.</p>
+      </section>
+
+      <!-- ═══ SUB-ABA: DISPARAR ═══ -->
+      <section class="camp-panel" id="panel-disparar" role="tabpanel" hidden>
+        <div class="camp-section-header">
+          <h2>Disparar Campanha</h2>
+        </div>
+
+        <div class="camp-toggle-row">
+          <button type="button" class="camp-toggle active" data-source="csv">Arquivo CSV</button>
+          <button type="button" class="camp-toggle" data-source="base">Base de dados</button>
+        </div>
+
+        <!-- Modo CSV -->
+        <div id="source-csv" class="camp-source-panel">
+          <div class="camp-field">
+            <label for="csv-file">Arquivo CSV (colunas: email, nome)</label>
+            <input type="file" id="csv-file" accept=".csv,.txt" />
+          </div>
+          <div id="csv-preview" class="camp-preview" style="display:none">
+            <p id="csv-count"></p>
+            <table class="camp-table camp-table-sm"><thead><tr><th>Email</th><th>Nome</th></tr></thead><tbody id="csv-preview-body"></tbody></table>
+          </div>
+        </div>
+
+        <!-- Modo Base -->
+        <div id="source-base" class="camp-source-panel" style="display:none">
+          <div class="camp-form-grid">
+            <div class="camp-field">
+              <label for="f-entrada-ini">Periodo Entrada (de)</label>
+              <input type="date" id="f-entrada-ini" />
+            </div>
+            <div class="camp-field">
+              <label for="f-entrada-fim">Periodo Entrada (ate)</label>
+              <input type="date" id="f-entrada-fim" />
+            </div>
+            <div class="camp-field">
+              <label for="f-disparo-ini">Periodo Disparo (de)</label>
+              <input type="date" id="f-disparo-ini" />
+            </div>
+            <div class="camp-field">
+              <label for="f-disparo-fim">Periodo Disparo (ate)</label>
+              <input type="date" id="f-disparo-fim" />
+            </div>
+            <div class="camp-field">
+              <label for="f-status">Status Disparo</label>
+              <select id="f-status">
+                <option value="">Todos</option>
+                <option value="nao_enviado">Nao enviado</option>
+                <option value="enviado">Enviado</option>
+                <option value="falhou">Falhou</option>
+              </select>
+            </div>
+            <div class="camp-field">
+              <label for="f-fornecedor">Fornecedor</label>
+              <select id="f-fornecedor">
+                <option value="">Todos</option>
+                <option value="Lemitti">Lemitti</option>
+                <option value="Assertiva">Assertiva</option>
+              </select>
+            </div>
+          </div>
+          <button type="button" class="camp-btn camp-btn-secondary" id="btn-preview-base">Visualizar</button>
+          <div id="base-preview" class="camp-preview" style="display:none">
+            <p id="base-count"></p>
+            <table class="camp-table camp-table-sm"><thead><tr><th>Email</th><th>Nome</th><th>Processo</th></tr></thead><tbody id="base-preview-body"></tbody></table>
+          </div>
+        </div>
+
+        <hr class="camp-divider" />
+
+        <div class="camp-field" style="max-width:600px">
+          <label for="disp-assunto">Assunto do e-mail</label>
+          <input type="text" id="disp-assunto" placeholder="Comunicado Importante" value="Comunicado Importante" />
+        </div>
+
+        <button type="button" class="camp-btn camp-btn-primary camp-btn-lg" id="btn-iniciar-disparo">Iniciar Disparo</button>
+        <div id="disparo-msg" class="camp-msg" style="display:none"></div>
+
+        <hr class="camp-divider" />
+
+        <div class="camp-section-header"><h3>Disparo Unico</h3></div>
+        <div class="camp-form-grid" style="max-width:600px">
+          <div class="camp-field">
+            <label for="unico-email">Email</label>
+            <input type="email" id="unico-email" placeholder="fulano@exemplo.com" />
+          </div>
+          <div class="camp-field">
+            <label for="unico-nome">Nome (opcional)</label>
+            <input type="text" id="unico-nome" placeholder="Fulano da Silva" />
+          </div>
+          <div class="camp-field">
+            <label for="unico-assunto">Assunto</label>
+            <input type="text" id="unico-assunto" placeholder="Comunicado Importante" value="Comunicado Importante" />
+          </div>
+        </div>
+        <button type="button" class="camp-btn camp-btn-secondary" id="btn-disparo-unico">Enviar para este email</button>
+        <div id="unico-msg" class="camp-msg" style="display:none"></div>
+      </section>
+
+      <!-- ═══ SUB-ABA: MONITORAMENTO ═══ -->
+      <section class="camp-panel" id="panel-monitoramento" role="tabpanel" hidden>
+        <div class="camp-section-header">
+          <h2>Monitoramento em Tempo Real</h2>
+          <button type="button" class="camp-btn camp-btn-danger" id="btn-cancelar-disparo" disabled>Cancelar Disparo</button>
+        </div>
+
+        <div id="monitor-idle" class="camp-empty">Nenhum disparo em andamento.</div>
+
+        <div id="monitor-active" style="display:none">
+          <div class="camp-progress-wrap">
+            <div class="camp-progress-bar">
+              <div class="camp-progress-fill" id="prog-fill" style="width:0%"></div>
+            </div>
+            <span class="camp-progress-text" id="prog-text">0%</span>
+          </div>
+
+          <div class="camp-stats-row">
+            <div class="camp-stat">
+              <span class="camp-stat-value" id="stat-enviados">0</span>
+              <span class="camp-stat-label">Enviados</span>
+            </div>
+            <div class="camp-stat">
+              <span class="camp-stat-value camp-stat-danger" id="stat-falhos">0</span>
+              <span class="camp-stat-label">Falhos</span>
+            </div>
+            <div class="camp-stat">
+              <span class="camp-stat-value camp-stat-warn" id="stat-blacklist">0</span>
+              <span class="camp-stat-label">Blacklist</span>
+            </div>
+            <div class="camp-stat">
+              <span class="camp-stat-value camp-stat-muted" id="stat-duplicados">0</span>
+              <span class="camp-stat-label">Duplicados</span>
+            </div>
+            <div class="camp-stat">
+              <span class="camp-stat-value" id="stat-total">0</span>
+              <span class="camp-stat-label">Total</span>
+            </div>
+          </div>
+
+          <div class="camp-log-wrap">
+            <h3>Log</h3>
+            <div class="camp-log" id="monitor-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ SUB-ABA: DASHBOARD ═══ -->
+      <section class="camp-panel" id="panel-dashboard" role="tabpanel" hidden>
+        <div class="camp-section-header">
+          <h2>Dashboard de Campanhas</h2>
+        </div>
+
+        <div class="camp-dash-cards" id="dash-cards">
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-total-camp">--</span>
+            <span class="camp-dash-card-label">Campanhas</span>
+          </div>
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-total-env">--</span>
+            <span class="camp-dash-card-label">Emails Enviados</span>
+          </div>
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-taxa">--</span>
+            <span class="camp-dash-card-label">Taxa de Sucesso</span>
+          </div>
+        </div>
+
+        <div id="dash-loading" class="camp-loading"><div class="camp-spin"></div> Carregando historico...</div>
+        <table class="camp-table" id="dash-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Campanha</th><th>Data</th><th>Assunto</th><th>Total</th><th>Enviados</th><th>Falhos</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="dash-tbody"></tbody>
+        </table>
+        <p id="dash-empty" class="camp-empty" style="display:none">Nenhuma campanha registrada.</p>
+      </section>
+
+    </main>
+  </div>
+
+<script>
+(function(){
+  /* ── Sub-abas ── */
+  const tabs = document.querySelectorAll('.camp-tab');
+  const panels = document.querySelectorAll('.camp-panel');
+  tabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabs.forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected','false'); });
+      panels.forEach(p => { p.classList.remove('active'); p.hidden = true; });
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected','true');
+      const panel = document.getElementById('panel-' + btn.dataset.tab);
+      if (panel) { panel.classList.add('active'); panel.hidden = false; }
+      if (btn.dataset.tab === 'dominios') loadDominios();
+      if (btn.dataset.tab === 'monitoramento') pollStatus();
+      if (btn.dataset.tab === 'dashboard') loadDashboard();
+    });
+  });
+
+  function showMsg(el, text, ok) {
+    el.textContent = text;
+    el.className = 'camp-msg ' + (ok ? 'camp-msg-ok' : 'camp-msg-err');
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 6000);
+  }
+
+  /* ── DOMINIOS ── */
+  const domTbody = document.getElementById('dominios-tbody');
+  const domTable = document.getElementById('dominios-table');
+  const domEmpty = document.getElementById('dominios-empty');
+  const domLoading = document.getElementById('dominios-loading');
+
+  function loadDominios() {
+    domLoading.style.display = '';
+    domTable.style.display = 'none';
+    domEmpty.style.display = 'none';
+    fetch('/api/campanha/dominios').then(r => r.json()).then(d => {
+      domLoading.style.display = 'none';
+      if (!d.ok) { domEmpty.textContent = d.error; domEmpty.style.display = ''; return; }
+      const rows = d.dominios || [];
+      if (!rows.length) { domEmpty.style.display = ''; return; }
+      domTbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const stateCls = r.mailgun_state === 'active' ? 'camp-badge-ok' : (r.mailgun_state === 'failed' ? 'camp-badge-err' : 'camp-badge-warn');
+        const dnsCls = r.dns_configured ? 'camp-badge-ok' : 'camp-badge-warn';
+        tr.innerHTML = `<td>${esc(r.nome)}</td><td>${esc(r.dominio)}</td><td>${esc(r.from_name)} &lt;${esc(r.from_email)}&gt;</td>`
+          + `<td><span class="camp-badge ${stateCls}">${esc(r.mailgun_state)}</span></td>`
+          + `<td><span class="camp-badge ${dnsCls}">${r.dns_configured ? 'OK' : 'Pendente'}</span></td>`
+          + `<td class="camp-actions">`
+          + `<button class="camp-btn camp-btn-xs camp-btn-secondary" onclick="verificarDom(${r.id})">Verificar</button>`
+          + `<button class="camp-btn camp-btn-xs camp-btn-danger" onclick="removerDom(${r.id},'${esc(r.dominio)}')">Remover</button>`
+          + `</td>`;
+        domTbody.appendChild(tr);
+      });
+      domTable.style.display = '';
+    }).catch(e => { domLoading.style.display='none'; domEmpty.textContent = 'Erro: '+e; domEmpty.style.display=''; });
+  }
+
+  document.getElementById('btn-add-dominio').addEventListener('click', () => {
+    document.getElementById('form-add-dominio').style.display = '';
+  });
+  document.getElementById('btn-cancel-dominio').addEventListener('click', () => {
+    document.getElementById('form-add-dominio').style.display = 'none';
+  });
+  document.getElementById('btn-save-dominio').addEventListener('click', () => {
+    const body = {
+      nome: document.getElementById('dom-nome').value.trim(),
+      dominio: document.getElementById('dom-dominio').value.trim(),
+      from_name: document.getElementById('dom-from-name').value.trim(),
+      from_email: document.getElementById('dom-from-email').value.trim(),
+      reply_to: document.getElementById('dom-reply-to').value.trim() || null,
+    };
+    if (!body.nome || !body.dominio || !body.from_email) {
+      showMsg(document.getElementById('dom-form-msg'), 'Preencha nome, dominio e from_email.', false); return;
+    }
+    fetch('/api/campanha/dominios', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+      .then(r=>r.json()).then(d => {
+        if (d.ok) {
+          showMsg(document.getElementById('dom-form-msg'), 'Dominio adicionado! DNS: '+(d.dns_configured?'configurado':'pendente (configure manualmente ou aguarde)'), true);
+          document.getElementById('form-add-dominio').style.display = 'none';
+          loadDominios();
+        } else {
+          showMsg(document.getElementById('dom-form-msg'), d.error || 'Erro ao adicionar.', false);
+        }
+      }).catch(e => showMsg(document.getElementById('dom-form-msg'), 'Erro: '+e, false));
+  });
+
+  window.verificarDom = function(id) {
+    fetch('/api/campanha/dominios/'+id+'/verificar', { method:'POST' }).then(r=>r.json()).then(d => {
+      alert(d.ok ? 'Status Mailgun: ' + d.mailgun_state : (d.error || 'Erro'));
+      loadDominios();
+    }).catch(e => alert('Erro: '+e));
+  };
+  window.removerDom = function(id, nome) {
+    if (!confirm('Remover dominio "'+nome+'"? Isso remove do Mailgun tambem.')) return;
+    fetch('/api/campanha/dominios/'+id, { method:'DELETE' }).then(r=>r.json()).then(d => {
+      alert(d.ok ? 'Dominio removido.' : (d.error||'Erro'));
+      loadDominios();
+    }).catch(e => alert('Erro: '+e));
+  };
+
+  document.getElementById('btn-migrar-toml').addEventListener('click', () => {
+    if (!confirm('Importar todos os dominios do campanha/config.toml para o banco de dados?\n\nDominios ja existentes serao atualizados.')) return;
+    fetch('/api/campanha/migrar-toml', { method:'POST' }).then(r=>r.json()).then(d => {
+      if (d.ok) {
+        alert('Migracao concluida!\n\nTotal no TOML: ' + d.total_toml + '\nInseridos: ' + d.inseridos + '\nAtualizados/ignorados: ' + d.ignorados_ou_atualizados);
+        loadDominios();
+      } else {
+        alert('Erro: ' + (d.error || 'Falha na migracao'));
+      }
+    }).catch(e => alert('Erro: ' + e));
+  });
+
+  loadDominios();
+
+  /* ── DISPARAR ── */
+  const toggleBtns = document.querySelectorAll('.camp-toggle');
+  toggleBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      toggleBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('source-csv').style.display = btn.dataset.source === 'csv' ? '' : 'none';
+      document.getElementById('source-base').style.display = btn.dataset.source === 'base' ? '' : 'none';
+    });
+  });
+
+  let csvRows = [];
+  document.getElementById('csv-file').addEventListener('change', function() {
+    const f = this.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const lines = e.target.result.split('\n');
+      const delim = lines[0].includes(';') ? ';' : ',';
+      const header = lines[0].split(delim).map(h => h.trim().replace(/^["']|["']$/g,'').toLowerCase());
+      const emailIdx = header.findIndex(h => h === 'email');
+      const nameIdx = header.findIndex(h => h === 'nome' || h === 'name');
+      csvRows = [];
+      for (let i=1; i<lines.length; i++) {
+        const cols = lines[i].split(delim).map(c => c.trim().replace(/^["']|["']$/g,''));
+        const email = (cols[emailIdx]||'').trim();
+        if (email && email.includes('@')) csvRows.push({ email, nome: (cols[nameIdx]||'').trim() });
+      }
+      document.getElementById('csv-count').textContent = csvRows.length + ' destinatario(s) encontrado(s)';
+      const tbody = document.getElementById('csv-preview-body');
+      tbody.innerHTML = '';
+      csvRows.slice(0, 20).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${esc(r.email)}</td><td>${esc(r.nome)}</td>`;
+        tbody.appendChild(tr);
+      });
+      if (csvRows.length > 20) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="2" style="text-align:center;color:#888">... e mais ${csvRows.length-20} registros</td>`;
+        tbody.appendChild(tr);
+      }
+      document.getElementById('csv-preview').style.display = '';
+    };
+    reader.readAsText(f, 'utf-8');
+  });
+
+  document.getElementById('btn-preview-base').addEventListener('click', () => {
+    const params = new URLSearchParams();
+    const fields = {
+      periodo_entrada_inicio: 'f-entrada-ini', periodo_entrada_fim: 'f-entrada-fim',
+      periodo_disparo_inicio: 'f-disparo-ini', periodo_disparo_fim: 'f-disparo-fim',
+      status_disparo: 'f-status', fornecedor: 'f-fornecedor',
+    };
+    for (const [k,id] of Object.entries(fields)) {
+      const v = document.getElementById(id).value;
+      if (v) params.set(k, v);
+    }
+    fetch('/api/campanha/destinatarios-preview?' + params.toString()).then(r=>r.json()).then(d => {
+      if (!d.ok) { alert(d.error); return; }
+      document.getElementById('base-count').textContent = d.total + ' destinatario(s) encontrado(s)';
+      const tbody = document.getElementById('base-preview-body');
+      tbody.innerHTML = '';
+      (d.preview||[]).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${esc(r.email)}</td><td>${esc(r.nome||'')}</td><td>${esc(r.processo||'')}</td>`;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('base-preview').style.display = '';
+    }).catch(e => alert('Erro: '+e));
+  });
+
+  document.getElementById('btn-iniciar-disparo').addEventListener('click', () => {
+    const assunto = document.getElementById('disp-assunto').value.trim();
+    const activeSource = document.querySelector('.camp-toggle.active').dataset.source;
+    const msgEl = document.getElementById('disparo-msg');
+
+    if (activeSource === 'csv') {
+      const fileInput = document.getElementById('csv-file');
+      if (!fileInput.files.length) { showMsg(msgEl, 'Selecione um arquivo CSV.', false); return; }
+      const fd = new FormData();
+      fd.append('csv', fileInput.files[0]);
+      fd.append('assunto', assunto);
+      fetch('/api/campanha/disparar', { method:'POST', body: fd })
+        .then(r=>r.json()).then(d => {
+          showMsg(msgEl, d.ok ? 'Disparo iniciado! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
+          if (d.ok) {
+            document.querySelector('.camp-tab[data-tab="monitoramento"]').click();
+          }
+        }).catch(e => showMsg(msgEl, 'Erro: '+e, false));
+    } else {
+      const filtros = {};
+      const fields = {
+        periodo_entrada_inicio: 'f-entrada-ini', periodo_entrada_fim: 'f-entrada-fim',
+        periodo_disparo_inicio: 'f-disparo-ini', periodo_disparo_fim: 'f-disparo-fim',
+        status_disparo: 'f-status', fornecedor: 'f-fornecedor',
+      };
+      for (const [k,id] of Object.entries(fields)) {
+        const v = document.getElementById(id).value;
+        if (v) filtros[k] = v;
+      }
+      fetch('/api/campanha/disparar', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ filtros, assunto }),
+      }).then(r=>r.json()).then(d => {
+        showMsg(msgEl, d.ok ? 'Disparo iniciado! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
+        if (d.ok) {
+          document.querySelector('.camp-tab[data-tab="monitoramento"]').click();
+        }
+      }).catch(e => showMsg(msgEl, 'Erro: '+e, false));
+    }
+  });
+
+  document.getElementById('btn-disparo-unico').addEventListener('click', () => {
+    const email = document.getElementById('unico-email').value.trim();
+    const nome = document.getElementById('unico-nome').value.trim();
+    const assunto = document.getElementById('unico-assunto').value.trim();
+    const msgEl = document.getElementById('unico-msg');
+    if (!email) { showMsg(msgEl, 'Informe o email.', false); return; }
+    fetch('/api/campanha/disparar-unico', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email, nome, assunto }),
+    }).then(r=>r.json()).then(d => {
+      showMsg(msgEl, d.ok ? 'Enviando para '+email+'! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
+    }).catch(e => showMsg(msgEl, 'Erro: '+e, false));
+  });
+
+  /* ── MONITORAMENTO ── */
+  let pollTimer = null;
+  function pollStatus() {
+    fetch('/api/campanha/status').then(r=>r.json()).then(d => {
+      if (!d.ok) return;
+      const idle = document.getElementById('monitor-idle');
+      const active = document.getElementById('monitor-active');
+      const cancelBtn = document.getElementById('btn-cancelar-disparo');
+      if (!d.ativo && d.status !== 'rodando' && d.status !== 'preparando') {
+        if (d.status) {
+          active.style.display = '';
+          idle.style.display = 'none';
+          updateMonitorUI(d);
+          cancelBtn.disabled = true;
+        } else {
+          idle.style.display = '';
+          active.style.display = 'none';
+          cancelBtn.disabled = true;
+        }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        return;
+      }
+      idle.style.display = 'none';
+      active.style.display = '';
+      cancelBtn.disabled = false;
+      updateMonitorUI(d);
+      if (!pollTimer) {
+        pollTimer = setInterval(pollStatus, 2000);
+      }
+    }).catch(() => {});
+  }
+
+  function updateMonitorUI(d) {
+    const pct = Math.min(100, d.progresso_pct || 0);
+    document.getElementById('prog-fill').style.width = pct + '%';
+    document.getElementById('prog-text').textContent = pct.toFixed(1) + '%';
+    document.getElementById('stat-enviados').textContent = d.enviados || 0;
+    document.getElementById('stat-falhos').textContent = d.falhos || 0;
+    document.getElementById('stat-blacklist').textContent = d.blacklist_skip || 0;
+    document.getElementById('stat-duplicados').textContent = d.duplicados || 0;
+    document.getElementById('stat-total').textContent = d.total || 0;
+    const logEl = document.getElementById('monitor-log');
+    if (d.log_lines && d.log_lines.length) {
+      logEl.innerHTML = d.log_lines.map(l => '<div class="camp-log-line">'+esc(l)+'</div>').join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+
+  document.getElementById('btn-cancelar-disparo').addEventListener('click', () => {
+    if (!confirm('Cancelar o disparo em andamento?')) return;
+    fetch('/api/campanha/cancelar', { method:'POST' }).then(r=>r.json()).then(d => {
+      alert(d.ok ? 'Cancelamento solicitado.' : (d.error||'Erro'));
+    });
+  });
+
+  /* ── DASHBOARD ── */
+  function loadDashboard() {
+    document.getElementById('dash-loading').style.display = '';
+    document.getElementById('dash-table').style.display = 'none';
+    document.getElementById('dash-empty').style.display = 'none';
+    fetch('/api/campanha/historico').then(r=>r.json()).then(d => {
+      document.getElementById('dash-loading').style.display = 'none';
+      if (!d.ok) { document.getElementById('dash-empty').textContent = d.error; document.getElementById('dash-empty').style.display=''; return; }
+      const rows = d.campanhas || [];
+      if (!rows.length) { document.getElementById('dash-empty').style.display = ''; return; }
+
+      let totalCamp = rows.length, totalEnv = 0, totalDest = 0;
+      rows.forEach(r => { totalEnv += (r.enviados||0); totalDest += (r.total_destinatarios||0); });
+      document.getElementById('dash-total-camp').textContent = totalCamp;
+      document.getElementById('dash-total-env').textContent = totalEnv.toLocaleString('pt-BR');
+      document.getElementById('dash-taxa').textContent = totalDest ? (totalEnv/totalDest*100).toFixed(1)+'%' : '--';
+
+      const tbody = document.getElementById('dash-tbody');
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const stCls = r.status==='concluido'?'camp-badge-ok':(r.status==='erro'||r.status==='cancelado'?'camp-badge-err':'camp-badge-warn');
+        const dt = r.iniciado_em ? new Date(r.iniciado_em).toLocaleString('pt-BR') : '--';
+        tr.innerHTML = `<td>${esc(r.campaign_id)}</td><td>${dt}</td><td>${esc(r.assunto||'')}</td>`
+          + `<td>${r.total_destinatarios}</td><td>${r.enviados}</td><td>${r.falhos}</td>`
+          + `<td><span class="camp-badge ${stCls}">${esc(r.status)}</span></td>`;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('dash-table').style.display = '';
+    }).catch(e => { document.getElementById('dash-loading').style.display='none'; });
+  }
+
+  function esc(s) { if (!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %} · Relatório corrigido{% endblock %}
+
+{% block content %}
+<div class="eda-wrap eda-wrap-narrow">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Relatório corrigido</h1>
+    <p class="eda-lead">
+      Lê um export de discagem em CSV (separador <code>;</code>), detecta o formato
+      <strong>legado</strong>, <strong>campanha</strong> ou <strong>federal</strong>, e gera um Excel com três abas.
+      Na aba <strong>Telefone_Recado</strong> cada telefone é incluído na blacklist (motivo <code>{resultado}_SysCall</code>).
+      Na aba <strong>Sem Interesse_Remover</strong> inclui telefone e nome na blacklist com o mesmo padrão de motivo.
+      A aba <strong>Outros Resultados</strong> só aparece no Excel (sem alterações na base).
+    </p>
+  </div>
+
+  <div class="eda-section-card eda-stack">
+    {% if csv_recente %}
+    <p class="eda-hint" style="margin:0;">
+      CSV mais recente na pasta de entrada:
+      <strong>{{ csv_recente }}</strong>
+      {% if data_recente %}<span class="eda-hint">· modificado {{ data_recente }}</span>{% endif %}
+    </p>
+    {% else %}
+    <p class="eda-hint" style="margin:0;">
+      Ainda não há ficheiros <code>.csv</code> em
+      <code>EDA_Diario/Entrada/relatorio_diario/</code>. Envie um abaixo ou copie um para essa pasta.
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="eda-section-card"
+       data-url-exportar="{{ url_for('relatorio_corrigido_exportar') }}"
+       x-data="relatorioCard()">
+    <form x-ref="mainForm" @submit="gerarComBlacklist($event)" action="{{ url_for('relatorio_corrigido_gerar') }}" method="POST" enctype="multipart/form-data">
+
+      <div class="eda-stack">
+        <div class="eda-block-label">
+          <span class="eda-dot"></span>
+          <span>Enviar novo CSV <span class="eda-hint">(opcional — grava na pasta e passa a ser o mais recente)</span></span>
+        </div>
+        <label class="eda-label" for="csv_rel">Ficheiro</label>
+        <input type="file" name="csv" id="csv_rel" accept=".csv,text/csv" class="eda-input" style="width:100%;" />
+      </div>
+
+      <p class="eda-hint" style="margin-top:1rem;">
+        Se não escolher ficheiro, o servidor usa automaticamente o CSV mais recente na pasta
+        <code>relatorio_diario</code>, como no script original.
+      </p>
+
+      <div style="display:flex;gap:.75rem;margin-top:1.25rem;flex-wrap:wrap;">
+        <button
+          type="submit"
+          :disabled="loading || loadingExport"
+          class="eda-btn eda-btn-primary"
+          style="flex:1 1 0;min-width:200px;">
+          <svg x-show="!loading" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          <svg x-show="loading" width="16" height="16" style="flex-shrink:0;animation:eda-wa-spin 0.9s linear infinite" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span x-text="loading ? 'A processar…' : 'Processar + Blacklist'"></span>
+        </button>
+
+        <button
+          type="button"
+          @click="exportarExcel($event)"
+          :disabled="loading || loadingExport"
+          class="eda-btn eda-btn-secondary"
+          style="flex:1 1 0;min-width:200px;">
+          <svg x-show="!loadingExport" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+          </svg>
+          <svg x-show="loadingExport" width="16" height="16" style="flex-shrink:0;animation:eda-wa-spin 0.9s linear infinite" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span x-text="loadingExport ? 'A exportar…' : 'Exportar Excel'"></span>
+        </button>
+      </div>
+
+    </form>
+
+    <p x-show="msgBlacklist" x-cloak class="eda-hint" style="margin-top:1rem;" x-text="msgBlacklist"></p>
+  </div>
+
+</div>
+
+<script>
+function relatorioCard() {
+  return {
+    loading: false,
+    loadingExport: false,
+    msgBlacklist: '',
+
+    async baixar(url, formEl) {
+      const resp = await fetch(url, { method: 'POST', body: new FormData(formEl), credentials: 'same-origin' });
+      if (resp.ok && resp.headers.get('Content-Type') && resp.headers.get('Content-Type').includes('spreadsheetml')) {
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const disp = resp.headers.get('Content-Disposition') || '';
+        const m = disp.match(/filename\*?=(?:UTF-8'')?([^;\n]+)/i);
+        const nome = m ? m[1].replace(/["']/g, '') : 'relatorio_corrigido.xlsx';
+        a.href = blobUrl; a.download = decodeURIComponent(nome); a.click();
+        URL.revokeObjectURL(blobUrl);
+        return resp;
+      } else {
+        window.location.reload();
+        return null;
+      }
+    },
+
+    async gerarComBlacklist(e) {
+      e.preventDefault();
+      this.loading = true;
+      this.msgBlacklist = '';
+      try {
+        const form = e.target;
+        const resp = await this.baixar(form.action, form);
+        if (resp) {
+          const h = resp.headers.get('X-Relatorio-Blacklist') || '';
+          if (h) {
+            const p = Object.fromEntries(h.split(';').map(function(s) { return s.trim().split('='); }));
+            const tr = p.tel_recado || '0';
+            const st = p.si_tel || '0';
+            const sn = p.si_nome || '0';
+            this.msgBlacklist =
+              'Blacklist: Telefone_Recado \u2014 ' + tr + ' telefone(s). ' +
+              'Sem Interesse_Remover \u2014 ' + st + ' telefone(s), ' + sn + ' nome(s).';
+          }
+        }
+      } catch(err) { console.error(err); window.location.reload(); }
+      finally { this.loading = false; }
+    },
+
+    async exportarExcel(e) {
+      e.preventDefault();
+      this.loadingExport = true;
+      this.msgBlacklist = '';
+      try {
+        const form = this.$refs.mainForm;
+        const url = this.$el.closest('[data-url-exportar]').dataset.urlExportar;
+        await this.baixar(url, form);
+      } catch(err) { console.error(err); window.location.reload(); }
+      finally { this.loadingExport = false; }
+    }
+  };
+}
+</script>
+{% endblock %}

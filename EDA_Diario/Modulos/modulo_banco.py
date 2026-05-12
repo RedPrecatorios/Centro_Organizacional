@@ -174,6 +174,39 @@ def criar_banco_e_tabelas() -> None:
         ativo          TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=ativo | 0=inativo',
         UNIQUE KEY uq_blacklist (tipo, valor)
     ) ENGINE=InnoDB;
+
+    CREATE TABLE IF NOT EXISTS campanha_dominios (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        nome            VARCHAR(128) NOT NULL UNIQUE,
+        dominio         VARCHAR(255) NOT NULL,
+        from_name       VARCHAR(255) NOT NULL DEFAULT 'RED PRECATORIOS',
+        from_email      VARCHAR(320) NOT NULL,
+        reply_to        VARCHAR(320) DEFAULT NULL,
+        mailgun_state   ENUM('pending','active','failed','deleted') NOT NULL DEFAULT 'pending',
+        dns_configured  TINYINT(1) NOT NULL DEFAULT 0,
+        ativo           TINYINT(1) NOT NULL DEFAULT 1,
+        criado_em       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;
+
+    CREATE TABLE IF NOT EXISTS campanha_disparos (
+        id                   INT AUTO_INCREMENT PRIMARY KEY,
+        campaign_id          VARCHAR(191) NOT NULL UNIQUE,
+        assunto              VARCHAR(500) NOT NULL,
+        total_destinatarios  INT NOT NULL DEFAULT 0,
+        enviados             INT NOT NULL DEFAULT 0,
+        falhos               INT NOT NULL DEFAULT 0,
+        blacklist_skip       INT NOT NULL DEFAULT 0,
+        duplicados           INT NOT NULL DEFAULT 0,
+        status               ENUM('preparando','rodando','concluido','erro','cancelado') NOT NULL DEFAULT 'preparando',
+        progresso_pct        DECIMAL(5,2) NOT NULL DEFAULT 0,
+        origem               ENUM('csv','base','unico') NOT NULL DEFAULT 'csv',
+        filtros_json         TEXT DEFAULT NULL,
+        log_json             TEXT DEFAULT NULL COMMENT 'Ultimas N linhas do log para exibicao',
+        iniciado_em          DATETIME DEFAULT NULL,
+        concluido_em         DATETIME DEFAULT NULL,
+        criado_por           VARCHAR(200) DEFAULT NULL
+    ) ENGINE=InnoDB;
     """
 
     for stmt in tabelas.split(";"):
