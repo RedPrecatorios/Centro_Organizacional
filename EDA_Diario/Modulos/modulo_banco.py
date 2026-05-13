@@ -207,6 +207,18 @@ def criar_banco_e_tabelas() -> None:
         concluido_em         DATETIME DEFAULT NULL,
         criado_por           VARCHAR(200) DEFAULT NULL
     ) ENGINE=InnoDB;
+
+    CREATE TABLE IF NOT EXISTS campanha_templates (
+        id               INT AUTO_INCREMENT PRIMARY KEY,
+        nome             VARCHAR(200) NOT NULL UNIQUE,
+        assunto          TEXT NOT NULL,
+        corpo_html       MEDIUMTEXT NOT NULL,
+        corpo_texto      MEDIUMTEXT NOT NULL,
+        mapeamento_json  TEXT DEFAULT NULL COMMENT 'JSON: variavel_template -> fonte (__email__,__nome__,coluna_csv)',
+        ativo            TINYINT(1) NOT NULL DEFAULT 1,
+        criado_em        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB;
     """
 
     for stmt in tabelas.split(";"):
@@ -218,6 +230,17 @@ def criar_banco_e_tabelas() -> None:
     cur.close()
     conn.close()
     print("[DB] Banco e tabelas verificados/criados com sucesso.")
+
+    try:
+        from campanha.api_templates import garantir_template_padrao_script
+
+        r = garantir_template_padrao_script(DB_CONFIG, DB_NAME)
+        if r.get("skipped"):
+            print("[DB] Campanha: template do script (default.html) ja existia:", r.get("nome"))
+        elif r.get("ok"):
+            print("[DB] Campanha: template do script inserido na plataforma (id=%s)." % r.get("id"))
+    except Exception as e:
+        print("[DB] Campanha: aviso ao inserir template padrao —", e)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

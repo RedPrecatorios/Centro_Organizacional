@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import io
 import hashlib
+import re
 import json
 import os
 import smtplib
@@ -45,11 +47,78 @@ def _read_text(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+
+
+def extrair_variaveis_template(*texts: str) -> list[str]:
+    """Lista nomes unicos usados como {{variavel}} nos textos."""
+    seen: dict[str, None] = {}
+    for t in texts:
+        if not t:
+            continue
+        for m in _PLACEHOLDER_RE.finditer(t):
+            seen.setdefault(m.group(1), None)
+    return list(seen.keys())
+
+
 def _render_template(template_text: str, vars: dict[str, str]) -> str:
     # Template mínimo, deliberadamente simples: {{var}}
     out = template_text
     for k, v in vars.items():
         out = out.replace("{{" + k + "}}", str(v))
+    return out
+
+
+def build_recipient_template_vars(
+    recipient: Recipient,
+    subject_template: str,
+    base_vars: dict[str, str],
+    mapeamento: dict[str, str] | None,
+) -> dict[str, str]:
+    """
+    Monta o dicionario para {{variavel}} no assunto e nos corpos.
+    mapeamento: nome da variavel no template -> fonte dos dados:
+      __email__, __nome__ (ou __name__), ou nome de coluna do CSV / campo da base.
+      Colunas padrao de nome/email do CSV nao entram em `fields`; use __nome__/__email__
+      ou o proprio cabecalho (ex.: "nome", "email") que resolve para name/email do destinatario.
+    Campos do destinatario ficam tambem em `out` pelas chaves originais (ex.: processo).
+    """
+    out: dict[str, str] = {k: str(v or "") for k, v in base_vars.items()}
+    out.update({k: str(v or "") for k, v in recipient.fields.items()})
+
+    magic_sources = {
+        "__email__": recipient.email,
+        "__nome__": recipient.name,
+        "__name__": recipient.name,
+    }
+    if mapeamento:
+        for tpl_var, source_key in mapeamento.items():
+            if not tpl_var or source_key is None:
+                continue
+            sk = str(source_key).strip()
+            if sk in magic_sources:
+                out[str(tpl_var).strip()] = magic_sources[sk]
+            else:
+                val = recipient.fields.get(sk, "")
+                if not val:
+                    for fk, fv in recipient.fields.items():
+                        if str(fk).lower() == sk.lower():
+                            val = str(fv or "")
+                            break
+                if not val:
+                    skl = sk.lower()
+                    if skl in ("nome", "name", "credor"):
+                        val = recipient.name or ""
+                    elif skl in ("email", "e-mail", "mail"):
+                        val = recipient.email or ""
+                out[str(tpl_var).strip()] = val
+
+    out["name"] = recipient.name
+    out["email"] = recipient.email
+    out["credor"] = out.get("credor") or recipient.name
+
+    subj = _render_template(subject_template, out)
+    out["subject"] = subj
     return out
 
 
@@ -112,6 +181,9 @@ class ContentConfig:
     html_template: str
     text_template: str
     vars: dict[str, str]
+    # Se preenchidos, ignoram leitura dos ficheiros html_template / text_template
+    html_inline: str | None = None
+    text_inline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -426,42 +498,122 @@ def load_config_toml(path: str) -> CampaignConfig:
     )
 
 
-def load_recipients_csv(path: str) -> list[Recipient]:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Arquivo de recipients não encontrado: {path}")
-    out: list[Recipient] = []
-    with p.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
+def _decode_csv_bytes(raw: bytes) -> str:
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8-sig", errors="replace")
+
+
+def _sniff_csv_delimiter(header_line: str) -> str:
+    """Escolhe o delimitador mais provável a partir da linha de cabeçalho."""
+    tabs = header_line.count("\t")
+    semis = header_line.count(";")
+    commas = header_line.count(",")
+    if tabs >= max(semis, commas) and tabs > 0:
+        return "\t"
+    if semis > commas:
+        return ";"
+    return ","
+
+
+def _csv_header_start_lines(text: str) -> str:
+    """
+    Normaliza quebras de linha, ignora linhas vazias, comentários e linha 'sep=,' do Excel.
+    Retorna o texto a partir da primeira linha de cabeçalho útil (inclusive).
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip().lstrip("\ufeff")
+        if not s or s.startswith("#"):
+            i += 1
+            continue
+        low = s.lower()
+        if low.startswith("sep="):
+            i += 1
+            continue
+        return "\n".join(lines[i:]).strip()
+    return ""
+
+
+def parse_recipients_csv_text(text: str) -> list[Recipient]:
+    """
+    Interpreta CSV/TSV em memória (upload web, etc.) com a mesma lógica de load_recipients_csv:
+    cabeçalhos com espaços, e-mail, Excel sep=, tab ou ';' ou ','.
+    Se o primeiro delimitador não produzir emails, tenta os outros.
+    """
+    block = _csv_header_start_lines(text)
+    if not block:
+        return []
+
+    header_line = block.split("\n", 1)[0]
+    delims = [_sniff_csv_delimiter(header_line), ";", ",", "\t"]
+    seen: set[str] = set()
+    ordered_delims: list[str] = []
+    for d in delims:
+        if d not in seen:
+            seen.add(d)
+            ordered_delims.append(d)
+
+    for delim in ordered_delims:
+        out: list[Recipient] = []
+        reader = csv.DictReader(io.StringIO(block), delimiter=delim)
         for row in reader:
-            # Aceita cabeçalhos no padrão atual da operação: Email, nome, processo
-            # e também compatibilidade retro: name,email.
             row_norm: dict[str, str] = {}
             for k, v in row.items():
                 if not k:
                     continue
-                kk = str(k).strip().lower()
+                kk = str(k).strip().lower().lstrip("\ufeff")
                 vv = "" if v is None else str(v).strip()
                 row_norm[kk] = vv
 
-            email = (row_norm.get("email") or row_norm.get("e-mail") or "").strip()
-            name = (row_norm.get("nome") or row_norm.get("name") or "").strip()
-            if not email:
+            email = (
+                row_norm.get("email")
+                or row_norm.get("e-mail")
+                or row_norm.get("mail")
+                or ""
+            ).strip()
+            name = (
+                row_norm.get("nome")
+                or row_norm.get("name")
+                or row_norm.get("credor")
+                or ""
+            ).strip()
+            if not email or "@" not in email:
                 continue
             fields: dict[str, str] = {}
             for k, v in row.items():
                 if not k:
                     continue
                 kk_raw = str(k).strip()
-                kk = kk_raw.lower()
-                if kk in ("name", "nome", "email", "e-mail"):
+                kk = kk_raw.lower().lstrip("\ufeff")
+                if kk in ("name", "nome", "email", "e-mail", "mail", "credor"):
                     continue
                 vv = "" if v is None else str(v).strip()
                 if vv:
-                    # Mantém a chave original para usar no template como {{processo}}, {{credor}}, etc.
                     fields[kk_raw] = vv
             out.append(Recipient(name=name or email, email=email, fields=fields))
-    return out
+        if out:
+            return out
+    return []
+
+
+def parse_recipients_csv_bytes(raw: bytes) -> list[Recipient]:
+    """Decodifica bytes (upload Flask) e extrai destinatários."""
+    return parse_recipients_csv_text(_decode_csv_bytes(raw))
+
+
+def load_recipients_csv(path: str) -> list[Recipient]:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Arquivo de recipients não encontrado: {path}")
+    raw = p.read_bytes()
+    text = _decode_csv_bytes(raw)
+    return parse_recipients_csv_text(text)
 
 
 def load_blacklist_emails(mysql_cfg: MysqlConfig, use_db: bool, extra_email_file: str | None) -> set[str]:
@@ -668,8 +820,16 @@ def run_campaign(
     blocked = load_blacklist_emails(cfg.mysql, cfg.blacklist.use_db, cfg.blacklist.extra_email_file)
     sent_keys = _load_sent_keys(sent_keys_file)
 
-    html_t = _read_text(cfg.content.html_template)
-    text_t = _read_text(cfg.content.text_template)
+    html_t = (
+        cfg.content.html_inline
+        if cfg.content.html_inline is not None
+        else _read_text(cfg.content.html_template)
+    )
+    text_t = (
+        cfg.content.text_inline
+        if cfg.content.text_inline is not None
+        else _read_text(cfg.content.text_template)
+    )
 
     # rate limit simples (por domínio): espaçamento mínimo entre envios
     per_min = max(1, int(cfg.sending.per_domain_per_minute))

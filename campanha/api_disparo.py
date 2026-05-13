@@ -14,6 +14,7 @@ from typing import Any
 
 import mysql.connector
 
+from campanha.api_templates import obter_template
 from campanha.core import (
     BlacklistConfig,
     ContentConfig,
@@ -31,6 +32,7 @@ from campanha.core import (
     _render_template,
     _round_robin,
     _smtp_send,
+    build_recipient_template_vars,
     load_blacklist_emails,
 )
 
@@ -115,6 +117,7 @@ def _thread_disparo(
     content: ContentConfig,
     blacklist_cfg: BlacklistConfig,
     criado_por: str,
+    mapeamento: dict[str, str] | None,
 ):
     global _disparo_atual
     _cancelar_flag.clear()
@@ -148,8 +151,16 @@ def _thread_disparo(
             _disparo_atual["status"] = "erro"
         return
 
-    html_t = _read_text(content.html_template)
-    text_t = _read_text(content.text_template)
+    html_t = (
+        content.html_inline
+        if content.html_inline is not None
+        else _read_text(content.html_template)
+    )
+    text_t = (
+        content.text_inline
+        if content.text_inline is not None
+        else _read_text(content.text_template)
+    )
 
     per_min = max(1, sending.per_domain_per_minute)
     min_interval = 60.0 / per_min
@@ -184,7 +195,11 @@ def _thread_disparo(
             )
             continue
 
-        key = _idempotency_key(campaign_id, r.email, content.subject)
+        vars_ = build_recipient_template_vars(
+            r, content.subject, dict(content.vars), mapeamento,
+        )
+        subj_final = vars_["subject"]
+        key = _idempotency_key(campaign_id, r.email, subj_final)
         if key in sent_keys:
             totals["duplicados"] += 1
             pct = round(((i + 1) / total) * 100, 2)
@@ -202,19 +217,11 @@ def _thread_disparo(
         if delta < min_interval:
             time.sleep(min_interval - delta)
 
-        vars_ = dict(content.vars)
-        vars_.update({
-            "subject": content.subject,
-            "name": r.name,
-            "email": r.email,
-            "credor": r.name,
-        })
-        vars_.update(r.fields)
         html = _render_template(html_t, vars_)
         text = _render_template(text_t, vars_)
 
         msg = _build_message(
-            domain=domain, to_email=r.email, subject=content.subject,
+            domain=domain, to_email=r.email, subject=subj_final,
             html=html, text=text,
             headers={"X-Campaign-Id": campaign_id, "X-Idempotency-Key": key},
             reply_to=_effective_reply_to(domain, sending),
@@ -279,6 +286,9 @@ def iniciar_disparo(
     origem: str,
     filtros: dict | None,
     criado_por: str,
+    *,
+    template_id: int | None = None,
+    mapeamento: dict[str, str] | None = None,
 ) -> dict:
     global _disparo_atual
 
@@ -345,11 +355,27 @@ def iniciar_disparo(
         html_p = project_root / "campanha" / "templates" / "default.html"
         text_p = project_root / "campanha" / "templates" / "default.txt"
 
+        html_inline: str | None = None
+        text_inline: str | None = None
+        map_use: dict[str, str] | None = mapeamento
+
+        if template_id is not None:
+            trow = obter_template(int(template_id), cfg_dict, db_name)
+            if not trow:
+                _disparo_lock.release()
+                return {"ok": False, "error": "Template nao encontrado ou inativo."}
+            html_inline = (trow.get("corpo_html") or "").strip() or None
+            text_inline = (trow.get("corpo_texto") or "").strip() or None
+            if mapeamento is None and trow.get("mapeamento"):
+                map_use = trow["mapeamento"]
+
         content = ContentConfig(
             subject=assunto,
             html_template=str(html_p),
             text_template=str(text_p),
             vars={"company_name": "RED PRECATORIOS", "support_email": "contato@redprecatorios.com.br"},
+            html_inline=html_inline,
+            text_inline=text_inline,
         )
 
         _disparo_atual = {
@@ -364,8 +390,10 @@ def iniciar_disparo(
 
         t = threading.Thread(
             target=_run_and_release,
-            args=(campaign_id, recipients, domains, mysql_cfg, sending, mailgun,
-                  content, blacklist_cfg, criado_por),
+            args=(
+                campaign_id, recipients, domains, mysql_cfg, sending, mailgun,
+                content, blacklist_cfg, criado_por, map_use,
+            ),
             daemon=True,
         )
         t.start()

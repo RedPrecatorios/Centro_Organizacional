@@ -22,6 +22,7 @@
 
     <nav class="camp-tabs" role="tablist" aria-label="Sub-abas da Campanha">
       <button type="button" class="camp-tab active" data-tab="dominios" role="tab" aria-selected="true">Dominios</button>
+      <button type="button" class="camp-tab" data-tab="templates" role="tab" aria-selected="false">Templates</button>
       <button type="button" class="camp-tab" data-tab="disparar" role="tab" aria-selected="false">Disparar</button>
       <button type="button" class="camp-tab" data-tab="monitoramento" role="tab" aria-selected="false">Monitoramento</button>
       <button type="button" class="camp-tab" data-tab="dashboard" role="tab" aria-selected="false">Dashboard</button>
@@ -83,6 +84,56 @@
         <p id="dominios-empty" class="camp-empty" style="display:none">Nenhum dominio cadastrado.</p>
       </section>
 
+      <!-- ═══ SUB-ABA: TEMPLATES ═══ -->
+      <section class="camp-panel" id="panel-templates" role="tabpanel" hidden>
+        <div class="camp-section-header">
+          <h2>Templates de e-mail</h2>
+          <button type="button" class="camp-btn camp-btn-primary" id="btn-tpl-new">+ Novo template</button>
+        </div>
+        <p class="dash-sub" style="margin-top:0;max-width:52rem">Use <code>{% raw %}{{variavel}}{% endraw %}</code> no assunto, HTML e texto. No disparo, mapeie cada variavel para uma coluna do CSV (ou <code>__email__</code> / <code>__nome__</code>).</p>
+
+        <div id="tpl-form-wrap" class="camp-form-card" style="display:none">
+          <h3 id="tpl-form-title">Novo template</h3>
+          <input type="hidden" id="tpl-id" value="" />
+          <div class="camp-form-grid">
+            <div class="camp-field" style="grid-column:1/-1;max-width:24rem">
+              <label for="tpl-nome">Nome (identificador)</label>
+              <input type="text" id="tpl-nome" placeholder="antecipacao_padrao" />
+            </div>
+            <div class="camp-field" style="grid-column:1/-1">
+              <label for="tpl-assunto">Assunto (pode usar {% raw %}{{variavel}}{% endraw %})</label>
+              <textarea id="tpl-assunto" rows="2" placeholder="Comunicado para {% raw %}{{credor}}{% endraw %}"></textarea>
+            </div>
+            <div class="camp-field" style="grid-column:1/-1">
+              <label for="tpl-html">Corpo HTML</label>
+              <textarea id="tpl-html" rows="14" class="camp-textarea-code" placeholder="&lt;p&gt;Ola {% raw %}{{credor}}{% endraw %}, processo {% raw %}{{processo}}{% endraw %}&lt;/p&gt;"></textarea>
+            </div>
+            <div class="camp-field" style="grid-column:1/-1">
+              <label for="tpl-txt">Corpo texto plano</label>
+              <textarea id="tpl-txt" rows="8" class="camp-textarea-code"></textarea>
+            </div>
+            <div class="camp-field" style="grid-column:1/-1">
+              <label for="tpl-map-json">Mapeamento padrao (JSON opcional)</label>
+              <input type="text" id="tpl-map-json" class="camp-input-mono" placeholder='{"credor":"nome","processo":"processo"}' />
+              <small class="camp-hint">Chave = variavel no template; valor = coluna CSV ou __email__ / __nome__</small>
+            </div>
+          </div>
+          <p id="tpl-vars-detected" class="camp-hint"></p>
+          <div class="camp-form-actions">
+            <button type="button" class="camp-btn camp-btn-primary" id="btn-tpl-save">Guardar</button>
+            <button type="button" class="camp-btn camp-btn-ghost" id="btn-tpl-cancel">Cancelar</button>
+          </div>
+          <div id="tpl-form-msg" class="camp-msg" style="display:none"></div>
+        </div>
+
+        <div id="tpl-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+        <table class="camp-table" id="tpl-table" style="display:none">
+          <thead><tr><th>Nome</th><th>Assunto</th><th>Tamanho</th><th>Acoes</th></tr></thead>
+          <tbody id="tpl-tbody"></tbody>
+        </table>
+        <p id="tpl-empty" class="camp-empty" style="display:none">Nenhum template. Crie um ou importe conteudo dos ficheiros em <code>campanha/templates/</code>.</p>
+      </section>
+
       <!-- ═══ SUB-ABA: DISPARAR ═══ -->
       <section class="camp-panel" id="panel-disparar" role="tabpanel" hidden>
         <div class="camp-section-header">
@@ -92,6 +143,20 @@
         <div class="camp-toggle-row">
           <button type="button" class="camp-toggle active" data-source="csv">Arquivo CSV</button>
           <button type="button" class="camp-toggle" data-source="base">Base de dados</button>
+        </div>
+
+        <div class="camp-form-card" style="margin-bottom:1rem">
+          <h3 style="margin:0 0 0.5rem;font-size:1rem">Template e variaveis</h3>
+          <div class="camp-field" style="max-width:28rem">
+            <label for="disp-template-id">Template</label>
+            <select id="disp-template-id">
+              <option value="">Padrao (ficheiros default.html / default.txt)</option>
+            </select>
+          </div>
+          <div id="disp-map-container" style="display:none;margin-top:0.75rem">
+            <p class="camp-hint" style="margin:0 0 0.5rem">Para cada <code>{% raw %}{{variavel}}{% endraw %}</code>, escolha a fonte dos dados:</p>
+            <div id="disp-map-rows" class="camp-map-rows"></div>
+          </div>
         </div>
 
         <!-- Modo CSV -->
@@ -156,7 +221,7 @@
           <label for="disp-assunto">Assunto do e-mail</label>
           <input type="text" id="disp-assunto" placeholder="Comunicado Importante" value="Comunicado Importante" />
         </div>
-
+        <br>
         <button type="button" class="camp-btn camp-btn-primary camp-btn-lg" id="btn-iniciar-disparo">Iniciar Disparo</button>
         <div id="disparo-msg" class="camp-msg" style="display:none"></div>
 
@@ -175,6 +240,10 @@
           <div class="camp-field">
             <label for="unico-assunto">Assunto</label>
             <input type="text" id="unico-assunto" placeholder="Comunicado Importante" value="Comunicado Importante" />
+          </div>
+          <div class="camp-field" style="grid-column:1/-1">
+            <label for="unico-template-id">Template (opcional)</label>
+            <select id="unico-template-id"><option value="">Padrao (default.html)</option></select>
           </div>
         </div>
         <button type="button" class="camp-btn camp-btn-secondary" id="btn-disparo-unico">Enviar para este email</button>
@@ -278,6 +347,8 @@
       const panel = document.getElementById('panel-' + btn.dataset.tab);
       if (panel) { panel.classList.add('active'); panel.hidden = false; }
       if (btn.dataset.tab === 'dominios') loadDominios();
+      if (btn.dataset.tab === 'templates') loadTemplatesList();
+      if (btn.dataset.tab === 'disparar') { loadTemplateSelects(); refreshDispMapUI(); }
       if (btn.dataset.tab === 'monitoramento') pollStatus();
       if (btn.dataset.tab === 'dashboard') loadDashboard();
     });
@@ -395,6 +466,214 @@
 
   loadDominios();
 
+  /* ── TEMPLATES (CRUD + select no disparo) ── */
+  let dispCsvHeaders = [];
+  let dispTemplateVars = [];
+  let dispTemplateMapDefault = {};
+
+  function tplEscAttr(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  function dataSourceOptions() {
+    const activeSource = document.querySelector('.camp-toggle.active').dataset.source;
+    if (activeSource === 'base') return ['__email__', '__nome__', 'processo'];
+    const o = ['__email__', '__nome__'];
+    dispCsvHeaders.forEach(h => { if (h && o.indexOf(h) < 0) o.push(h); });
+    return o;
+  }
+
+  function renderDispMapRows() {
+    const wrap = document.getElementById('disp-map-container');
+    const rowsEl = document.getElementById('disp-map-rows');
+    if (!document.getElementById('disp-template-id').value || !dispTemplateVars.length) {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = '';
+    rowsEl.innerHTML = '';
+    const opts = dataSourceOptions();
+    dispTemplateVars.forEach(v => {
+      const row = document.createElement('div');
+      row.className = 'camp-map-row';
+      const lab = document.createElement('span');
+      lab.className = 'camp-map-label';
+      lab.innerHTML = '<code>' + '\u007B\u007B' + esc(v) + '\u007D\u007D' + '</code>';
+      const sel = document.createElement('select');
+      sel.dataset.tplVar = v;
+      let html = '<option value="">(auto: coluna com mesmo nome ou padrao do template)</option>';
+      opts.forEach(o => { html += '<option value="' + tplEscAttr(o) + '">' + esc(o) + '</option>'; });
+      sel.innerHTML = html;
+      const def = dispTemplateMapDefault[v];
+      if (def && [...sel.options].some(op => op.value === def)) sel.value = def;
+      else if (opts.indexOf(v) >= 0) sel.value = v;
+      row.appendChild(lab);
+      row.appendChild(sel);
+      rowsEl.appendChild(row);
+    });
+  }
+
+  function refreshDispMapUI() {
+    if (document.getElementById('disp-template-id').value) renderDispMapRows();
+    else document.getElementById('disp-map-container').style.display = 'none';
+  }
+
+  function collectDispMapeamento() {
+    if (!document.getElementById('disp-template-id').value) return null;
+    const out = {};
+    document.querySelectorAll('#disp-map-rows select').forEach(sel => {
+      if (sel.value) out[sel.dataset.tplVar] = sel.value;
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
+  async function loadTemplateSelects() {
+    const d = await fetch('/api/campanha/templates').then(r => r.json());
+    if (!d.ok) return;
+    const sel = document.getElementById('disp-template-id');
+    const sel2 = document.getElementById('unico-template-id');
+    const cur = sel.value, cur2 = sel2.value;
+    const head = '<option value="">Padrao (ficheiros default.html / default.txt)</option>';
+    const body = (d.templates || []).map(t => '<option value="' + String(t.id) + '">' + esc(t.nome) + '</option>').join('');
+    sel.innerHTML = head + body;
+    sel2.innerHTML = head + body;
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    if ([...sel2.options].some(o => o.value === cur2)) sel2.value = cur2;
+  }
+
+  document.getElementById('disp-template-id').addEventListener('change', async function() {
+    const id = this.value;
+    if (!id) {
+      dispTemplateVars = [];
+      dispTemplateMapDefault = {};
+      document.getElementById('disp-map-container').style.display = 'none';
+      return;
+    }
+    const d = await fetch('/api/campanha/templates/' + id).then(r => r.json());
+    if (!d.ok) { alert(d.error || 'Erro'); return; }
+    dispTemplateVars = d.template.variaveis || [];
+    dispTemplateMapDefault = d.template.mapeamento || {};
+    if (d.template.assunto && !document.getElementById('disp-assunto').dataset.touched) {
+      document.getElementById('disp-assunto').value = d.template.assunto;
+    }
+    renderDispMapRows();
+  });
+
+  function tplDetectVars() {
+    const a = document.getElementById('tpl-assunto').value || '';
+    const h = document.getElementById('tpl-html').value || '';
+    const t = document.getElementById('tpl-txt').value || '';
+    const re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, s = new Set();
+    [a, h, t].forEach(txt => { let m; while ((m = re.exec(txt))) s.add(m[1]); });
+    document.getElementById('tpl-vars-detected').textContent = s.size
+      ? 'Variaveis detectadas: ' + Array.from(s).map(x => '\u007B\u007B' + x + '\u007D\u007D').join(', ')
+      : 'Nenhuma variavel \u007B\u007B...\u007D\u007D detectada.';
+  }
+  ['tpl-assunto','tpl-html','tpl-txt'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', tplDetectVars);
+  });
+
+  async function loadTemplatesList() {
+    const load = document.getElementById('tpl-loading');
+    const tbl = document.getElementById('tpl-table');
+    const empty = document.getElementById('tpl-empty');
+    load.style.display = '';
+    tbl.style.display = 'none';
+    empty.style.display = 'none';
+    const d = await fetch('/api/campanha/templates').then(r => r.json());
+    load.style.display = 'none';
+    if (!d.ok) { empty.textContent = d.error; empty.style.display = ''; return; }
+    const rows = d.templates || [];
+    if (!rows.length) { empty.style.display = ''; return; }
+    const tb = document.getElementById('tpl-tbody');
+    tb.innerHTML = '';
+    rows.forEach(t => {
+      const tr = document.createElement('tr');
+      const subj = (t.assunto || '').substring(0, 60) + ((t.assunto || '').length > 60 ? '…' : '');
+      const sz = (t.html_len || 0) + (t.texto_len || 0);
+      tr.innerHTML = '<td>' + esc(t.nome) + '</td><td>' + esc(subj) + '</td><td>' + sz + ' chars</td>' +
+        '<td class="camp-actions">' +
+        '<button type="button" class="camp-btn camp-btn-xs camp-btn-secondary tpl-edit" data-id="' + t.id + '">Editar</button> ' +
+        '<button type="button" class="camp-btn camp-btn-xs camp-btn-danger tpl-del" data-id="' + t.id + '">Remover</button></td>';
+      tb.appendChild(tr);
+    });
+    tbl.style.display = '';
+    tb.querySelectorAll('.tpl-edit').forEach(b => b.addEventListener('click', () => tplEdit(parseInt(b.dataset.id, 10))));
+    tb.querySelectorAll('.tpl-del').forEach(b => b.addEventListener('click', () => tplDel(parseInt(b.dataset.id, 10))));
+  }
+
+  function tplResetForm() {
+    document.getElementById('tpl-id').value = '';
+    document.getElementById('tpl-nome').value = '';
+    document.getElementById('tpl-assunto').value = '';
+    document.getElementById('tpl-html').value = '';
+    document.getElementById('tpl-txt').value = '';
+    document.getElementById('tpl-map-json').value = '';
+    document.getElementById('tpl-form-title').textContent = 'Novo template';
+    tplDetectVars();
+  }
+
+  document.getElementById('btn-tpl-new').addEventListener('click', () => {
+    tplResetForm();
+    document.getElementById('tpl-form-wrap').style.display = '';
+  });
+  document.getElementById('btn-tpl-cancel').addEventListener('click', () => {
+    document.getElementById('tpl-form-wrap').style.display = 'none';
+  });
+
+  async function tplEdit(id) {
+    const d = await fetch('/api/campanha/templates/' + id).then(r => r.json());
+    if (!d.ok) { alert(d.error); return; }
+    const t = d.template;
+    document.getElementById('tpl-id').value = id;
+    document.getElementById('tpl-nome').value = t.nome || '';
+    document.getElementById('tpl-assunto').value = t.assunto || '';
+    document.getElementById('tpl-html').value = t.corpo_html || '';
+    document.getElementById('tpl-txt').value = t.corpo_texto || '';
+    document.getElementById('tpl-map-json').value = (t.mapeamento && Object.keys(t.mapeamento).length)
+      ? JSON.stringify(t.mapeamento) : '';
+    document.getElementById('tpl-form-title').textContent = 'Editar template';
+    document.getElementById('tpl-form-wrap').style.display = '';
+    tplDetectVars();
+  }
+
+  async function tplDel(id) {
+    if (!confirm('Remover este template?')) return;
+    const d = await fetch('/api/campanha/templates/' + id, { method: 'DELETE' }).then(r => r.json());
+    if (d.ok) loadTemplatesList(); else alert(d.error || 'Erro');
+  }
+
+  document.getElementById('btn-tpl-save').addEventListener('click', async () => {
+    const msg = document.getElementById('tpl-form-msg');
+    let mmap = null;
+    const mj = document.getElementById('tpl-map-json').value.trim();
+    if (mj) {
+      try { mmap = JSON.parse(mj); if (typeof mmap !== 'object') mmap = null; }
+      catch (e) { showMsg(msg, 'JSON de mapeamento invalido.', false); return; }
+    }
+    const body = {
+      nome: document.getElementById('tpl-nome').value.trim(),
+      assunto: document.getElementById('tpl-assunto').value,
+      corpo_html: document.getElementById('tpl-html').value,
+      corpo_texto: document.getElementById('tpl-txt').value,
+      mapeamento: mmap,
+    };
+    if (!body.nome) { showMsg(msg, 'Nome e obrigatorio.', false); return; }
+    const tid = document.getElementById('tpl-id').value;
+    const url = tid ? '/api/campanha/templates/' + tid : '/api/campanha/templates';
+    const opt = { method: tid ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const d = await fetch(url, opt).then(r => r.json());
+    if (d.ok) {
+      showMsg(msg, 'Guardado.', true);
+      document.getElementById('tpl-form-wrap').style.display = 'none';
+      loadTemplatesList();
+      loadTemplateSelects();
+    } else showMsg(msg, d.error || 'Erro', false);
+  });
+
+  document.getElementById('disp-assunto').addEventListener('input', function() { this.dataset.touched = '1'; });
+
   /* ── DISPARAR ── */
   const toggleBtns = document.querySelectorAll('.camp-toggle');
   toggleBtns.forEach(btn => {
@@ -403,6 +682,7 @@
       btn.classList.add('active');
       document.getElementById('source-csv').style.display = btn.dataset.source === 'csv' ? '' : 'none';
       document.getElementById('source-base').style.display = btn.dataset.source === 'base' ? '' : 'none';
+      refreshDispMapUI();
     });
   });
 
@@ -412,9 +692,11 @@
     if (!f) return;
     const reader = new FileReader();
     reader.onload = function(e) {
-      const lines = e.target.result.split('\n');
-      const delim = lines[0].includes(';') ? ';' : ',';
-      const header = lines[0].split(delim).map(h => h.trim().replace(/^["']|["']$/g,'').toLowerCase());
+      const lines = e.target.result.split(/\r?\n/);
+      const raw0 = (lines[0] || '').trim();
+      const delim = raw0.includes(';') ? ';' : ',';
+      dispCsvHeaders = raw0.split(delim).map(h => h.trim().replace(/^["']|["']$/g,''));
+      const header = dispCsvHeaders.map(h => h.toLowerCase());
       const emailIdx = header.findIndex(h => h === 'email');
       const nameIdx = header.findIndex(h => h === 'nome' || h === 'name');
       csvRows = [];
@@ -437,6 +719,7 @@
         tbody.appendChild(tr);
       }
       document.getElementById('csv-preview').style.display = '';
+      refreshDispMapUI();
     };
     reader.readAsText(f, 'utf-8');
   });
@@ -477,6 +760,10 @@
       const fd = new FormData();
       fd.append('csv', fileInput.files[0]);
       fd.append('assunto', assunto);
+      const tid = document.getElementById('disp-template-id').value;
+      if (tid) fd.append('template_id', tid);
+      const mmap = collectDispMapeamento();
+      if (tid && mmap) fd.append('mapeamento_json', JSON.stringify(mmap));
       fetch('/api/campanha/disparar', { method:'POST', body: fd })
         .then(r=>r.json()).then(d => {
           showMsg(msgEl, d.ok ? 'Disparo iniciado! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
@@ -495,9 +782,14 @@
         const v = document.getElementById(id).value;
         if (v) filtros[k] = v;
       }
+      const tid = document.getElementById('disp-template-id').value;
+      const mmap = collectDispMapeamento();
+      const payload = { filtros, assunto };
+      if (tid) payload.template_id = parseInt(tid, 10);
+      if (tid && mmap) payload.mapeamento = mmap;
       fetch('/api/campanha/disparar', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ filtros, assunto }),
+        body: JSON.stringify(payload),
       }).then(r=>r.json()).then(d => {
         showMsg(msgEl, d.ok ? 'Disparo iniciado! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
         if (d.ok) {
@@ -513,9 +805,12 @@
     const assunto = document.getElementById('unico-assunto').value.trim();
     const msgEl = document.getElementById('unico-msg');
     if (!email) { showMsg(msgEl, 'Informe o email.', false); return; }
+    const tid = document.getElementById('unico-template-id').value;
+    const body = { email, nome, assunto };
+    if (tid) body.template_id = parseInt(tid, 10);
     fetch('/api/campanha/disparar-unico', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ email, nome, assunto }),
+      body: JSON.stringify(body),
     }).then(r=>r.json()).then(d => {
       showMsg(msgEl, d.ok ? 'Enviando para '+email+'! ID: '+d.campaign_id : (d.error||'Erro'), d.ok);
     }).catch(e => showMsg(msgEl, 'Erro: '+e, false));
@@ -607,6 +902,8 @@
       document.getElementById('dash-table').style.display = '';
     }).catch(e => { document.getElementById('dash-loading').style.display='none'; });
   }
+
+  loadTemplateSelects();
 
   function esc(s) { if (!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 })();

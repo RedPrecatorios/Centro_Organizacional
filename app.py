@@ -1072,8 +1072,6 @@ def get_messages():
 # CAMPANHA — Disparo de e-mails, gestao de dominios
 # ══════════════════════════════════════════════════════════════════════════════
 
-import csv
-import io
 import uuid
 
 from campanha.api_dominios import (
@@ -1093,7 +1091,14 @@ from campanha.api_disparo import (
     obter_historico_detalhe,
     obter_status,
 )
-from campanha.core import Recipient
+from campanha.api_templates import (
+    atualizar_template,
+    criar_template,
+    listar_templates,
+    obter_template,
+    remover_template,
+)
+from campanha.core import Recipient, parse_recipients_csv_bytes
 
 
 def _camp_db():
@@ -1110,9 +1115,122 @@ def _camp_db():
     }, db_name
 
 
+def _parse_disparo_template_args():
+    """template_id e mapeamento (form multipart ou JSON)."""
+    raw = (request.form.get("template_id") or "").strip()
+    if not raw:
+        jd = request.get_json(silent=True) or {}
+        raw = str(jd.get("template_id") or "").strip()
+    tid = int(raw) if raw.isdigit() else None
+
+    mapeamento = None
+    mj = (request.form.get("mapeamento_json") or "").strip()
+    if mj:
+        try:
+            o = json.loads(mj)
+            if isinstance(o, dict):
+                mapeamento = {str(k): str(v) for k, v in o.items()}
+        except (json.JSONDecodeError, TypeError):
+            mapeamento = None
+    else:
+        jd = request.get_json(silent=True) or {}
+        mm = jd.get("mapeamento")
+        if isinstance(mm, dict):
+            mapeamento = {str(k): str(v) for k, v in mm.items()}
+    return tid, mapeamento
+
+
 @app.route("/campanha")
 def campanha_page():
     return render_template("campanha.html")
+
+
+# ── Templates de e-mail ───────────────────────────────────────────────────────
+
+@app.route("/api/campanha/templates", methods=["GET"], endpoint="api_campanha_templates_list")
+def api_campanha_templates_list():
+    try:
+        cfg, db = _camp_db()
+        return jsonify({"ok": True, "templates": listar_templates(cfg, db)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/templates", methods=["POST"], endpoint="api_campanha_templates_create")
+def api_campanha_templates_create():
+    data = request.get_json(silent=True) or {}
+    nome = (data.get("nome") or "").strip()
+    if not nome:
+        return jsonify({"ok": False, "error": "Nome do template e obrigatorio."}), 400
+    try:
+        cfg, db = _camp_db()
+        m = data.get("mapeamento")
+        mmap = {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else None
+        r = criar_template(
+            nome,
+            str(data.get("assunto") or ""),
+            str(data.get("corpo_html") or ""),
+            str(data.get("corpo_texto") or ""),
+            mmap,
+            cfg,
+            db,
+        )
+        return jsonify(r)
+    except mysql.connector.IntegrityError:
+        return jsonify({"ok": False, "error": "Ja existe um template com esse nome."}), 409
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/templates/<int:tid>", methods=["GET"], endpoint="api_campanha_templates_get")
+def api_campanha_templates_get(tid):
+    try:
+        cfg, db = _camp_db()
+        row = obter_template(tid, cfg, db)
+        if not row:
+            return jsonify({"ok": False, "error": "Nao encontrado."}), 404
+        return jsonify({"ok": True, "template": row})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/templates/<int:tid>", methods=["PUT"], endpoint="api_campanha_templates_update")
+def api_campanha_templates_update(tid):
+    data = request.get_json(silent=True) or {}
+    nome = (data.get("nome") or "").strip()
+    if not nome:
+        return jsonify({"ok": False, "error": "Nome e obrigatorio."}), 400
+    try:
+        cfg, db = _camp_db()
+        m = data.get("mapeamento")
+        mmap = {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else None
+        r = atualizar_template(
+            tid,
+            nome,
+            str(data.get("assunto") or ""),
+            str(data.get("corpo_html") or ""),
+            str(data.get("corpo_texto") or ""),
+            mmap,
+            cfg,
+            db,
+        )
+        if not r.get("ok"):
+            return jsonify({"ok": False, "error": "Nao encontrado."}), 404
+        return jsonify(r)
+    except mysql.connector.IntegrityError:
+        return jsonify({"ok": False, "error": "Nome ja em uso."}), 409
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/campanha/templates/<int:tid>", methods=["DELETE"], endpoint="api_campanha_templates_delete")
+def api_campanha_templates_delete(tid):
+    try:
+        cfg, db = _camp_db()
+        r = remover_template(tid, cfg, db)
+        return jsonify(r), (200 if r.get("ok") else 404)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ── Dominios ──────────────────────────────────────────────────────────────────
@@ -1193,15 +1311,8 @@ def api_campanha_disparar():
 
     if request.files.get("csv"):
         f = request.files["csv"]
-        raw_text = f.stream.read().decode("utf-8-sig", errors="replace")
-        delim = ";" if ";" in raw_text.split("\n", 1)[0] else ","
-        stream = io.StringIO(raw_text)
-        reader = csv.DictReader(stream, delimiter=delim)
-        for row in reader:
-            email = (row.get("email") or row.get("Email") or row.get("EMAIL") or "").strip()
-            name = (row.get("nome") or row.get("Nome") or row.get("name") or row.get("Name") or "").strip()
-            if email:
-                recipients.append(Recipient(email=email, name=name, fields=dict(row)))
+        raw = f.read()
+        recipients = parse_recipients_csv_bytes(raw)
         origem = "csv"
     else:
         data = request.get_json(silent=True) or {}
@@ -1220,7 +1331,11 @@ def api_campanha_disparar():
     if not recipients:
         return jsonify({"ok": False, "error": "Nenhum destinatario encontrado."}), 400
 
-    result = iniciar_disparo(recipients, campaign_id, assunto, origem, filtros, criado_por)
+    tid, mmap = _parse_disparo_template_args()
+    result = iniciar_disparo(
+        recipients, campaign_id, assunto, origem, filtros, criado_por,
+        template_id=tid, mapeamento=mmap,
+    )
     code = 200 if result.get("ok") else 409
     return jsonify(result), code
 
@@ -1237,7 +1352,20 @@ def api_campanha_disparar_unico():
         return jsonify({"ok": False, "error": "Campo email e obrigatorio."}), 400
     campaign_id = f"unico_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     recipients = [Recipient(email=email, name=nome, fields={})]
-    result = iniciar_disparo(recipients, campaign_id, assunto, "unico", None, criado_por)
+    tid = data.get("template_id")
+    try:
+        tid = int(tid) if tid is not None and str(tid).strip() != "" else None
+    except (TypeError, ValueError):
+        tid = None
+    mmap = data.get("mapeamento")
+    if isinstance(mmap, dict):
+        mmap = {str(k): str(v) for k, v in mmap.items()}
+    else:
+        mmap = None
+    result = iniciar_disparo(
+        recipients, campaign_id, assunto, "unico", None, criado_por,
+        template_id=tid, mapeamento=mmap,
+    )
     code = 200 if result.get("ok") else 409
     return jsonify(result), code
 
