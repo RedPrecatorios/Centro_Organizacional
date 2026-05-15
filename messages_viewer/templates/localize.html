@@ -118,11 +118,12 @@
     var p = b.processo || {};
     var card = document.createElement('article');
     card.className = 'loc-card';
-    var procLine = [
+    var title = p.requerente
+      ? esc(p.requerente)
+      : (p.numero_processo ? esc(p.numero_processo) : ('Processo #' + esc(p.processo_id)));
+    var meta = [
       p.numero_processo ? '<strong>Processo:</strong> ' + esc(p.numero_processo) : '',
       p.numero_incidente ? '<strong>Incidente:</strong> ' + esc(p.numero_incidente) : '',
-    ].filter(Boolean).join(' · ');
-    var meta = [
       p.requerente ? 'Requerente: ' + esc(p.requerente) : '',
       p.pessoa_cpf ? 'CPF: ' + esc(p.pessoa_cpf) : '',
       p.foro ? 'Foro: ' + esc(p.foro) : '',
@@ -136,7 +137,7 @@
       return '<tr><td>' + esc(e.email) + '</td><td>' + esc(e.fornecedor) + '</td><td>' + st + '</td></tr>';
     }).join('');
     card.innerHTML =
-      '<header class="loc-card-head"><h3 class="loc-card-title">' + (procLine || 'Processo #' + esc(p.processo_id)) + '</h3>'
+      '<header class="loc-card-head"><h3 class="loc-card-title">' + title + '</h3>'
       + '<p class="loc-card-meta">' + (meta || '') + '</p></header>'
       + '<div class="loc-card-grid">'
       + '<section><h4>Telefones</h4>'
