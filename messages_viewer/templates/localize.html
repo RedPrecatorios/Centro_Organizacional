@@ -68,7 +68,20 @@
     return r ? r.value : 'email';
   }
 
-  function syncLabel() {
+  function clearResults() {
+    offset = 0;
+    lastTotal = 0;
+    hasSearched = false;
+    document.getElementById('loc-results').innerHTML = '';
+    document.getElementById('loc-empty').style.display = 'none';
+    document.getElementById('loc-pager').style.display = 'none';
+    document.getElementById('loc-loading').style.display = 'none';
+    document.getElementById('loc-summary').textContent =
+      '15 processos por página — clique em Pesquisar para consultar o MySQL.';
+    hideErr();
+  }
+
+  function syncLabel(clearOnModeChange) {
     var t = tipo();
     var lab = document.getElementById('loc-q-label');
     var inp = document.getElementById('loc-q');
@@ -81,12 +94,16 @@
       inp.placeholder = 'ex.: nome@dominio.com ou parte do e-mail';
       inp.inputMode = 'text';
     }
+    if (clearOnModeChange) {
+      inp.value = '';
+      clearResults();
+    }
   }
 
   document.querySelectorAll('input[name="loc-tipo"]').forEach(function(r) {
-    r.addEventListener('change', syncLabel);
+    r.addEventListener('change', function() { syncLabel(true); });
   });
-  syncLabel();
+  syncLabel(false);
 
   function showErr(msg) {
     var el = document.getElementById('loc-err');
@@ -107,7 +124,6 @@
     ].filter(Boolean).join(' · ');
     var meta = [
       p.requerente ? 'Requerente: ' + esc(p.requerente) : '',
-      p.pessoa_nome ? 'Pessoa: ' + esc(p.pessoa_nome) : '',
       p.pessoa_cpf ? 'CPF: ' + esc(p.pessoa_cpf) : '',
       p.foro ? 'Foro: ' + esc(p.foro) : '',
       p.entidade_devedora ? 'Devedor: ' + esc(p.entidade_devedora) : '',
@@ -180,15 +196,7 @@
   });
   document.getElementById('loc-limpar').addEventListener('click', function() {
     document.getElementById('loc-q').value = '';
-    offset = 0;
-    lastTotal = 0;
-    hasSearched = false;
-    document.getElementById('loc-results').innerHTML = '';
-    document.getElementById('loc-empty').style.display = 'none';
-    document.getElementById('loc-pager').style.display = 'none';
-    document.getElementById('loc-summary').textContent =
-      '15 processos por página — clique em Pesquisar para consultar o MySQL.';
-    hideErr();
+    clearResults();
   });
   document.getElementById('loc-prev').addEventListener('click', function() {
     if (!hasSearched) return;
