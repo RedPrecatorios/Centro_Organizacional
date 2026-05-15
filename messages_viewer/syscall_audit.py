@@ -90,7 +90,7 @@ def _only_digits(s: str, max_len: int = 64) -> str:
 
 def list_audit_rows(
     *,
-    limit: int = 50,
+    limit: int = 15,
     offset: int = 0,
     ligacao_id: int | None = None,
     request_id: str | None = None,
@@ -101,7 +101,6 @@ def list_audit_rows(
     credor_telefone: str | None = None,
     desde: str | None = None,
     ate: str | None = None,
-    *,
     include_total: bool = True,
 ) -> tuple[list[dict[str, Any]], int | None]:
     """
