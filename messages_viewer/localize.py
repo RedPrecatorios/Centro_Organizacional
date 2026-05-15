@@ -70,22 +70,23 @@ def _find_process_ids_by_email(
         cond = "LOWER(TRIM(e.email)) LIKE %s"
         params = [f"%{q}%"]
 
-    base = f"""
+    # GROUP BY em vez de DISTINCT + ORDER BY (MySQL exige colunas do ORDER BY no SELECT com DISTINCT)
+    grouped = f"""
+        SELECT pj.id AS pid, MAX(pj.ultimo_processamento) AS ord
         FROM emails e
         INNER JOIN processos_juridicos pj ON pj.id = e.id_processo_juridico
-        INNER JOIN pessoas p ON p.id = pj.id_pessoa
         WHERE {cond}
+        GROUP BY pj.id
     """
     total: int | None = None
     if include_total:
-        cur.execute(f"SELECT COUNT(DISTINCT pj.id) AS c {base}", params)
+        cur.execute(f"SELECT COUNT(*) AS c FROM ({grouped}) AS u", params)
         total = int((cur.fetchone() or {}).get("c", 0))
 
     cur.execute(
         f"""
-        SELECT DISTINCT pj.id AS pid
-        {base}
-        ORDER BY pj.ultimo_processamento DESC, pj.id DESC
+        SELECT u.pid FROM ({grouped}) AS u
+        ORDER BY u.ord DESC, u.pid DESC
         LIMIT %s OFFSET %s
         """,
         params + [limit, offset],
