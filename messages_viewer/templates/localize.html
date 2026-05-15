@@ -126,7 +126,6 @@
       p.numero_incidente ? '<strong>Incidente:</strong> ' + esc(p.numero_incidente) : '',
       p.requerente ? 'Requerente: ' + esc(p.requerente) : '',
       p.pessoa_cpf ? 'CPF: ' + esc(p.pessoa_cpf) : '',
-      p.foro ? 'Foro: ' + esc(p.foro) : '',
       p.entidade_devedora ? 'Devedor: ' + esc(p.entidade_devedora) : '',
     ].filter(Boolean).join(' · ');
     var telRows = (b.telefones || []).map(function(t) {
