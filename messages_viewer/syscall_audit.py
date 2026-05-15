@@ -101,12 +101,15 @@ def list_audit_rows(
     credor_telefone: str | None = None,
     desde: str | None = None,
     ate: str | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+    *,
+    include_total: bool = True,
+) -> tuple[list[dict[str, Any]], int | None]:
     """
-    Lista linhas (sem payload completo na listagem) e total que bate com os filtros.
+    Lista linhas (sem payload completo na listagem).
+    include_total=False: só SELECT com LIMIT/OFFSET (paginação sem COUNT no MySQL).
     """
     table = audit_table_name()
-    limit = max(1, min(int(limit), 200))
+    limit = max(1, min(int(limit), 15))
     offset = max(0, int(offset))
 
     where: list[str] = ["1=1"]
@@ -157,11 +160,13 @@ def list_audit_rows(
     conn = mysql.connector.connect(**kw)
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            f"SELECT COUNT(*) AS c FROM `{table}` WHERE {wsql}",
-            params,
-        )
-        total = int((cur.fetchone() or {}).get("c", 0))
+        total: int | None = None
+        if include_total:
+            cur.execute(
+                f"SELECT COUNT(*) AS c FROM `{table}` WHERE {wsql}",
+                params,
+            )
+            total = int((cur.fetchone() or {}).get("c", 0))
         cur.execute(
             f"SELECT {cols} FROM `{table}` WHERE {wsql} "
             "ORDER BY ultima_ligacao_at DESC LIMIT %s OFFSET %s",

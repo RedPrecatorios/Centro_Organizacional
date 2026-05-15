@@ -67,7 +67,7 @@
         </div>
       </div>
 
-      <p id="audit-summary" class="camp-hint" style="margin:0.75rem 0"></p>
+      <p id="audit-summary" class="camp-hint" style="margin:0.75rem 0">Use os filtros e clique em <strong>Pesquisar</strong> (15 registos por página).</p>
       <div id="audit-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
       <div id="audit-table-wrap" style="overflow-x:auto">
         <table class="camp-table" id="audit-table" style="display:none">
@@ -113,9 +113,10 @@
 
 <script>
 (function(){
-  const PAGE = 50;
+  const PAGE = 15;
   let offset = 0;
   let lastTotal = 0;
+  let hasSearched = false;
 
   function esc(s) {
     if (s == null || s === '') return '';
@@ -124,10 +125,11 @@
     return d.innerHTML;
   }
 
-  function qs() {
+  function qs(includeTotal) {
     const p = new URLSearchParams();
     p.set('limit', String(PAGE));
     p.set('offset', String(offset));
+    p.set('include_total', includeTotal ? '1' : '0');
     const lig = document.getElementById('af-ligacao').value.trim();
     const req = document.getElementById('af-request').value.trim();
     if (lig) p.set('ligacao_id', lig);
@@ -158,20 +160,23 @@
     document.getElementById('audit-err').style.display = 'none';
   }
 
-  async function load() {
+  async function load(includeTotal) {
     hideErr();
     document.getElementById('audit-loading').style.display = '';
     document.getElementById('audit-table').style.display = 'none';
     document.getElementById('audit-empty').style.display = 'none';
     document.getElementById('audit-pager').style.display = 'none';
     try {
-      const r = await fetch('/api/auditoria-syscall/linhas?' + qs());
+      const r = await fetch('/api/auditoria-syscall/linhas?' + qs(includeTotal));
       const d = await r.json();
       document.getElementById('audit-loading').style.display = 'none';
       if (!d.ok) { showErr(d.error || 'Falha na API'); return; }
-      lastTotal = d.total || 0;
+      if (d.total != null) lastTotal = d.total;
+      var pageNum = Math.floor(offset / PAGE) + 1;
+      var pageCount = lastTotal ? Math.max(1, Math.ceil(lastTotal / PAGE)) : 1;
       document.getElementById('audit-summary').textContent =
-        lastTotal + ' registo(s) — a mostrar ' + (d.rows || []).length + ' (offset ' + offset + ')';
+        lastTotal + ' registo(s) no total — página ' + pageNum + ' de ' + pageCount
+        + ' (' + (d.rows || []).length + ' nesta página)';
       const tbody = document.getElementById('audit-tbody');
       tbody.innerHTML = '';
       if (!(d.rows || []).length) {
@@ -208,10 +213,12 @@
   }
 
   function updatePager() {
+    var pageNum = Math.floor(offset / PAGE) + 1;
+    var pageCount = lastTotal ? Math.max(1, Math.ceil(lastTotal / PAGE)) : 1;
     document.getElementById('af-prev').disabled = offset <= 0;
-    document.getElementById('af-next').disabled = lastTotal === 0 || offset + PAGE >= lastTotal;
+    document.getElementById('af-next').disabled = lastTotal === 0 || pageNum >= pageCount;
     document.getElementById('audit-pager-label').textContent =
-      'Offset ' + offset + ' / total ' + lastTotal;
+      'Página ' + pageNum + ' de ' + pageCount;
   }
 
   async function openDetail(id) {
@@ -239,28 +246,37 @@
 
   document.getElementById('af-buscar').addEventListener('click', function() {
     offset = 0;
-    load();
+    hasSearched = true;
+    load(true);
   });
   document.getElementById('af-limpar').addEventListener('click', function() {
     ['af-ligacao','af-request','af-user','af-nome','af-credor','af-cpf','af-tel','af-desde','af-ate'].forEach(function(id) {
       document.getElementById(id).value = '';
     });
     offset = 0;
-    load();
+    lastTotal = 0;
+    hasSearched = false;
+    document.getElementById('audit-tbody').innerHTML = '';
+    document.getElementById('audit-table').style.display = 'none';
+    document.getElementById('audit-empty').style.display = 'none';
+    document.getElementById('audit-pager').style.display = 'none';
+    document.getElementById('audit-summary').textContent =
+      'Use os filtros e clique em Pesquisar (15 registos por página).';
+    hideErr();
   });
   document.getElementById('af-prev').addEventListener('click', function() {
+    if (!hasSearched) return;
     offset = Math.max(0, offset - PAGE);
-    load();
+    load(false);
   });
   document.getElementById('af-next').addEventListener('click', function() {
+    if (!hasSearched) return;
     var lastPage = Math.max(0, Math.floor((lastTotal - 1) / PAGE) * PAGE);
     offset = Math.min(lastPage, offset + PAGE);
-    load();
+    load(false);
   });
   document.getElementById('audit-modal-close').addEventListener('click', closeModal);
   document.getElementById('audit-modal-backdrop').addEventListener('click', closeModal);
-
-  load();
 })();
 </script>
 </body>

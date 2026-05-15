@@ -1579,8 +1579,13 @@ def api_auditoria_syscall_linhas():
         lig = (request.args.get("ligacao_id") or "").strip()
         ligacao_id = int(lig) if lig.isdigit() else None
         req = (request.args.get("request_id") or "").strip() or None
-        lim = int(request.args.get("limit", "50") or "50")
+        lim = int(request.args.get("limit", "15") or "15")
         off = int(request.args.get("offset", "0") or "0")
+        include_total = (request.args.get("include_total") or "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+        )
         rows, total = list_audit_rows(
             limit=lim,
             offset=off,
@@ -1593,8 +1598,18 @@ def api_auditoria_syscall_linhas():
             credor_telefone=(request.args.get("credor_telefone") or "").strip() or None,
             desde=_parse_audit_dt(request.args.get("desde")),
             ate=_parse_audit_dt(request.args.get("ate")),
+            include_total=include_total,
         )
-        return jsonify({"ok": True, "rows": rows, "total": total, "limit": lim, "offset": off})
+        return jsonify(
+            {
+                "ok": True,
+                "rows": rows,
+                "total": total,
+                "limit": lim,
+                "offset": off,
+                "include_total": include_total,
+            }
+        )
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
