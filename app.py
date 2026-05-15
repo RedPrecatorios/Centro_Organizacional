@@ -1100,6 +1100,7 @@ from campanha.api_templates import (
 )
 from campanha.core import Recipient, parse_recipients_csv_bytes
 from messages_viewer.syscall_audit import get_audit_row, list_audit_rows
+from messages_viewer.localize import search_localize
 
 
 def _camp_db():
@@ -1553,6 +1554,52 @@ def api_campanha_sincronizar_mailgun():
         "atualizados": atualizados,
         "ja_cadastrados": len(ja_cadastrados),
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LOCALIZE — pesquisa e-mail / telefone (MySQL EDA)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/localize")
+def localize_page():
+    return render_template("localize.html")
+
+
+@app.route("/api/localize/pesquisar", methods=["GET"], endpoint="api_localize_pesquisar")
+def api_localize_pesquisar():
+    try:
+        tipo = (request.args.get("tipo") or "email").strip().lower()
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"ok": False, "error": "Informe o termo de pesquisa."}), 400
+        lim = int(request.args.get("limit", "15") or "15")
+        off = int(request.args.get("offset", "0") or "0")
+        include_total = (request.args.get("include_total") or "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        results, total = search_localize(
+            tipo=tipo,
+            q=q,
+            limit=lim,
+            offset=off,
+            include_total=include_total,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "results": results,
+                "total": total,
+                "limit": lim,
+                "offset": off,
+            }
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════

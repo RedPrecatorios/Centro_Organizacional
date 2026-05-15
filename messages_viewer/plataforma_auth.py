@@ -33,6 +33,7 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("memoria_calculo", "Memória de cálculo", "Consulta e actualização de memórias"),
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
+    ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
     ("eda", "EDA Diário", "Processamento e relatórios EDA (/eda/)"),
 )
 
@@ -183,6 +184,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("memoria_calculo", "memoria_calculo"),
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
+        ("localize", "localize_page"),
         ("outro_modulo", "embedded.index"),
     ]
     for tab, endpoint in order:
@@ -211,6 +213,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "campanha"
     if path.startswith("/auditoria-syscall"):
         return "auditoria_syscall"
+    if path.startswith("/localize"):
+        return "localize"
     if path.startswith("/eda"):
         return "eda"
     if path.startswith("/auth"):
@@ -290,6 +294,8 @@ def _endpoint_to_tab() -> str | None:
         "auditoria_syscall_page": "auditoria_syscall",
         "api_auditoria_syscall_linhas": "auditoria_syscall",
         "api_auditoria_syscall_detalhe": "auditoria_syscall",
+        "localize_page": "localize",
+        "api_localize_pesquisar": "localize",
     }
     t = m.get(ep)
     if t is not None:

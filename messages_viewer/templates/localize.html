@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Localize — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Localize</h1>
+        <p class="dash-sub">Pesquise por <strong>e-mail</strong> ou <strong>telefone</strong> nas tabelas da base EDA. O resultado cruza contatos, e-mails e dados do processo judicial associado.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <div class="camp-form-card loc-filters">
+        <div class="loc-mode-row" role="radiogroup" aria-label="Tipo de pesquisa">
+          <label class="loc-mode-opt"><input type="radio" name="loc-tipo" value="email" checked /> E-mail</label>
+          <label class="loc-mode-opt"><input type="radio" name="loc-tipo" value="telefone" /> Telefone</label>
+        </div>
+        <div class="camp-field" style="max-width:28rem;margin-top:0.75rem">
+          <label for="loc-q" id="loc-q-label">E-mail</label>
+          <input type="search" id="loc-q" class="auth-input" placeholder="ex.: nome@dominio.com ou parte do e-mail" autocomplete="off" />
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.5rem">
+          <button type="button" class="camp-btn camp-btn-primary" id="loc-buscar">Pesquisar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="loc-limpar">Limpar</button>
+        </div>
+      </div>
+
+      <p id="loc-summary" class="camp-hint" style="margin:0.75rem 0">15 processos por página — clique em Pesquisar para consultar o MySQL.</p>
+      <div id="loc-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A pesquisar...</div>
+      <div id="loc-results"></div>
+      <p id="loc-empty" class="camp-empty" style="display:none">Nenhum registo encontrado.</p>
+      <div class="audit-pager" id="loc-pager" style="display:none">
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="loc-prev">Anterior</button>
+        <span id="loc-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="loc-next">Seguinte</button>
+      </div>
+      <div id="loc-err" class="camp-msg camp-msg-err" style="display:none"></div>
+    </main>
+  </div>
+
+<script>
+(function(){
+  const PAGE = 15;
+  let offset = 0;
+  let lastTotal = 0;
+  let hasSearched = false;
+
+  function esc(s) {
+    if (s == null || s === '') return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function tipo() {
+    var r = document.querySelector('input[name="loc-tipo"]:checked');
+    return r ? r.value : 'email';
+  }
+
+  function syncLabel() {
+    var t = tipo();
+    var lab = document.getElementById('loc-q-label');
+    var inp = document.getElementById('loc-q');
+    if (t === 'telefone') {
+      lab.textContent = 'Telefone';
+      inp.placeholder = 'ex.: 11999998888 (mín. 4 dígitos)';
+      inp.inputMode = 'numeric';
+    } else {
+      lab.textContent = 'E-mail';
+      inp.placeholder = 'ex.: nome@dominio.com ou parte do e-mail';
+      inp.inputMode = 'text';
+    }
+  }
+
+  document.querySelectorAll('input[name="loc-tipo"]').forEach(function(r) {
+    r.addEventListener('change', syncLabel);
+  });
+  syncLabel();
+
+  function showErr(msg) {
+    var el = document.getElementById('loc-err');
+    el.textContent = msg || 'Erro';
+    el.style.display = 'block';
+  }
+  function hideErr() {
+    document.getElementById('loc-err').style.display = 'none';
+  }
+
+  function renderBundle(b) {
+    var p = b.processo || {};
+    var card = document.createElement('article');
+    card.className = 'loc-card';
+    var procLine = [
+      p.numero_processo ? '<strong>Processo:</strong> ' + esc(p.numero_processo) : '',
+      p.numero_incidente ? '<strong>Incidente:</strong> ' + esc(p.numero_incidente) : '',
+    ].filter(Boolean).join(' · ');
+    var meta = [
+      p.requerente ? 'Requerente: ' + esc(p.requerente) : '',
+      p.pessoa_nome ? 'Pessoa: ' + esc(p.pessoa_nome) : '',
+      p.pessoa_cpf ? 'CPF: ' + esc(p.pessoa_cpf) : '',
+      p.foro ? 'Foro: ' + esc(p.foro) : '',
+      p.entidade_devedora ? 'Devedor: ' + esc(p.entidade_devedora) : '',
+    ].filter(Boolean).join(' · ');
+    var telRows = (b.telefones || []).map(function(t) {
+      return '<tr><td>' + esc(t.telefone) + '</td><td>' + esc(t.fornecedor) + '</td><td>' + esc(t.origem) + '</td></tr>';
+    }).join('');
+    var emRows = (b.emails || []).map(function(e) {
+      var st = e.campanha_disparo_status ? esc(e.campanha_disparo_status) : '—';
+      return '<tr><td>' + esc(e.email) + '</td><td>' + esc(e.fornecedor) + '</td><td>' + st + '</td></tr>';
+    }).join('');
+    card.innerHTML =
+      '<header class="loc-card-head"><h3 class="loc-card-title">' + (procLine || 'Processo #' + esc(p.processo_id)) + '</h3>'
+      + '<p class="loc-card-meta">' + (meta || '') + '</p></header>'
+      + '<div class="loc-card-grid">'
+      + '<section><h4>Telefones</h4>'
+      + (telRows ? '<table class="camp-table camp-table-sm"><thead><tr><th>Número</th><th>Fornecedor</th><th>Origem</th></tr></thead><tbody>' + telRows + '</tbody></table>' : '<p class="loc-none">Nenhum</p>')
+      + '</section>'
+      + '<section><h4>E-mails</h4>'
+      + (emRows ? '<table class="camp-table camp-table-sm"><thead><tr><th>E-mail</th><th>Fornecedor</th><th>Campanha</th></tr></thead><tbody>' + emRows + '</tbody></table>' : '<p class="loc-none">Nenhum</p>')
+      + '</section></div>';
+    return card;
+  }
+
+  async function load(includeTotal) {
+    var q = document.getElementById('loc-q').value.trim();
+    if (!q) { showErr('Informe o termo de pesquisa.'); return; }
+    hideErr();
+    document.getElementById('loc-loading').style.display = '';
+    document.getElementById('loc-results').innerHTML = '';
+    document.getElementById('loc-empty').style.display = 'none';
+    document.getElementById('loc-pager').style.display = 'none';
+    try {
+      var p = new URLSearchParams();
+      p.set('tipo', tipo());
+      p.set('q', q);
+      p.set('limit', String(PAGE));
+      p.set('offset', String(offset));
+      p.set('include_total', includeTotal ? '1' : '0');
+      var r = await fetch('/api/localize/pesquisar?' + p.toString());
+      var d = await r.json();
+      document.getElementById('loc-loading').style.display = 'none';
+      if (!d.ok) { showErr(d.error || 'Falha na API'); return; }
+      if (d.total != null) lastTotal = d.total;
+      var pageNum = Math.floor(offset / PAGE) + 1;
+      var pageCount = lastTotal ? Math.max(1, Math.ceil(lastTotal / PAGE)) : 1;
+      document.getElementById('loc-summary').textContent =
+        lastTotal + ' processo(s) — página ' + pageNum + ' de ' + pageCount;
+      var box = document.getElementById('loc-results');
+      box.innerHTML = '';
+      if (!(d.results || []).length) {
+        document.getElementById('loc-empty').style.display = '';
+      } else {
+        (d.results || []).forEach(function(b) { box.appendChild(renderBundle(b)); });
+      }
+      document.getElementById('loc-pager').style.display = lastTotal > PAGE ? '' : 'none';
+      document.getElementById('loc-prev').disabled = offset <= 0;
+      document.getElementById('loc-next').disabled = lastTotal === 0 || pageNum >= pageCount;
+      document.getElementById('loc-pager-label').textContent = 'Página ' + pageNum + ' de ' + pageCount;
+    } catch (e) {
+      document.getElementById('loc-loading').style.display = 'none';
+      showErr(String(e));
+    }
+  }
+
+  document.getElementById('loc-buscar').addEventListener('click', function() {
+    offset = 0;
+    hasSearched = true;
+    load(true);
+  });
+  document.getElementById('loc-limpar').addEventListener('click', function() {
+    document.getElementById('loc-q').value = '';
+    offset = 0;
+    lastTotal = 0;
+    hasSearched = false;
+    document.getElementById('loc-results').innerHTML = '';
+    document.getElementById('loc-empty').style.display = 'none';
+    document.getElementById('loc-pager').style.display = 'none';
+    document.getElementById('loc-summary').textContent =
+      '15 processos por página — clique em Pesquisar para consultar o MySQL.';
+    hideErr();
+  });
+  document.getElementById('loc-prev').addEventListener('click', function() {
+    if (!hasSearched) return;
+    offset = Math.max(0, offset - PAGE);
+    load(false);
+  });
+  document.getElementById('loc-next').addEventListener('click', function() {
+    if (!hasSearched) return;
+    var lastPage = Math.max(0, Math.floor((lastTotal - 1) / PAGE) * PAGE);
+    offset = Math.min(lastPage, offset + PAGE);
+    load(false);
+  });
+  document.getElementById('loc-q').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('loc-buscar').click();
+    }
+  });
+})();
+</script>
+</body>
+</html>

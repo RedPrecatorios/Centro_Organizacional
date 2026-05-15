@@ -1564,6 +1564,44 @@ body.platform-body #app-toast {
 }
 .admin-btn-sm { font-size: 0.78rem; padding: 0.3rem 0.55rem; }
 .admin-user-name { font-size: 1rem; }
+
+/* Localize */
+.loc-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.loc-mode-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.loc-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+.loc-card-head { margin-bottom: 0.75rem; }
+.loc-card-title { margin: 0 0 0.35rem; font-size: 1rem; }
+.loc-card-meta { margin: 0; font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
+.loc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.loc-card-grid h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.loc-none { margin: 0; font-size: 0.82rem; color: var(--muted); }
+
 .admin-intro {
   color: var(--muted);
   font-size: 0.9rem;
