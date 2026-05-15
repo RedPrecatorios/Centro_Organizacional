@@ -265,7 +265,11 @@ def carregar_blacklist() -> dict[str, set]:
     conn.close()
 
     bl: dict[str, set] = {"CPF": set(), "NOME": set(), "TELEFONE": set(), "EMAIL": set()}
-    for tipo, valor in rows:
+    valid_tipos = frozenset(bl.keys())
+    for tipo_raw, valor in rows:
+        tipo = str(tipo_raw).strip().upper()
+        if tipo not in valid_tipos:
+            continue
         nv = normalizar_valor_para_blacklist(tipo, valor)
         if nv:
             bl[tipo].add(nv)

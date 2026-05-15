@@ -349,9 +349,16 @@ def iniciar_disparo(
             method="mailgun" if mailgun else "smtp",
             reply_to="contato@redprecatorios.com.br",
         )
-        blacklist_cfg = BlacklistConfig(use_db=True, extra_email_file=None)
-
         project_root = Path(__file__).resolve().parent.parent
+        blacklist_cfg = BlacklistConfig(use_db=True, extra_email_file=None)
+        raw_extra = (os.getenv("CAMPANHA_BLACKLIST_EXTRA_EMAIL_FILE") or "").strip()
+        if raw_extra:
+            xp = Path(raw_extra)
+            if not xp.is_absolute():
+                xp = project_root / raw_extra
+            if xp.is_file():
+                blacklist_cfg = BlacklistConfig(use_db=True, extra_email_file=str(xp.resolve()))
+
         html_p = project_root / "campanha" / "templates" / "default.html"
         text_p = project_root / "campanha" / "templates" / "default.txt"
 

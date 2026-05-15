@@ -76,7 +76,7 @@ def normalizar_valor_para_blacklist(tipo: str, valor) -> str:
     """
     Mesma logica usada na filtragem — valores da blacklist no banco sao normalizados assim ao carregar.
     """
-    t = str(tipo).upper()
+    t = str(tipo).strip().upper()
     if t == "CPF":
         return _normalizar_cpf_cmp(valor)
     if t == "TELEFONE":
