@@ -1099,6 +1099,7 @@ from campanha.api_templates import (
     remover_template,
 )
 from campanha.core import Recipient, parse_recipients_csv_bytes
+from messages_viewer.syscall_audit import get_audit_row, list_audit_rows
 
 
 def _camp_db():
@@ -1552,6 +1553,65 @@ def api_campanha_sincronizar_mailgun():
         "atualizados": atualizados,
         "ja_cadastrados": len(ja_cadastrados),
     })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUDITORIA — requisições / ligações (MySQL request_audit)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/auditoria-syscall")
+def auditoria_syscall_page():
+    return render_template("auditoria_syscall.html")
+
+
+def _parse_audit_dt(raw: str | None) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    s = s.replace("T", " ")[:32]
+    return s
+
+
+@app.route("/api/auditoria-syscall/linhas", methods=["GET"], endpoint="api_auditoria_syscall_linhas")
+def api_auditoria_syscall_linhas():
+    try:
+        lig = (request.args.get("ligacao_id") or "").strip()
+        ligacao_id = int(lig) if lig.isdigit() else None
+        req = (request.args.get("request_id") or "").strip() or None
+        lim = int(request.args.get("limit", "50") or "50")
+        off = int(request.args.get("offset", "0") or "0")
+        rows, total = list_audit_rows(
+            limit=lim,
+            offset=off,
+            ligacao_id=ligacao_id,
+            request_id=req,
+            user_usuario=(request.args.get("user_usuario") or "").strip() or None,
+            user_nome=(request.args.get("user_nome") or "").strip() or None,
+            credor_nome=(request.args.get("credor_nome") or "").strip() or None,
+            credor_cpf=(request.args.get("credor_cpf") or "").strip() or None,
+            credor_telefone=(request.args.get("credor_telefone") or "").strip() or None,
+            desde=_parse_audit_dt(request.args.get("desde")),
+            ate=_parse_audit_dt(request.args.get("ate")),
+        )
+        return jsonify({"ok": True, "rows": rows, "total": total, "limit": lim, "offset": off})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/auditoria-syscall/<int:rid>", methods=["GET"], endpoint="api_auditoria_syscall_detalhe")
+def api_auditoria_syscall_detalhe(rid):
+    try:
+        row = get_audit_row(rid)
+        if not row:
+            return jsonify({"ok": False, "error": "Registro nao encontrado."}), 404
+        return jsonify({"ok": True, "row": row})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # EDA Diario: montado em /eda/ (ver eda_integracao.py e variavel plataforma_central_PATH)

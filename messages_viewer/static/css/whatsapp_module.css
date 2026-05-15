@@ -1958,6 +1958,75 @@ body.platform-body #app-toast {
   font-size: 0.85rem;
 }
 
+.camp-btn-sm {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.65rem;
+}
+
+/* Auditoria syscall */
+.audit-filter-grid {
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+}
+.audit-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+.audit-modal[hidden] { display: none !important; }
+.audit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.audit-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+}
+.audit-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100%);
+  max-height: min(90vh, 900px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.audit-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.audit-modal-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.audit-modal-body {
+  padding: 0.75rem 1rem 1rem;
+  overflow: auto;
+  flex: 1;
+}
+.audit-json-pre {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .camp-tabs { overflow-x: auto; }

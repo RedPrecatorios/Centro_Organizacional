@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auditoria syscall — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Auditoria syscall</h1>
+        <p class="dash-sub">Consulta à tabela MySQL configurada em <code>MYSQL_AUDIT_TABLE</code> (padrão <code>request_audit</code>), com as credenciais <code>EDA_MYSQL_*</code>. Filtros e paginação; clique numa linha para ver payload e cabeçalhos.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <div class="camp-form-card audit-filters">
+        <h2 class="dash-section-title" style="margin-top:0">Filtros</h2>
+        <div class="camp-form-grid audit-filter-grid">
+          <div class="camp-field">
+            <label for="af-ligacao">ID ligação</label>
+            <input type="text" id="af-ligacao" inputmode="numeric" placeholder="4267860" />
+          </div>
+          <div class="camp-field">
+            <label for="af-request">Request ID (UUID)</label>
+            <input type="text" id="af-request" placeholder="cdd6b773-f0ec-..." />
+          </div>
+          <div class="camp-field">
+            <label for="af-user">Utilizador (login)</label>
+            <input type="text" id="af-user" placeholder="karina.aparecida" />
+          </div>
+          <div class="camp-field">
+            <label for="af-nome">Nome operador</label>
+            <input type="text" id="af-nome" placeholder="Karina" />
+          </div>
+          <div class="camp-field">
+            <label for="af-credor">Nome credor</label>
+            <input type="text" id="af-credor" placeholder="SILVIA" />
+          </div>
+          <div class="camp-field">
+            <label for="af-cpf">CPF credor (dígitos)</label>
+            <input type="text" id="af-cpf" inputmode="numeric" placeholder="59392096887" />
+          </div>
+          <div class="camp-field">
+            <label for="af-tel">Telefone credor (dígitos)</label>
+            <input type="text" id="af-tel" inputmode="numeric" placeholder="16999714634" />
+          </div>
+          <div class="camp-field">
+            <label for="af-desde">Última ligação desde</label>
+            <input type="datetime-local" id="af-desde" />
+          </div>
+          <div class="camp-field">
+            <label for="af-ate">Última ligação até</label>
+            <input type="datetime-local" id="af-ate" />
+          </div>
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.75rem">
+          <button type="button" class="camp-btn camp-btn-primary" id="af-buscar">Pesquisar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="af-limpar">Limpar</button>
+        </div>
+      </div>
+
+      <p id="audit-summary" class="camp-hint" style="margin:0.75rem 0"></p>
+      <div id="audit-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+      <div id="audit-table-wrap" style="overflow-x:auto">
+        <table class="camp-table" id="audit-table" style="display:none">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Última ligação</th>
+              <th>Utilizador</th>
+              <th>Operador</th>
+              <th>Credor</th>
+              <th>CPF</th>
+              <th>Tel.</th>
+              <th>Ligação</th>
+              <th>Acionamento</th>
+              <th>Nº</th>
+            </tr>
+          </thead>
+          <tbody id="audit-tbody"></tbody>
+        </table>
+      </div>
+      <p id="audit-empty" class="camp-empty" style="display:none">Nenhum registo encontrado.</p>
+      <div class="audit-pager" id="audit-pager" style="display:none">
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="af-prev">Anterior</button>
+        <span id="audit-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="af-next">Seguinte</button>
+      </div>
+      <div id="audit-err" class="camp-msg camp-msg-err" style="display:none"></div>
+    </main>
+  </div>
+
+  <div id="audit-modal" class="audit-modal" hidden aria-modal="true" role="dialog">
+    <div class="audit-modal-backdrop" id="audit-modal-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="audit-modal-title">Detalhe</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="audit-modal-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <pre id="audit-modal-json" class="audit-json-pre"></pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const PAGE = 50;
+  let offset = 0;
+  let lastTotal = 0;
+
+  function esc(s) {
+    if (s == null || s === '') return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function qs() {
+    const p = new URLSearchParams();
+    p.set('limit', String(PAGE));
+    p.set('offset', String(offset));
+    const lig = document.getElementById('af-ligacao').value.trim();
+    const req = document.getElementById('af-request').value.trim();
+    if (lig) p.set('ligacao_id', lig);
+    if (req) p.set('request_id', req);
+    const u = document.getElementById('af-user').value.trim();
+    const n = document.getElementById('af-nome').value.trim();
+    const c = document.getElementById('af-credor').value.trim();
+    const cpf = document.getElementById('af-cpf').value.trim();
+    const tel = document.getElementById('af-tel').value.trim();
+    if (u) p.set('user_usuario', u);
+    if (n) p.set('user_nome', n);
+    if (c) p.set('credor_nome', c);
+    if (cpf) p.set('credor_cpf', cpf);
+    if (tel) p.set('credor_telefone', tel);
+    const d0 = document.getElementById('af-desde').value;
+    const d1 = document.getElementById('af-ate').value;
+    if (d0) p.set('desde', d0);
+    if (d1) p.set('ate', d1);
+    return p.toString();
+  }
+
+  function showErr(msg) {
+    const el = document.getElementById('audit-err');
+    el.textContent = msg || 'Erro';
+    el.style.display = 'block';
+  }
+  function hideErr() {
+    document.getElementById('audit-err').style.display = 'none';
+  }
+
+  async function load() {
+    hideErr();
+    document.getElementById('audit-loading').style.display = '';
+    document.getElementById('audit-table').style.display = 'none';
+    document.getElementById('audit-empty').style.display = 'none';
+    document.getElementById('audit-pager').style.display = 'none';
+    try {
+      const r = await fetch('/api/auditoria-syscall/linhas?' + qs());
+      const d = await r.json();
+      document.getElementById('audit-loading').style.display = 'none';
+      if (!d.ok) { showErr(d.error || 'Falha na API'); return; }
+      lastTotal = d.total || 0;
+      document.getElementById('audit-summary').textContent =
+        lastTotal + ' registo(s) — a mostrar ' + (d.rows || []).length + ' (offset ' + offset + ')';
+      const tbody = document.getElementById('audit-tbody');
+      tbody.innerHTML = '';
+      if (!(d.rows || []).length) {
+        document.getElementById('audit-empty').style.display = '';
+        document.getElementById('audit-pager').style.display = lastTotal > PAGE ? '' : 'none';
+        updatePager();
+        return;
+      }
+      d.rows.forEach(function(row) {
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.dataset.id = String(row.id);
+        tr.innerHTML =
+          '<td>' + esc(row.id) + '</td>' +
+          '<td>' + esc(row.ultima_ligacao_at || '') + '</td>' +
+          '<td>' + esc(row.user_usuario) + '</td>' +
+          '<td>' + esc(row.user_nome) + '</td>' +
+          '<td>' + esc(row.credor_nome) + '</td>' +
+          '<td>' + esc(row.credor_cpf) + '</td>' +
+          '<td>' + esc(row.credor_telefone) + '</td>' +
+          '<td>' + esc(row.ligacao_id) + '</td>' +
+          '<td>' + esc(row.ligacao_acionamento) + '</td>' +
+          '<td>' + esc(row.total_ligacoes) + '</td>';
+        tr.addEventListener('click', function() { openDetail(row.id); });
+        tbody.appendChild(tr);
+      });
+      document.getElementById('audit-table').style.display = '';
+      document.getElementById('audit-pager').style.display = lastTotal > PAGE ? '' : 'none';
+      updatePager();
+    } catch (e) {
+      document.getElementById('audit-loading').style.display = 'none';
+      showErr(String(e));
+    }
+  }
+
+  function updatePager() {
+    document.getElementById('af-prev').disabled = offset <= 0;
+    document.getElementById('af-next').disabled = lastTotal === 0 || offset + PAGE >= lastTotal;
+    document.getElementById('audit-pager-label').textContent =
+      'Offset ' + offset + ' / total ' + lastTotal;
+  }
+
+  async function openDetail(id) {
+    const modal = document.getElementById('audit-modal');
+    const pre = document.getElementById('audit-modal-json');
+    pre.textContent = 'A carregar...';
+    modal.hidden = false;
+    try {
+      const r = await fetch('/api/auditoria-syscall/' + id);
+      const d = await r.json();
+      if (!d.ok) {
+        pre.textContent = d.error || 'Erro';
+        return;
+      }
+      document.getElementById('audit-modal-title').textContent = 'Registo #' + id;
+      pre.textContent = JSON.stringify(d.row, null, 2);
+    } catch (e) {
+      pre.textContent = String(e);
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('audit-modal').hidden = true;
+  }
+
+  document.getElementById('af-buscar').addEventListener('click', function() {
+    offset = 0;
+    load();
+  });
+  document.getElementById('af-limpar').addEventListener('click', function() {
+    ['af-ligacao','af-request','af-user','af-nome','af-credor','af-cpf','af-tel','af-desde','af-ate'].forEach(function(id) {
+      document.getElementById(id).value = '';
+    });
+    offset = 0;
+    load();
+  });
+  document.getElementById('af-prev').addEventListener('click', function() {
+    offset = Math.max(0, offset - PAGE);
+    load();
+  });
+  document.getElementById('af-next').addEventListener('click', function() {
+    var lastPage = Math.max(0, Math.floor((lastTotal - 1) / PAGE) * PAGE);
+    offset = Math.min(lastPage, offset + PAGE);
+    load();
+  });
+  document.getElementById('audit-modal-close').addEventListener('click', closeModal);
+  document.getElementById('audit-modal-backdrop').addEventListener('click', closeModal);
+
+  load();
+})();
+</script>
+</body>
+</html>

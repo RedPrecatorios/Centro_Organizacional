@@ -36,6 +36,10 @@ TAB_KEYS: tuple[tuple[str, str], ...] = (
     ("memoria_calculo", "Memória de cálculo (menu lateral)"),
     ("campanha", "Campanha (disparo de e-mails, domínios)"),
     ("eda", "EDA Diário (link no menu, se o módulo estiver activo)"),
+    (
+        "auditoria_syscall",
+        "Auditoria syscall (ligações / request_audit no MySQL)",
+    ),
 )
 
 TAB_IDS = {k for k, _ in TAB_KEYS}
@@ -63,6 +67,20 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _sync_auditoria_syscall_permission_for_campanha_users() -> None:
+    """Quem já tem Campanha passa a ver Auditoria syscall sem reconfigurar cada conta."""
+    with _connect() as c:
+        c.execute(
+            """
+            INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+            SELECT user_id, 'auditoria_syscall'
+            FROM user_permissions
+            WHERE tab_id = 'campanha'
+            """
+        )
+        c.commit()
+
+
 def init_db() -> None:
     p = _db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +105,7 @@ def init_db() -> None:
             """
         )
         c.commit()
+    _sync_auditoria_syscall_permission_for_campanha_users()
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -166,6 +185,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("conversas", "conversas"),
         ("memoria_calculo", "memoria_calculo"),
         ("campanha", "campanha_page"),
+        ("auditoria_syscall", "auditoria_syscall_page"),
         ("outro_modulo", "embedded.index"),
     ]
     for tab, endpoint in order:
@@ -192,6 +212,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "outro_modulo"
     if path.startswith("/campanha"):
         return "campanha"
+    if path.startswith("/auditoria-syscall"):
+        return "auditoria_syscall"
     if path.startswith("/eda"):
         return "eda"
     if path.startswith("/auth"):
@@ -268,6 +290,9 @@ def _endpoint_to_tab() -> str | None:
         "api_campanha_templates_get": "campanha",
         "api_campanha_templates_update": "campanha",
         "api_campanha_templates_delete": "campanha",
+        "auditoria_syscall_page": "auditoria_syscall",
+        "api_auditoria_syscall_linhas": "auditoria_syscall",
+        "api_auditoria_syscall_detalhe": "auditoria_syscall",
     }
     t = m.get(ep)
     if t is not None:
@@ -343,6 +368,8 @@ def plataforma_before_request() -> Any | None:
     if u.get("role") == "admin":
         return None
     if not user_can_tab(needs):
+        if needs == "auditoria_syscall" and user_can_tab("campanha"):
+            return None
         # Só "Início" sem permissão: manda para a primeira aba que o colaborador tenha
         if request.endpoint == "index" and needs == "index":
             alt = _first_accessible_url_for_user(u)
