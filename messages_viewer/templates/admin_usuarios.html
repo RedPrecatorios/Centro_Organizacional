@@ -14,8 +14,8 @@
   <div class="dash-main">
     <header class="dash-top">
       <div>
-        <h1 class="dash-h1">Utilizadores e abas do painel</h1>
-        <p class="dash-sub">Como <strong>admin</strong>, define em cada <strong>colaborador</strong> quais <strong>abas e entradas do menu</strong> estão visíveis (e que rotas o sistema permite). Cada aba abaixo corresponde ao que o utilizador vê no painel após fazer login.</p>
+        <h1 class="dash-h1">Utilizadores e painéis</h1>
+        <p class="dash-sub">Defina quais <strong>painéis do menu lateral</strong> cada colaborador pode abrir. Administradores têm acesso a tudo automaticamente.</p>
       </div>
     </header>
     <main class="dash-content admin-users-main">
@@ -28,7 +28,6 @@
 
       <section class="admin-section" aria-labelledby="h-new">
         <h2 id="h-new" class="dash-section-title">Novo utilizador</h2>
-        <p class="admin-intro">Se escolher <strong>Colaborador</strong>, marque logo abaixo <strong>quais abas do painel</strong> ele pode ver; pode alterar depois na secção de cada conta.</p>
         <form class="admin-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="form-novo-user">
           <input type="hidden" name="action" value="create" />
           <div class="admin-row">
@@ -42,63 +41,80 @@
             </label>
             <button class="auth-submit" type="submit">Criar</button>
           </div>
-          <div class="admin-new-tabs" id="new-collab-tabs" role="group" aria-labelledby="new-tabs-label">
-            <p id="new-tabs-label" class="admin-perm-label">Abas visíveis para este colaborador (após fazer login):</p>
-            <div class="admin-checkboxes">
-              {% for key, label in tab_defs %}
-              <label class="admin-cb">
-                <input type="checkbox" name="new_tab_{{ key }}" value="1" />
-                {{ label }}
+          <div id="new-collab-panels" class="admin-panels-block">
+            <div class="admin-panels-toolbar">
+              <p class="admin-perm-label">Painéis com acesso:</p>
+              <div class="admin-panels-actions">
+                <button type="button" class="admin-btn admin-btn-sm" data-panels-action="all" data-panels-root="new-collab-panels">Marcar todos</button>
+                <button type="button" class="admin-btn admin-btn-sm" data-panels-action="none" data-panels-root="new-collab-panels">Desmarcar todos</button>
+              </div>
+            </div>
+            <div class="admin-panel-grid">
+              {% for key, title, desc in panel_defs %}
+              <label class="admin-panel-card">
+                <input type="checkbox" name="new_tab_{{ key }}" value="1" class="admin-panel-cb" />
+                <span class="admin-panel-card-body">
+                  <span class="admin-panel-card-title">{{ title }}</span>
+                  <span class="admin-panel-card-desc">{{ desc }}</span>
+                </span>
               </label>
               {% endfor %}
             </div>
           </div>
         </form>
-        <script>
-        (function () {
-          var sel = document.getElementById("new-role");
-          var block = document.getElementById("new-collab-tabs");
-          if (!sel || !block) return;
-          function sync() {
-            var isCol = sel.value === "colaborador";
-            block.classList.toggle("dash-hidden", !isCol);
-            block.setAttribute("aria-hidden", isCol ? "false" : "true");
-          }
-          sel.addEventListener("change", sync);
-          sync();
-        })();
-        </script>
       </section>
 
       <section class="admin-section" aria-labelledby="h-list">
-        <h2 id="h-list" class="dash-section-title">Contas: editar abas de cada colaborador</h2>
-        <p class="admin-intro">Para cada <strong>colaborador</strong>, marque as <strong>abas do painel</strong> a mostrar, depois clique <strong>Guardar permissões</strong>. Administradores têm todas as abas; não precisam de caixas.</p>
+        <h2 id="h-list" class="dash-section-title">Contas existentes</h2>
         <div class="admin-user-list">
           {% for u in users %}
-          <div class="admin-user-block">
-            <div class="admin-user-header">
-              <strong>{{ u.username|e }}</strong>
+          <article class="admin-user-block">
+            <header class="admin-user-header">
+              <strong class="admin-user-name">{{ u.username|e }}</strong>
               <span class="dash-pill {{ 'dash-pill-ok' if u.active else '' }}">
                 {{ 'Ativo' if u.active else 'Inactivo' }} · {{ 'Admin' if u.role == 'admin' else 'Colaborador' }}
               </span>
-            </div>
+            </header>
+
             {% if u.role == 'colaborador' %}
-            <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+            <div class="admin-user-panels-summary" aria-label="Painéis activos">
+              {% set ns = namespace(any=false) %}
+              {% for key, title, desc in panel_defs %}
+                {% if key in u.tabs %}
+                  {% set ns.any = true %}
+                  <span class="admin-panel-chip">{{ title }}</span>
+                {% endif %}
+              {% endfor %}
+              {% if not ns.any %}
+              <span class="admin-panel-chip admin-panel-chip-warn">Nenhum painel seleccionado</span>
+              {% endif %}
+            </div>
+
+            <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="perm-form-{{ u.id }}">
               <input type="hidden" name="action" value="save_perms" />
               <input type="hidden" name="user_id" value="{{ u.id }}" />
-              <p class="admin-perm-label">Abas visíveis no painel deste utilizador (menu lateral e extras):</p>
-              <div class="admin-checkboxes">
-                {% for key, label in tab_defs %}
-                <label class="admin-cb">
-                  <input type="checkbox" name="tab_{{ key }}" value="1" {% if key in u.tabs %}checked{% endif %} />
-                  {{ label }}
+              <div class="admin-panels-toolbar">
+                <p class="admin-perm-label">Seleccionar painéis para <strong>{{ u.username|e }}</strong>:</p>
+                <div class="admin-panels-actions">
+                  <button type="button" class="admin-btn admin-btn-sm" data-panels-action="all" data-panels-root="perm-form-{{ u.id }}">Marcar todos</button>
+                  <button type="button" class="admin-btn admin-btn-sm" data-panels-action="none" data-panels-root="perm-form-{{ u.id }}">Desmarcar todos</button>
+                </div>
+              </div>
+              <div class="admin-panel-grid">
+                {% for key, title, desc in panel_defs %}
+                <label class="admin-panel-card">
+                  <input type="checkbox" name="tab_{{ key }}" value="1" class="admin-panel-cb" {% if key in u.tabs %}checked{% endif %} />
+                  <span class="admin-panel-card-body">
+                    <span class="admin-panel-card-title">{{ title }}</span>
+                    <span class="admin-panel-card-desc">{{ desc }}</span>
+                  </span>
                 </label>
                 {% endfor %}
               </div>
-              <button class="auth-submit admin-perm-btn" type="submit">Guardar permissões</button>
+              <button class="auth-submit admin-perm-btn" type="submit">Guardar painéis</button>
             </form>
             {% else %}
-            <p class="admin-note">O administrador tem acesso a todos os módulos.</p>
+            <p class="admin-note">Administrador — acesso a todos os painéis da plataforma.</p>
             {% endif %}
 
             <div class="admin-actions">
@@ -123,13 +139,52 @@
               </label>
               <button class="auth-submit" type="submit">Alterar palavra-passe</button>
             </form>
-          </div>
+          </article>
           {% else %}
-          <p>Nenhum utilizador (o bootstrap do .env deveria ter criado o primeiro admin).</p>
+          <p>Nenhum utilizador registado.</p>
           {% endfor %}
         </div>
       </section>
     </main>
   </div>
+
+<script>
+(function () {
+  function rootEl(id) {
+    return document.getElementById(id);
+  }
+  function setAllInRoot(root, checked) {
+    if (!root) return;
+    root.querySelectorAll('.admin-panel-cb').forEach(function (cb) {
+      cb.checked = checked;
+      cb.closest('.admin-panel-card')?.classList.toggle('is-on', checked);
+    });
+  }
+  document.querySelectorAll('[data-panels-action]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var root = rootEl(btn.getAttribute('data-panels-root'));
+      setAllInRoot(root, btn.getAttribute('data-panels-action') === 'all');
+    });
+  });
+  document.querySelectorAll('.admin-panel-cb').forEach(function (cb) {
+    function sync() {
+      cb.closest('.admin-panel-card')?.classList.toggle('is-on', cb.checked);
+    }
+    cb.addEventListener('change', sync);
+    sync();
+  });
+  var roleSel = document.getElementById('new-role');
+  var newPanels = document.getElementById('new-collab-panels');
+  if (roleSel && newPanels) {
+    function syncRole() {
+      var isCol = roleSel.value === 'colaborador';
+      newPanels.classList.toggle('dash-hidden', !isCol);
+      newPanels.setAttribute('aria-hidden', isCol ? 'false' : 'true');
+    }
+    roleSel.addEventListener('change', syncRole);
+    syncRole();
+  }
+})();
+</script>
 </body>
 </html>

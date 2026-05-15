@@ -24,25 +24,22 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 auth_bp = Blueprint("auth", __name__, template_folder="templates")
 
-# Permissões por aba (colaborador): admin ignora a tabela e acede a tudo.
-# Cada chave = uma aba/entrada no painel; o admin controla o que o colaborador vê.
-TAB_KEYS: tuple[tuple[str, str], ...] = (
-    ("index", "Início (resumo no menu lateral)"),
-    ("conversas", "Conversas (WhatsApp no menu e APIs)"),
-    (
-        "outro_modulo",
-        "2.º módulo (aba extra na página Conversas + rota /embedded/)",
-    ),
-    ("memoria_calculo", "Memória de cálculo (menu lateral)"),
-    ("campanha", "Campanha (disparo de e-mails, domínios)"),
-    ("eda", "EDA Diário (link no menu, se o módulo estiver activo)"),
-    (
-        "auditoria_syscall",
-        "Auditoria syscall (ligações / request_audit no MySQL)",
-    ),
+# Permissões por painel (colaborador): admin ignora a tabela e acede a tudo.
+# (id, nome no menu, descrição curta)
+TAB_PANELS: tuple[tuple[str, str, str], ...] = (
+    ("index", "Início", "Página inicial e resumo do painel"),
+    ("conversas", "Conversas", "WhatsApp, instâncias e histórico de mensagens"),
+    ("outro_modulo", "2.º módulo", "Iframe extra na página Conversas (/embedded/)"),
+    ("memoria_calculo", "Memória de cálculo", "Consulta e actualização de memórias"),
+    ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
+    ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
+    ("eda", "EDA Diário", "Processamento e relatórios EDA (/eda/)"),
 )
 
-TAB_IDS = {k for k, _ in TAB_KEYS}
+# Compat: (id, label) para loops antigos
+TAB_KEYS: tuple[tuple[str, str], ...] = tuple((p[0], p[1]) for p in TAB_PANELS)
+
+TAB_IDS = {p[0] for p in TAB_PANELS}
 SESSION_USER_ID = "plataforma_uid"
 SESSION_VERSION = "plataforma_ver"
 
@@ -555,7 +552,7 @@ def admin_usuarios():
     return render_template(
         "admin_usuarios.html",
         users=users,
-        tab_defs=TAB_KEYS,
+        panel_defs=TAB_PANELS,
         error=err,
         ok_message=ok,
     )

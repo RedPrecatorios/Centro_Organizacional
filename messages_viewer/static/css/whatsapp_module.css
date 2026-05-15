@@ -1502,7 +1502,68 @@ body.platform-body #app-toast {
 .platform-bar { flex-wrap: wrap; min-height: 52px; height: auto; padding-top: 8px; padding-bottom: 8px; }
 .platform-tabs { flex: 1 1 auto; min-width: 0; }
 
-.admin-users-main { max-width: 900px; }
+.admin-users-main { max-width: 960px; }
+.admin-panels-block { margin-top: 1rem; }
+.admin-panels-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+.admin-panels-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.admin-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+.admin-panel-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.admin-panel-card:hover { border-color: var(--accent); }
+.admin-panel-card.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.admin-panel-cb {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.admin-panel-card-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.admin-panel-card-title { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+.admin-panel-card-desc { font-size: 0.75rem; color: var(--muted); line-height: 1.35; }
+.admin-user-panels-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0.75rem;
+}
+.admin-panel-chip {
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #065f46;
+}
+.admin-panel-chip-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.admin-btn-sm { font-size: 0.78rem; padding: 0.3rem 0.55rem; }
+.admin-user-name { font-size: 1rem; }
 .admin-intro {
   color: var(--muted);
   font-size: 0.9rem;
