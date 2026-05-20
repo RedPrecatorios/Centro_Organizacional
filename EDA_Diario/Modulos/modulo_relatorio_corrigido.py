@@ -314,10 +314,50 @@ ABA_1_STATUS = [
 ABA_2_STATUS = [
     "Sem Interesse",
     "Inclusão Monday",
+    "Inclusão Pré Cálculo",
     "Remover do Mailing",
 ]
 
 ABA_BLACKLIST_EXCEL = "Localizados_Blacklist"
+ABA_TELEFONE_RECADO = "Telefone_Recado"
+ABA_SEM_INTERESSE = "Sem Interesse_Remover"
+ABA_OUTROS = "Outros Resultados"
+
+
+def _resultado_coincide_lista(resultado: str, valores: list[str]) -> bool:
+    """Compara resultado ignorando maiúsculas e acentos."""
+    chave = _norm_status_comparacao(_texto_resultado_linha(resultado))
+    if not chave:
+        return False
+    for v in valores:
+        if _norm_status_comparacao(v) == chave:
+            return True
+    return False
+
+
+def aba_por_resultado(resultado: str) -> str:
+    """Nome da aba Excel/BD conforme o campo ``resultado``."""
+    if _resultado_coincide_lista(resultado, ABA_1_STATUS):
+        return ABA_TELEFONE_RECADO
+    if _resultado_coincide_lista(resultado, ABA_2_STATUS):
+        return ABA_SEM_INTERESSE
+    return ABA_OUTROS
+
+
+def _reclassificar_abas_linhas_banco(linhas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Recalcula ``aba`` a partir de ``resultado`` (export e contagens).
+    Mantém ``Localizados_Blacklist``; corrige linhas antigas gravadas em Outros.
+    """
+    out: list[dict[str, Any]] = []
+    for row in linhas:
+        item = dict(row)
+        if (item.get("aba") or "").strip() == ABA_BLACKLIST_EXCEL:
+            out.append(item)
+            continue
+        item["aba"] = aba_por_resultado(item.get("resultado"))
+        out.append(item)
+    return out
 
 
 def montar_dataframes(caminho_csv: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -329,9 +369,14 @@ def montar_dataframes(caminho_csv: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd
     df = pd.DataFrame(dados)
     df["resultado"] = df["resultado"].fillna("").astype(str).str.strip()
 
-    df_aba1 = df[df["resultado"].isin(ABA_1_STATUS)]
-    df_aba2 = df[df["resultado"].isin(ABA_2_STATUS)]
-    df_aba3 = df[~df["resultado"].isin(ABA_1_STATUS + ABA_2_STATUS)]
+    df_aba1 = df[df["resultado"].apply(lambda r: _resultado_coincide_lista(r, ABA_1_STATUS))]
+    df_aba2 = df[df["resultado"].apply(lambda r: _resultado_coincide_lista(r, ABA_2_STATUS))]
+    usadas = ABA_1_STATUS + ABA_2_STATUS
+    df_aba3 = df[
+        ~df["resultado"].apply(
+            lambda r: _resultado_coincide_lista(r, usadas)
+        )
+    ]
     return df_aba1, df_aba2, df_aba3
 
 
@@ -744,7 +789,9 @@ def gerar_excel_do_banco(
     """
     from modulo_banco import carregar_relatorio_discagem
 
-    linhas = carregar_relatorio_discagem(arquivo, formato)
+    linhas = _reclassificar_abas_linhas_banco(
+        carregar_relatorio_discagem(arquivo, formato)
+    )
     if not linhas:
         if arquivo:
             raise ValueError(
@@ -779,14 +826,14 @@ def resumo_exportacao_banco(
     """Contagens por aba na BD (para mensagens na UI)."""
     from modulo_banco import carregar_relatorio_discagem
 
-    linhas = carregar_relatorio_discagem(arquivo, formato)
+    linhas = _reclassificar_abas_linhas_banco(
+        carregar_relatorio_discagem(arquivo, formato)
+    )
     return {
         "total": len(linhas),
-        "telefone_recado": sum(1 for r in linhas if r.get("aba") == "Telefone_Recado"),
-        "sem_interesse": sum(
-            1 for r in linhas if r.get("aba") == "Sem Interesse_Remover"
-        ),
-        "outros": sum(1 for r in linhas if r.get("aba") == "Outros Resultados"),
+        "telefone_recado": sum(1 for r in linhas if r.get("aba") == ABA_TELEFONE_RECADO),
+        "sem_interesse": sum(1 for r in linhas if r.get("aba") == ABA_SEM_INTERESSE),
+        "outros": sum(1 for r in linhas if r.get("aba") == ABA_OUTROS),
         "blacklist": sum(1 for r in linhas if r.get("aba") == ABA_BLACKLIST_EXCEL),
     }
 
