@@ -1,0 +1,2 @@
+# Copie para /etc/default/atualizacao-calculo-api e ajuste CENTRO_ROOT se o código não estiver no volume abaixo.
+CENTRO_ROOT=/mnt/volume_nyc1_1778499775066/Centro_Organizacional

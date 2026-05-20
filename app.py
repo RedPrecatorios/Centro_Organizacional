@@ -1323,7 +1323,11 @@ def api_campanha_disparar():
         for r in rows:
             recipients.append(Recipient(
                 email=r["email"], name=r.get("nome", ""),
-                fields={"processo": r.get("processo", "")},
+                fields={
+                    "processo": r.get("processo") or "",
+                    "incidente": r.get("incidente") or "",
+                    "cpf": r.get("cpf") or "",
+                },
             ))
         origem = "base"
 

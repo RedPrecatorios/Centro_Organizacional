@@ -7,23 +7,34 @@
 
   <div class="eda-page-head">
     <h1 class="eda-h1">Blacklist</h1>
-    <p class="eda-lead">Gerencie os contatos, e-mails, CPFs e nomes bloqueados.</p>
+    <p class="eda-lead">Gerencie CPF, nome, telefone, e-mail e pares <strong>processo + incidente</strong> bloqueados em todas as plataformas.</p>
   </div>
 
-  <div class="eda-form-bar">
+  <div class="eda-form-bar" x-data="{ tipo: 'CPF' }">
     <form action="{{ url_for('blacklist_adicionar') }}" method="POST" class="eda-form-row">
-      <div class="eda-field" style="min-width:160px;">
+      <div class="eda-field" style="min-width:200px;">
         <label class="eda-label" for="tipo_bl">Tipo</label>
-        <select name="tipo" id="tipo_bl" required class="eda-select" style="width:100%;">
+        <select name="tipo" id="tipo_bl" required class="eda-select" style="width:100%;" x-model="tipo">
           <option value="CPF">CPF</option>
           <option value="NOME">NOME</option>
           <option value="TELEFONE">TELEFONE</option>
           <option value="EMAIL">EMAIL</option>
+          <option value="PROCESSO_INCIDENTE">PROCESSO + INCIDENTE</option>
         </select>
       </div>
-      <div class="eda-field eda-field--grow">
+      <div class="eda-field eda-field--grow" x-show="tipo !== 'PROCESSO_INCIDENTE'">
         <label class="eda-label" for="valor_bl">Valor</label>
-        <input type="text" name="valor" id="valor_bl" required placeholder="Ex.: 12345678900" class="eda-input" style="width:100%;" />
+        <input type="text" name="valor" id="valor_bl" placeholder="Ex.: 12345678900" class="eda-input" style="width:100%;"
+               :required="tipo !== 'PROCESSO_INCIDENTE'" />
+      </div>
+      <div class="eda-field eda-field--grow" x-show="tipo === 'PROCESSO_INCIDENTE'" x-cloak>
+        <label class="eda-label" for="processo_bl">Nº do processo</label>
+        <input type="text" name="processo" id="processo_bl" placeholder="Obrigatório" class="eda-input" style="width:100%;"
+               :required="tipo === 'PROCESSO_INCIDENTE'" />
+      </div>
+      <div class="eda-field eda-field--grow" x-show="tipo === 'PROCESSO_INCIDENTE'" x-cloak>
+        <label class="eda-label" for="incidente_bl">Nº do incidente <span style="color:#94a3b8;font-weight:400;">(opcional)</span></label>
+        <input type="text" name="incidente" id="incidente_bl" placeholder="Cumprimento / incidente" class="eda-input" style="width:100%;" />
       </div>
       <div class="eda-field eda-field--grow">
         <label class="eda-label" for="motivo_bl">Motivo <span style="color:#94a3b8;font-weight:400;">(opcional)</span></label>
@@ -49,8 +60,10 @@
           <li><strong>tipo</strong> — obrigatório: um de <span class="eda-mono" style="font-size:11px;">CPF</span>,
             <span class="eda-mono" style="font-size:11px;">NOME</span>,
             <span class="eda-mono" style="font-size:11px;">TELEFONE</span>,
-            <span class="eda-mono" style="font-size:11px;">EMAIL</span> (maiúsculas recomendadas).</li>
-          <li><strong>valor</strong> — obrigatório: texto a bloquear (CPF só dígitos ou com pontuação; será normalizado no fluxo).</li>
+            <span class="eda-mono" style="font-size:11px;">EMAIL</span>,
+            <span class="eda-mono" style="font-size:11px;">PROCESSO_INCIDENTE</span> (maiúsculas recomendadas).</li>
+          <li><strong>valor</strong> — obrigatório. Para <span class="eda-mono" style="font-size:11px;">PROCESSO_INCIDENTE</span> use
+            <span class="eda-mono" style="font-size:11px;">processo|incidente</span> (incidente pode ficar vazio após o <span class="eda-mono" style="font-size:11px;">|</span>).</li>
           <li><strong>motivo</strong> — opcional: texto livre.</li>
           <li><strong>ativo</strong> — opcional: <span class="eda-mono" style="font-size:11px;">1</span> /
             <span class="eda-mono" style="font-size:11px;">true</span> / vazio importa;
@@ -70,7 +83,8 @@
 EMAIL,contacto.livre@gmail.com,Solicitou remoção,1
 CPF,12345678901,,1
 NOME,JOSÉ SILVA EXPORTADO,Blacklist operacional,
-TELEFONE,11988776655,Apenas este número bloqueado,1</pre>
+TELEFONE,11988776655,Apenas este número bloqueado,1
+PROCESSO_INCIDENTE,0001234-56.2023.8.26.0100|12345,Sem contato neste cumprimento,1</pre>
         <p class="eda-csv-help__caption">
           Linhas com o mesmo par <span class="eda-mono" style="font-size:11px;">tipo</span> +
           <span class="eda-mono" style="font-size:11px;">valor</span> fazem atualização (<em>reactiva</em> e mantém/atualiza motivo conforme envio).
@@ -112,11 +126,18 @@ TELEFONE,11988776655,Apenas este número bloqueado,1</pre>
             {% for r in registros %}
             <tr>
               <td>
-                <span class="eda-tag {% if r.tipo == 'CPF' %}eda-tag-cpf{% elif r.tipo == 'NOME' %}eda-tag-nome{% elif r.tipo == 'TELEFONE' %}eda-tag-tel{% else %}eda-tag-email{% endif %}">
-                  {{ r.tipo }}
+                <span class="eda-tag {% if r.tipo == 'CPF' %}eda-tag-cpf{% elif r.tipo == 'NOME' %}eda-tag-nome{% elif r.tipo == 'TELEFONE' %}eda-tag-tel{% elif r.tipo == 'EMAIL' %}eda-tag-email{% else %}eda-tag-proc{% endif %}">
+                  {% if r.tipo == 'PROCESSO_INCIDENTE' %}PROC+INC{% else %}{{ r.tipo }}{% endif %}
                 </span>
               </td>
-              <td class="eda-mono">{{ r.valor }}</td>
+              <td class="eda-mono">
+                {% if r.tipo == 'PROCESSO_INCIDENTE' and '|' in r.valor %}
+                  {% set p = r.valor.split('|', 1) %}
+                  <span title="{{ r.valor }}">Proc: {{ p[0] }}{% if p[1] %} · Inc: {{ p[1] }}{% endif %}</span>
+                {% else %}
+                  {{ r.valor }}
+                {% endif %}
+              </td>
               <td style="color:var(--muted);">{{ r.motivo or '—' }}</td>
               <td style="color:var(--muted);font-size:12px;white-space:nowrap;">{{ r.data_inclusao }}</td>
               <td>

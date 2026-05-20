@@ -652,6 +652,7 @@
 .eda-tag-nome { background: #ffedd5; color: #c2410c; }
 .eda-tag-tel { background: #fef3c7; color: #b45309; }
 .eda-tag-email { background: #dbeafe; color: #1d4ed8; }
+.eda-tag-proc { background: #ede9fe; color: #6d28d9; }
 
 /* Formulários (blacklist, exportar) */
 .eda-form-bar {

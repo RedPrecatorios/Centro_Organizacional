@@ -616,25 +616,55 @@ def load_recipients_csv(path: str) -> list[Recipient]:
     return parse_recipients_csv_text(text)
 
 
-def load_blacklist_emails(mysql_cfg: MysqlConfig, use_db: bool, extra_email_file: str | None) -> set[str]:
-    blocked: set[str] = set()
+def _eda_blacklist_mod_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "EDA_Diario" / "Modulos"
 
+
+def _import_eda_blacklist():
+    import sys
+
+    p = str(_eda_blacklist_mod_path())
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    from modulo_blacklist import (  # noqa: WPS433
+        normalizar_chave_processo_incidente,
+        normalizar_valor_para_blacklist,
+    )
+
+    return normalizar_chave_processo_incidente, normalizar_valor_para_blacklist
+
+
+def load_blacklist_for_campanha(
+    mysql_cfg: MysqlConfig,
+    use_db: bool,
+    extra_email_file: str | None,
+) -> dict[str, set]:
+    """Carrega todos os tipos da blacklist (normalizados) + ficheiro extra de e-mails."""
+    norm_valor = _import_eda_blacklist()[1]
+    bl: dict[str, set] = {
+        "CPF": set(),
+        "NOME": set(),
+        "TELEFONE": set(),
+        "EMAIL": set(),
+        "PROCESSO_INCIDENTE": set(),
+    }
     if use_db:
         try:
             conn = mysql.connector.connect(**_mysql_connect_kwargs(mysql_cfg))
         except mysql.connector.Error as e:
             raise RuntimeError(
                 "Campanha: não foi possível conectar ao MySQL para carregar blacklist. "
-                "Ajuste [db.mysql] no config ou defina variáveis CAMPANHA_MYSQL_* ou EDA_MYSQL_* no .env "
-                "(as variáveis de ambiente sobrescrevem o TOML). "
-                f"Ou defina blacklist.use_db = false para ignorar blacklist do banco. Detalhes: {e}"
+                "Ajuste [db.mysql] ou EDA_MYSQL_* no .env. Detalhes: " + str(e)
             ) from e
         cur = conn.cursor(buffered=True)
-        cur.execute("SELECT valor FROM blacklist WHERE ativo = 1 AND tipo = 'EMAIL'")
-        for (valor,) in cur.fetchall():
-            n = _norm_email(str(valor))
-            if n:
-                blocked.add(n)
+        cur.execute("SELECT tipo, valor FROM blacklist WHERE ativo = 1")
+        for tipo_raw, valor in cur.fetchall():
+            tipo = str(tipo_raw).strip().upper()
+            if tipo not in bl:
+                continue
+            nv = norm_valor(tipo, str(valor))
+            if nv:
+                bl[tipo].add(nv)
         cur.close()
         conn.close()
 
@@ -647,9 +677,66 @@ def load_blacklist_emails(mysql_cfg: MysqlConfig, use_db: bool, extra_email_file
                     continue
                 n = _norm_email(s)
                 if n:
-                    blocked.add(n)
+                    bl["EMAIL"].add(n)
+    return bl
 
-    return blocked
+
+def load_blacklist_processo_incidente(mysql_cfg: MysqlConfig, use_db: bool) -> set[str]:
+    """Compat: só pares processo|incidente."""
+    return load_blacklist_for_campanha(mysql_cfg, use_db, None).get(
+        "PROCESSO_INCIDENTE", set()
+    )
+
+
+def recipient_processo_incidente(r: Recipient) -> tuple[str, str]:
+    """Extrai processo e incidente dos fields do destinatário (CSV ou base)."""
+    low = {str(k).strip().lower(): (v or "").strip() for k, v in r.fields.items()}
+    proc = (
+        low.get("processo")
+        or low.get("numero_processo")
+        or low.get("numero de processo")
+        or low.get("numero_de_processo")
+        or ""
+    )
+    inc = (
+        low.get("incidente")
+        or low.get("numero_incidente")
+        or low.get("numero do incidente")
+        or low.get("numero_do_incidente")
+        or low.get("numero do cumprimento")
+        or ""
+    )
+    return proc, inc
+
+
+def recipient_cpf(r: Recipient) -> str:
+    _, norm_valor = _import_eda_blacklist()
+    for k, v in r.fields.items():
+        if str(k).strip().lower() == "cpf":
+            return norm_valor("CPF", v)
+    return ""
+
+
+def recipient_blocked_by_blacklist(r: Recipient, bl: dict[str, set]) -> tuple[bool, str]:
+    """Valida e-mail, CPF, nome, processo+incidente contra a blacklist."""
+    from modulo_blacklist import campanha_destinatario_bloqueado  # noqa: WPS433
+
+    proc, inc = recipient_processo_incidente(r)
+    return campanha_destinatario_bloqueado(
+        r.email, r.name, recipient_cpf(r), proc, inc, bl
+    )
+
+
+def recipient_blocked_processo_incidente(r: Recipient, blocked: set[str]) -> bool:
+    """Compat."""
+    bl = {"PROCESSO_INCIDENTE": blocked}
+    bloqueado, motivo = recipient_blocked_by_blacklist(r, bl)
+    return bloqueado and motivo == "PROCESSO_INCIDENTE"
+
+
+def load_blacklist_emails(mysql_cfg: MysqlConfig, use_db: bool, extra_email_file: str | None) -> set[str]:
+    """Compat: só e-mails."""
+    return load_blacklist_for_campanha(mysql_cfg, use_db, extra_email_file).get("EMAIL", set())
 
 
 class JsonlLogger:
@@ -817,7 +904,9 @@ def run_campaign(
 
     logger = JsonlLogger(str(Path(log_dir) / f"{campaign_id}.jsonl")) if cfg.jsonl_log_enabled else NullLogger()
 
-    blocked = load_blacklist_emails(cfg.mysql, cfg.blacklist.use_db, cfg.blacklist.extra_email_file)
+    bl = load_blacklist_for_campanha(
+        cfg.mysql, cfg.blacklist.use_db, cfg.blacklist.extra_email_file
+    )
     sent_keys = _load_sent_keys(sent_keys_file)
 
     html_t = (
@@ -856,7 +945,8 @@ def run_campaign(
             to_norm = _norm_email(r.email)
             if not to_norm:
                 continue
-            if to_norm in blocked:
+            bloqueado, motivo_bl = recipient_blocked_by_blacklist(r, bl)
+            if bloqueado:
                 totals["skipped_blacklist"] += 1
                 logger.write(
                     {
@@ -864,6 +954,8 @@ def run_campaign(
                         "campaign_id": campaign_id,
                         "to": r.email,
                         "name": r.name,
+                        "motivo": motivo_bl,
+                        "processo_incidente": recipient_processo_incidente(r),
                     }
                 )
                 if emails_log_conn:

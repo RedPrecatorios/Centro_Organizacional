@@ -6,7 +6,7 @@ import pandas as pd
 # Filtragem de blacklist para as abas sms e Emails
 # ─────────────────────────────────────────────
 # Regras:
-#   - Bloqueio total  (CPF ou NOME): remove TODOS os contatos da pessoa
+#   - Bloqueio total (CPF, NOME ou PROCESSO+INCIDENTE): remove TODOS os contatos da linha
 #   - Bloqueio parcial (TELEFONE ou EMAIL): remove apenas aquele valor
 
 
@@ -72,6 +72,68 @@ def _normalizar_email_cmp(email) -> str:
     return s.upper() if s and s.lower() != "nan" else ""
 
 
+def _normalizar_processo_cmp(valor) -> str:
+    """Número de processo/incidente: trim, maiúsculas, espaços colapsados."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    s = str(valor).strip()
+    if not s or s.lower() == "nan":
+        return ""
+    return " ".join(s.split()).upper()
+
+
+def normalizar_chave_processo_incidente(processo, incidente) -> str:
+    """
+    Chave única na blacklist: ``processo_normalizado|incidente_normalizado``.
+    O processo é obrigatório; incidente pode ser vazio (casos sem cumprimento).
+    """
+    p = _normalizar_processo_cmp(processo)
+    if not p:
+        return ""
+    i = _normalizar_processo_cmp(incidente)
+    return f"{p}|{i}"
+
+
+def normalizar_chave_processo_incidente_de_valor(valor) -> str:
+    """Aceita valor já composto (proc|inc) ou só processo."""
+    s = str(valor or "").strip()
+    if not s:
+        return ""
+    if "|" in s:
+        proc, _, inc = s.partition("|")
+        return normalizar_chave_processo_incidente(proc, inc)
+    return normalizar_chave_processo_incidente(s, "")
+
+
+def _valor_coluna_row(row, candidatos: tuple[str, ...]):
+    for col in candidatos:
+        if not hasattr(row, "get"):
+            continue
+        try:
+            if hasattr(row, "index") and col not in row.index:
+                continue
+        except Exception:
+            pass
+        v = row.get(col)
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            continue
+        s = str(v).strip()
+        if s and s.lower() != "nan":
+            return s
+    return ""
+
+
+_PROCESSO_COLS = ("Numero_de_Processo", "Processo", "numero_processo")
+_INCIDENTE_COLS = ("Numero_do_Incidente", "Incidente", "numero_incidente")
+
+
+def processo_incidente_from_row(row) -> tuple[str, str]:
+    return (
+        _valor_coluna_row(row, _PROCESSO_COLS),
+        _valor_coluna_row(row, _INCIDENTE_COLS),
+    )
+
+
 def normalizar_valor_para_blacklist(tipo: str, valor) -> str:
     """
     Mesma logica usada na filtragem — valores da blacklist no banco sao normalizados assim ao carregar.
@@ -85,7 +147,14 @@ def normalizar_valor_para_blacklist(tipo: str, valor) -> str:
         return _normalizar_nome_cmp(valor)
     if t == "EMAIL":
         return _normalizar_email_cmp(valor)
+    if t == "PROCESSO_INCIDENTE":
+        return normalizar_chave_processo_incidente_de_valor(valor)
     return ""
+
+
+def _processo_incidente_bloqueado(processo, incidente, bl: dict[str, set]) -> bool:
+    chave = normalizar_chave_processo_incidente(processo, incidente)
+    return bool(chave and chave in bl.get("PROCESSO_INCIDENTE", set()))
 
 
 def _pessoa_bloqueada(cpf, nome, bl: dict[str, set]) -> bool:
@@ -95,13 +164,109 @@ def _pessoa_bloqueada(cpf, nome, bl: dict[str, set]) -> bool:
 
 def _motivo_bloqueio_pessoa(cpf, nome, bl: dict[str, set]) -> str | None:
     """'PESSOA_CPF', 'PESSOA_NOME' ou None."""
-    cpf_norm  = _normalizar_cpf_cmp(cpf)
+    cpf_norm = _normalizar_cpf_cmp(cpf)
     nome_norm = _normalizar_nome_cmp(nome)
-    if cpf_norm and cpf_norm in bl["CPF"]:
+    if cpf_norm and cpf_norm in bl.get("CPF", set()):
         return "PESSOA_CPF"
-    if nome_norm and nome_norm in bl["NOME"]:
+    if nome_norm and nome_norm in bl.get("NOME", set()):
         return "PESSOA_NOME"
     return None
+
+
+def linha_totalmente_bloqueada(
+    *,
+    cpf=None,
+    nome=None,
+    processo=None,
+    incidente=None,
+    bl: dict[str, set],
+) -> bool:
+    """Bloqueio total (CPF, NOME ou par processo+incidente)."""
+    if _motivo_bloqueio_pessoa(cpf, nome, bl):
+        return True
+    return _processo_incidente_bloqueado(processo, incidente, bl)
+
+
+def motivo_blacklist_linha_relatorio(row, bl: dict[str, set]) -> str | None:
+    """
+    Indica se uma linha do relatório corrigido já está na blacklist.
+    Retorna o código do motivo ou None.
+    """
+    if not bl:
+        return None
+    motivo_p = _motivo_bloqueio_pessoa(row.get("cpf"), row.get("nome"), bl)
+    if motivo_p:
+        return motivo_p
+    if _processo_incidente_bloqueado(
+        row.get("processo"), row.get("numero_incidente"), bl
+    ):
+        return "PROCESSO_INCIDENTE"
+    tel = normalizar_valor_para_blacklist("TELEFONE", row.get("telefone"))
+    if tel and tel in bl.get("TELEFONE", set()):
+        return "TELEFONE"
+    return None
+
+
+def separar_relatorio_blacklist(
+    df: pd.DataFrame,
+    bl: dict[str, set],
+    aba_origem: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Divide o DataFrame do relatório em linhas activas (vão às abas normais)
+    e linhas já na blacklist (aba ``Localizados_Blacklist`` no Excel).
+    """
+    if df.empty:
+        return df.copy(), pd.DataFrame()
+
+    ativos: list[int] = []
+    bl_rows: list[dict] = []
+
+    for idx, row in df.iterrows():
+        motivo = motivo_blacklist_linha_relatorio(row, bl)
+        if motivo:
+            item = row.to_dict()
+            item["aba_origem"] = aba_origem
+            item["motivo_blacklist"] = motivo
+            bl_rows.append(item)
+        else:
+            ativos.append(idx)
+
+    df_ativos = df.loc[ativos].reset_index(drop=True) if ativos else df.iloc[0:0].copy()
+    if bl_rows:
+        df_bl = pd.DataFrame(bl_rows)
+    else:
+        df_bl = pd.DataFrame(columns=list(df.columns) + ["aba_origem", "motivo_blacklist"])
+    return df_ativos, df_bl
+
+
+def filtrar_dataframe_relatorio(df: pd.DataFrame, bl: dict[str, set]) -> pd.DataFrame:
+    """Remove linhas já na blacklist (preferir ``separar_relatorio_blacklist``)."""
+    ativos, _ = separar_relatorio_blacklist(df, bl, "")
+    return ativos
+
+
+def campanha_destinatario_bloqueado(
+    email: str,
+    nome: str,
+    cpf: str,
+    processo: str,
+    incidente: str,
+    bl: dict[str, set],
+) -> tuple[bool, str]:
+    """
+    Valida blacklist para disparo de e-mail (campanha).
+    Retorna (bloqueado, motivo).
+    """
+    email_n = _normalizar_email_cmp(email)
+    if email_n and email_n in bl.get("EMAIL", set()):
+        return True, "EMAIL"
+    motivo_p = _motivo_bloqueio_pessoa(cpf, nome, bl)
+    if motivo_p:
+        return True, motivo_p
+    if _processo_incidente_bloqueado(processo, incidente, bl):
+        return True, "PROCESSO_INCIDENTE"
+    return False, ""
 
 
 def filtrar_registros_por_blacklist(
@@ -114,7 +279,7 @@ def filtrar_registros_por_blacklist(
     Aplica a blacklist sobre os registros antes de gerar as abas sms e Emails.
 
     Regras:
-    - CPF ou NOME na blacklist -> remove TODOS os telefones e emails da linha
+    - CPF, NOME ou par PROCESSO+INCIDENTE -> remove TODOS os telefones e emails da linha
     - TELEFONE especifico na blacklist -> remove apenas aquele numero
     - EMAIL especifico na blacklist -> remove apenas aquele email
 
@@ -192,10 +357,31 @@ def filtrar_registros_por_blacklist(
             })
             continue
 
+        proc_row, inc_row = processo_incidente_from_row(row)
+        if _processo_incidente_bloqueado(proc_row, inc_row, bl):
+            n_t = len(registros_tel[pos])
+            n_e = len(registros_email[pos])
+            tel_bloq += n_t
+            email_bloq += n_e
+            tel_filtrado.append([])
+            email_filtrado.append([])
+            pessoas_bloq += 1
+            detalhes.append({
+                "tipo_bloqueio": "PROCESSO_INCIDENTE",
+                "cpf": meta["cpf"],
+                "requerente": meta["requerente"],
+                "numero_processo": meta["numero_processo"],
+                "valor_removido": (
+                    f"processo={proc_row or meta['numero_processo']}"
+                    f" | incidente={inc_row or '—'}"
+                ),
+            })
+            continue
+
         # ── Bloqueio parcial — telefones ──────────────────────────────────────
         tel_limpo = []
         for telefone, is_red in registros_tel[pos]:
-            if _telefone_bloqueado(telefone, bl["TELEFONE"]):
+            if _telefone_bloqueado(telefone, bl.get("TELEFONE", set())):
                 tel_bloq += 1
                 detalhes.append({
                     "tipo_bloqueio":  "TELEFONE",
@@ -211,7 +397,7 @@ def filtrar_registros_por_blacklist(
         # ── Bloqueio parcial — emails ─────────────────────────────────────────
         email_limpo = []
         for email, is_red in registros_email[pos]:
-            if _normalizar_email_cmp(email) in bl["EMAIL"]:
+            if _normalizar_email_cmp(email) in bl.get("EMAIL", set()):
                 email_bloq += 1
                 detalhes.append({
                     "tipo_bloqueio":  "EMAIL",
@@ -262,9 +448,13 @@ def filtrar_hsm_por_blacklist(
         if motivo_p:
             resultado.append([])
             continue
+        proc_row, inc_row = processo_incidente_from_row(row)
+        if _processo_incidente_bloqueado(proc_row, inc_row, bl):
+            resultado.append([])
+            continue
         linha_limpa = []
         for telefone, is_red in registros_hsm[pos]:
-            if _telefone_bloqueado(telefone, bl["TELEFONE"]):
+            if _telefone_bloqueado(telefone, bl.get("TELEFONE", set())):
                 continue
             linha_limpa.append((telefone, is_red))
         resultado.append(linha_limpa)

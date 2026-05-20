@@ -82,14 +82,20 @@ app = Flask(
 app.secret_key = "plataforma_central_secret"
 # Evita colidir com a sessão da plataforma quando o cookie é partilhado no mesmo host
 app.config.setdefault("SESSION_COOKIE_NAME", "eda_session")
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = max(
-    int(app.config.get("MAX_CONTENT_LENGTH") or 0), 25 * 1024 * 1024
+    int(app.config.get("MAX_CONTENT_LENGTH") or 0), _MAX_UPLOAD_BYTES
 )
 
 
 @app.errorhandler(413)
-def _blacklist_upload_too_large(_exc=None):
-    flash("O ficheiro excedeu o limite de 25 MB.", "error")
+def _upload_too_large(_exc=None):
+    msg = "O ficheiro excedeu o limite de 100 MB."
+    ref = request.referrer or ""
+    if "relatorio-corrigido" in ref:
+        flash(msg, "error")
+        return redirect(url_for("relatorio_corrigido")), 413
+    flash(msg, "error")
     return redirect(request.referrer or url_for("blacklist")), 413
 
 
@@ -359,20 +365,36 @@ def blacklist():
 
 @app.route("/blacklist/adicionar", methods=["POST"])
 def blacklist_adicionar():
+    from modulo_blacklist import normalizar_chave_processo_incidente
+
     tipo   = request.form.get("tipo", "").upper().strip()
     valor  = request.form.get("valor", "").strip()
     motivo = request.form.get("motivo", "").strip() or None
 
-    if not tipo or not valor:
-        flash("Tipo e valor sao obrigatorios.", "error")
+    if tipo == "PROCESSO_INCIDENTE":
+        processo = request.form.get("processo", "").strip()
+        incidente = request.form.get("incidente", "").strip()
+        valor = normalizar_chave_processo_incidente(processo, incidente)
+        if not valor:
+            flash("Número de processo é obrigatório para bloqueio por processo/incidente.", "error")
+            return redirect(url_for("blacklist"))
+    elif not tipo or not valor:
+        flash("Tipo e valor são obrigatórios.", "error")
         return redirect(url_for("blacklist"))
-    if tipo not in {"CPF", "NOME", "TELEFONE", "EMAIL"}:
-        flash("Tipo invalido. Use CPF, NOME, TELEFONE ou EMAIL.", "error")
+
+    if tipo not in {"CPF", "NOME", "TELEFONE", "EMAIL", "PROCESSO_INCIDENTE"}:
+        flash(
+            "Tipo inválido. Use CPF, NOME, TELEFONE, EMAIL ou PROCESSO_INCIDENTE.",
+            "error",
+        )
         return redirect(url_for("blacklist"))
 
     criar_banco_e_tabelas()
     adicionar_blacklist(tipo, valor, motivo)
-    flash(f"Adicionado à blacklist: [{tipo}] {valor}", "success")
+    if tipo == "PROCESSO_INCIDENTE":
+        flash(f"Adicionado à blacklist: [PROCESSO+INCIDENTE] {valor.replace('|', ' · ')}", "success")
+    else:
+        flash(f"Adicionado à blacklist: [{tipo}] {valor}", "success")
     return redirect(url_for("blacklist"))
 
 
@@ -404,7 +426,7 @@ def blacklist_importar_csv():
         else:
             flash(
                 "Nenhuma linha importada. Use colunas tipo e valor como na tabela blacklist; "
-                "tipos CPF, NOME, TELEFONE ou EMAIL.",
+                "tipos CPF, NOME, TELEFONE, EMAIL ou PROCESSO_INCIDENTE.",
                 "warning",
             )
         return redirect(url_for("blacklist"))
@@ -449,7 +471,10 @@ def blacklist_remover(id_registro: int):
 
 @app.route("/api/blacklist")
 def api_blacklist():
-    return jsonify(_listar_blacklist())
+    busca = request.args.get("q", "").strip()
+    limite = min(int(request.args.get("limite", 500)), 2000)
+    registros, total = _listar_blacklist(busca, limite, 0)
+    return jsonify({"total": total, "registros": registros})
 
 
 # ── Historico ─────────────────────────────────────────────────────────────────
@@ -545,46 +570,24 @@ def _listar_execucoes() -> list[dict]:
 @app.route("/relatorio-corrigido")
 def relatorio_corrigido():
     """Painel: CSV → Excel com abas Telefone_Recado / Sem Interesse_Remover / Outros."""
-    csv_recente = None
-    data_recente = None
-    try:
-        from modulo_relatorio_corrigido import obter_csv_mais_recente
-
-        cr = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
-        csv_recente = cr.name
-        data_recente = _data_arquivo(cr)
-    except FileNotFoundError:
-        pass
-    return render_template(
-        "relatorio_corrigido.html",
-        csv_recente=csv_recente,
-        data_recente=data_recente,
-    )
+    return render_template("relatorio_corrigido.html")
 
 
 @app.route("/relatorio-corrigido/gerar", methods=["POST"])
 def relatorio_corrigido_gerar():
-    from modulo_relatorio_corrigido import gerar_relatorio_com_blacklist, obter_csv_mais_recente
+    from modulo_relatorio_corrigido import gerar_relatorio_com_blacklist
 
     f = request.files.get("csv")
-    if f is not None and (f.filename or "").strip():
-        nome = f.filename.strip()
-        if not nome.lower().endswith(".csv"):
-            flash("O ficheiro deve ter extensão .csv", "error")
-            return redirect(url_for("relatorio_corrigido"))
-        destino = RELATORIO_DIARIO_ENTRADA / Path(nome).name
-        f.save(str(destino))
-        caminho = destino
-    else:
-        try:
-            caminho = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
-        except FileNotFoundError:
-            flash(
-                "Nenhum CSV na pasta. Envie um ficheiro ou copie um .csv para "
-                f"`{RELATORIO_DIARIO_ENTRADA.name}`.",
-                "error",
-            )
-            return redirect(url_for("relatorio_corrigido"))
+    if f is None or not (f.filename or "").strip():
+        flash("Envie um ficheiro CSV para processar.", "error")
+        return redirect(url_for("relatorio_corrigido"))
+    nome = f.filename.strip()
+    if not nome.lower().endswith(".csv"):
+        flash("O ficheiro deve ter extensão .csv", "error")
+        return redirect(url_for("relatorio_corrigido"))
+    destino = RELATORIO_DIARIO_ENTRADA / Path(nome).name
+    f.save(str(destino))
+    caminho = destino
 
     criar_banco_e_tabelas()
     try:
@@ -608,38 +611,41 @@ def relatorio_corrigido_gerar():
         f"recado_sem_tel={stats_bl['bl_recado_sem_tel']};"
         f"si_tel={stats_bl['bl_sem_interesse_tel']};"
         f"si_nome={stats_bl['bl_sem_interesse_nome']};"
-        f"si_sem_tel={stats_bl['bl_sem_interesse_sem_tel']}"
+        f"si_sem_tel={stats_bl['bl_sem_interesse_sem_tel']};"
+        f"localizados_blacklist={stats_bl.get('linhas_localizadas_blacklist', 0)};"
+        f"linhas_bd={stats_bl.get('linhas_gravadas_bd', 0)};"
+        f"csv_apagados={stats_bl.get('csv_apagados', 0)}"
     )
     return resp
 
 
 @app.route("/relatorio-corrigido/exportar", methods=["POST"])
 def relatorio_corrigido_exportar():
-    """Gera o Excel formatado (com colunas MOTIVO/Resultado) sem gravar na blacklist."""
-    from modulo_relatorio_corrigido import gerar_excel_somente, obter_csv_mais_recente
+    """Gera o Excel a partir da tabela relatorio_discagem (filtro opcional por formato)."""
+    from modulo_relatorio_corrigido import (
+        FORMATO_PRC_CMP,
+        FORMATO_PRC_IMP,
+        FORMATO_PRC_TJSP,
+        gerar_excel_do_banco,
+        resumo_exportacao_banco,
+    )
 
-    f = request.files.get("csv")
-    if f is not None and (f.filename or "").strip():
-        nome = f.filename.strip()
-        if not nome.lower().endswith(".csv"):
-            flash("O ficheiro deve ter extensão .csv", "error")
-            return redirect(url_for("relatorio_corrigido"))
-        destino = RELATORIO_DIARIO_ENTRADA / Path(nome).name
-        f.save(str(destino))
-        caminho = destino
-    else:
-        try:
-            caminho = obter_csv_mais_recente(RELATORIO_DIARIO_ENTRADA)
-        except FileNotFoundError:
-            flash(
-                "Nenhum CSV na pasta. Envie um ficheiro ou copie um .csv para "
-                f"`{RELATORIO_DIARIO_ENTRADA.name}`.",
-                "error",
-            )
-            return redirect(url_for("relatorio_corrigido"))
+    chave = (request.form.get("exportar_formato") or "todos").strip().lower()
+    mapa = {
+        "prc_tjsp": FORMATO_PRC_TJSP,
+        "prc_cmp": FORMATO_PRC_CMP,
+        "prc_imp": FORMATO_PRC_IMP,
+        "todos": None,
+    }
+    if chave not in mapa:
+        flash("Opção de exportação inválida.", "error")
+        return redirect(url_for("relatorio_corrigido"))
+    filtro_formato = mapa[chave]
 
+    criar_banco_e_tabelas()
     try:
-        data = gerar_excel_somente(caminho)
+        data = gerar_excel_do_banco(formato=filtro_formato)
+        resumo = resumo_exportacao_banco(formato=filtro_formato)
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("relatorio_corrigido"))
@@ -647,12 +653,20 @@ def relatorio_corrigido_exportar():
         flash(f"Erro ao gerar o Excel: {exc}", "error")
         return redirect(url_for("relatorio_corrigido"))
 
-    return send_file(
+    sufixo = chave if chave != "todos" else "todos"
+    resp = send_file(
         io.BytesIO(data),
         as_attachment=True,
-        download_name="relatorio_corrigido.xlsx",
+        download_name=f"relatorio_corrigido_{sufixo}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    resp.headers["X-Relatorio-Export"] = (
+        f"formato={chave};"
+        f"total={resumo['total']};recado={resumo['telefone_recado']};"
+        f"sem_interesse={resumo['sem_interesse']};outros={resumo['outros']};"
+        f"blacklist={resumo['blacklist']}"
+    )
+    return resp
 
 
 # ── Exportacao por periodo ────────────────────────────────────────────────────

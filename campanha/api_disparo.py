@@ -33,7 +33,9 @@ from campanha.core import (
     _round_robin,
     _smtp_send,
     build_recipient_template_vars,
-    load_blacklist_emails,
+    load_blacklist_for_campanha,
+    recipient_blocked_by_blacklist,
+    recipient_processo_incidente,
 )
 
 _disparo_lock = threading.Lock()
@@ -140,7 +142,9 @@ def _thread_disparo(
     _atualizar_progresso(campaign_id, log_line=f"[{_ts()}] Iniciando disparo -- {len(recipients)} destinatario(s)")
 
     try:
-        blocked = load_blacklist_emails(mysql_cfg, blacklist_cfg.use_db, blacklist_cfg.extra_email_file)
+        bl = load_blacklist_for_campanha(
+            mysql_cfg, blacklist_cfg.use_db, blacklist_cfg.extra_email_file
+        )
     except Exception as e:
         _atualizar_progresso(
             campaign_id, status="erro",
@@ -186,12 +190,17 @@ def _thread_disparo(
         if not to_norm:
             continue
 
-        if to_norm in blocked:
+        bloqueado, motivo_bl = recipient_blocked_by_blacklist(r, bl)
+        if bloqueado:
             totals["blacklist_skip"] += 1
             pct = round(((i + 1) / total) * 100, 2)
+            proc, inc = recipient_processo_incidente(r)
+            bl_msg = f"{r.email} [{motivo_bl}]"
+            if proc:
+                bl_msg += f" (proc={proc}" + (f" inc={inc})" if inc else ")")
             _atualizar_progresso(
                 campaign_id, blacklist_skip=totals["blacklist_skip"],
-                progresso_pct=pct, log_line=f"[{_ts()}] Blacklist: {r.email}",
+                progresso_pct=pct, log_line=f"[{_ts()}] Blacklist: {bl_msg}",
             )
             continue
 
@@ -517,7 +526,9 @@ def buscar_destinatarios_base(
         params.append(fornecedor)
 
     sql = f"""
-        SELECT DISTINCT e.email, p.nome, pj.numero_processo AS processo
+        SELECT DISTINCT e.email, p.nome, p.cpf,
+               pj.numero_processo AS processo,
+               pj.numero_incidente AS incidente
         FROM emails e
         JOIN processos_juridicos pj ON pj.id = e.id_processo_juridico
         JOIN pessoas p ON p.id = pj.id_pessoa

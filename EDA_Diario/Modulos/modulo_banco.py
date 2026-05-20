@@ -167,7 +167,7 @@ def criar_banco_e_tabelas() -> None:
 
     CREATE TABLE IF NOT EXISTS blacklist (
         id             INT AUTO_INCREMENT PRIMARY KEY,
-        tipo           ENUM('CPF','NOME','TELEFONE','EMAIL') NOT NULL COMMENT 'Escopo do bloqueio',
+        tipo           ENUM('CPF','NOME','TELEFONE','EMAIL','PROCESSO_INCIDENTE') NOT NULL COMMENT 'Escopo do bloqueio',
         valor          VARCHAR(300) NOT NULL,
         motivo         TEXT,
         data_inclusao  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -219,6 +219,42 @@ def criar_banco_e_tabelas() -> None:
         criado_em        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         atualizado_em    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;
+
+    CREATE TABLE IF NOT EXISTS relatorio_discagem (
+        id                          INT AUTO_INCREMENT PRIMARY KEY,
+        arquivo                     VARCHAR(500) NOT NULL,
+        formato                     VARCHAR(20) NOT NULL COMMENT 'PRC IMP | PRC TJSP | PRC CMP',
+        aba                         VARCHAR(64) NOT NULL,
+        telefone                    VARCHAR(50),
+        nome                        VARCHAR(300),
+        cpf                         VARCHAR(20),
+        ordem                       VARCHAR(100) COMMENT 'IMP:OC | TJSP:Ordem | CMP:Cumprimento',
+        processo_principal          VARCHAR(200) COMMENT 'CMP: processo_principal',
+        processo                    VARCHAR(200) COMMENT 'IMP:processosOriginarios | TJSP:Processo | CMP:numero cumprimento',
+        numero_incidente            VARCHAR(200) COMMENT 'TJSP:Numero Incidente | CMP:Cumprimento',
+        data_base                   VARCHAR(50),
+        desconto_previdenciario     VARCHAR(100),
+        desconto_assistencia_medica VARCHAR(100),
+        honorarios                  VARCHAR(100),
+        principal                   VARCHAR(200) COMMENT 'IMP:Oficio | TJSP:Principal | CMP:Valor Total',
+        pre_calculo                 VARCHAR(200),
+        ir_retido                   VARCHAR(200) COMMENT 'IMP: IR Retido',
+        advogado                    VARCHAR(300),
+        entidade_devedora           VARCHAR(300),
+        assunto                     VARCHAR(300),
+        telefone_discagem           VARCHAR(50),
+        status_ligacao              VARCHAR(200),
+        origem                      VARCHAR(200),
+        resultado                   VARCHAR(200),
+        tempo                       VARCHAR(50),
+        aba_origem                  VARCHAR(64) DEFAULT NULL,
+        motivo_blacklist            VARCHAR(50) DEFAULT NULL,
+        importado_em                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_rel_arquivo (arquivo),
+        INDEX idx_rel_formato (formato),
+        INDEX idx_rel_processo (processo),
+        INDEX idx_rel_cpf (cpf)
+    ) ENGINE=InnoDB;
     """
 
     for stmt in tabelas.split(";"):
@@ -226,6 +262,10 @@ def criar_banco_e_tabelas() -> None:
         if stmt:
             cur.execute(stmt)
 
+    conn.commit()
+    _migrar_blacklist_enum_processo_incidente(cur)
+    _migrar_relatorio_discagem_colunas(cur)
+    _migrar_relatorio_discagem_formato(cur)
     conn.commit()
     cur.close()
     conn.close()
@@ -244,8 +284,289 @@ def criar_banco_e_tabelas() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RELATÓRIO DE DISCAGEM (PRC TJSP / PRC CMP / PRC IMP)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_COLUNAS_RELATORIO_INSERT: tuple[str, ...] = (
+    "arquivo",
+    "formato",
+    "aba",
+    "telefone",
+    "nome",
+    "cpf",
+    "ordem",
+    "processo_principal",
+    "processo",
+    "numero_incidente",
+    "data_base",
+    "desconto_previdenciario",
+    "desconto_assistencia_medica",
+    "honorarios",
+    "principal",
+    "pre_calculo",
+    "ir_retido",
+    "advogado",
+    "entidade_devedora",
+    "assunto",
+    "telefone_discagem",
+    "status_ligacao",
+    "origem",
+    "resultado",
+    "tempo",
+    "aba_origem",
+    "motivo_blacklist",
+    "importado_em",
+)
+
+_LIMITES_RELATORIO: dict[str, int | None] = {
+    "telefone": 50,
+    "nome": 300,
+    "cpf": 20,
+    "ordem": 100,
+    "processo_principal": 200,
+    "processo": 200,
+    "numero_incidente": 200,
+    "data_base": 50,
+    "desconto_previdenciario": 100,
+    "desconto_assistencia_medica": 100,
+    "honorarios": 100,
+    "principal": 200,
+    "pre_calculo": 200,
+    "ir_retido": 200,
+    "advogado": 300,
+    "entidade_devedora": 300,
+    "assunto": 300,
+    "telefone_discagem": 50,
+    "status_ligacao": 200,
+    "origem": 200,
+    "resultado": 200,
+    "tempo": 50,
+    "aba": 64,
+    "aba_origem": 64,
+    "motivo_blacklist": 50,
+}
+
+
+def _migrar_relatorio_discagem_formato(cur) -> None:
+    """ENUM legado/campanha/federal → VARCHAR PRC TJSP / PRC CMP / PRC IMP."""
+    try:
+        cur.execute(
+            "ALTER TABLE relatorio_discagem MODIFY formato VARCHAR(20) NOT NULL"
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        if "unknown column" not in msg:
+            print(f"[DB] Aviso: migracao relatorio_discagem.formato tipo — {e}")
+
+    renomear = (
+        ("legado", "PRC TJSP"),
+        ("campanha", "PRC CMP"),
+        ("federal", "PRC IMP"),
+    )
+    for antigo, novo in renomear:
+        try:
+            cur.execute(
+                "UPDATE relatorio_discagem SET formato = %s WHERE formato = %s",
+                (novo, antigo),
+            )
+        except Exception as e:
+            print(f"[DB] Aviso: migracao formato {antigo}→{novo} — {e}")
+
+
+def _migrar_relatorio_discagem_colunas(cur) -> None:
+    """Alinha schema antigo ao mapeamento PRC IMP / TJSP / CMP."""
+    novas = (
+        ("processo_principal", "VARCHAR(200) NULL"),
+        ("ir_retido", "VARCHAR(200) NULL"),
+        ("assunto", "VARCHAR(300) NULL"),
+        ("data_base", "VARCHAR(50) NULL"),
+        ("desconto_previdenciario", "VARCHAR(100) NULL"),
+        ("desconto_assistencia_medica", "VARCHAR(100) NULL"),
+        ("honorarios", "VARCHAR(100) NULL"),
+    )
+    for col, ddl in novas:
+        try:
+            cur.execute(f"ALTER TABLE relatorio_discagem ADD COLUMN {col} {ddl}")
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate column" not in msg:
+                print(f"[DB] Aviso: migracao relatorio_discagem.{col} — {e}")
+    for col_obsoleta in ("oc", "oficio"):
+        try:
+            cur.execute(f"ALTER TABLE relatorio_discagem DROP COLUMN {col_obsoleta}")
+        except Exception:
+            pass
+
+
+def _valor_coluna_relatorio(row: dict, col: str, arquivo: str, fmt: str, agora) -> Any:
+    if col == "arquivo":
+        return arquivo
+    if col == "formato":
+        return fmt
+    if col == "importado_em":
+        return agora
+    raw = row.get(col)
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    lim = _LIMITES_RELATORIO.get(col)
+    if lim:
+        return s[:lim]
+    return s
+
+
+def salvar_relatorio_discagem(arquivo: str, linhas: list[dict]) -> int:
+    """
+    Substitui no banco todas as linhas do mesmo ``arquivo`` (nome do CSV)
+    e insere o lote actual (uma linha por registo parseado).
+    Cada linha traz ``formato``: PRC IMP, PRC TJSP ou PRC CMP.
+    """
+    from modulo_relatorio_corrigido import normalizar_formato_relatorio
+
+    linhas = [r for r in linhas if (r.get("aba") or "") != "_vazio"]
+    if not linhas:
+        return 0
+
+    agora = datetime.now()
+    conn = conectar()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM relatorio_discagem WHERE arquivo = %s", (arquivo,))
+
+    cols_sql = ", ".join(_COLUNAS_RELATORIO_INSERT)
+    placeholders = ", ".join(["%s"] * len(_COLUNAS_RELATORIO_INSERT))
+    sql = f"INSERT INTO relatorio_discagem ({cols_sql}) VALUES ({placeholders})"
+
+    params = []
+    fmt_counts: dict[str, int] = {}
+    for row in linhas:
+        fmt = normalizar_formato_relatorio(row.get("formato") or "")
+        fmt_counts[fmt] = fmt_counts.get(fmt, 0) + 1
+        params.append(
+            tuple(
+                _valor_coluna_relatorio(row, col, arquivo, fmt, agora)
+                for col in _COLUNAS_RELATORIO_INSERT
+            )
+        )
+
+    cur.executemany(sql, params)
+    conn.commit()
+    n = len(params)
+    cur.close()
+    conn.close()
+    resumo_fmt = ", ".join(f"{k}:{v}" for k, v in sorted(fmt_counts.items()))
+    print(f"[relatorio_discagem] {n} linha(s) — {arquivo} [{resumo_fmt}]")
+    return n
+
+
+def _valores_formato_relatorio_sql(formato: str) -> tuple[str, ...]:
+    """Valores na coluna ``formato`` (inclui aliases antigos na BD)."""
+    from modulo_relatorio_corrigido import (
+        FORMATO_PRC_CMP,
+        FORMATO_PRC_IMP,
+        FORMATO_PRC_TJSP,
+    )
+
+    mapa = {
+        FORMATO_PRC_TJSP: (FORMATO_PRC_TJSP, "legado"),
+        FORMATO_PRC_CMP: (FORMATO_PRC_CMP, "campanha"),
+        FORMATO_PRC_IMP: (FORMATO_PRC_IMP, "federal"),
+    }
+    return mapa.get((formato or "").strip(), (formato,))
+
+
+def carregar_relatorio_discagem(
+    arquivo: str | None = None,
+    formato: str | None = None,
+) -> list[dict]:
+    """
+    Lê registos da tabela ``relatorio_discagem``.
+    Se ``arquivo`` for indicado, filtra só esse nome de CSV.
+    Se ``formato`` for indicado (PRC TJSP / PRC CMP / PRC IMP), filtra por tipo de mailing.
+    """
+    cols = ", ".join(_COLUNAS_RELATORIO_INSERT)
+    sql = f"SELECT {cols} FROM relatorio_discagem"
+    clauses: list[str] = []
+    params: list = []
+    if arquivo:
+        clauses.append("arquivo = %s")
+        params.append(arquivo)
+    if formato:
+        vals = _valores_formato_relatorio_sql(formato)
+        placeholders = ", ".join(["%s"] * len(vals))
+        clauses.append(f"formato IN ({placeholders})")
+        params.extend(vals)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY arquivo, id"
+    params_tuple: tuple = tuple(params)
+
+    conn = conectar()
+    cur = conn.cursor(buffered=True)
+    cur.execute(sql, params_tuple)
+    nomes = [d[0] for d in cur.description]
+    rows = [dict(zip(nomes, row)) for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    for row in rows:
+        for k, v in list(row.items()):
+            if v is None:
+                row[k] = ""
+            elif hasattr(v, "isoformat"):
+                row[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                row[k] = str(v).strip() if isinstance(v, str) else v
+    return rows
+
+
+def contar_relatorio_discagem(
+    arquivo: str | None = None,
+    formato: str | None = None,
+) -> int:
+    conn = conectar()
+    cur = conn.cursor()
+    clauses: list[str] = []
+    params: list = []
+    if arquivo:
+        clauses.append("arquivo = %s")
+        params.append(arquivo)
+    if formato:
+        vals = _valores_formato_relatorio_sql(formato)
+        placeholders = ", ".join(["%s"] * len(vals))
+        clauses.append(f"formato IN ({placeholders})")
+        params.extend(vals)
+    sql = "SELECT COUNT(*) FROM relatorio_discagem"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    cur.execute(sql, tuple(params) if params else ())
+    n = int(cur.fetchone()[0])
+    cur.close()
+    conn.close()
+    return n
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # BLACKLIST
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _migrar_blacklist_enum_processo_incidente(cur) -> None:
+    """Inclui PROCESSO_INCIDENTE no ENUM em bases já existentes."""
+    try:
+        cur.execute(
+            """
+            ALTER TABLE blacklist
+            MODIFY tipo ENUM(
+                'CPF','NOME','TELEFONE','EMAIL','PROCESSO_INCIDENTE'
+            ) NOT NULL COMMENT 'Escopo do bloqueio'
+            """
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        if "duplicate" not in msg and "already" not in msg:
+            print(f"[DB] Aviso: migracao blacklist PROCESSO_INCIDENTE — {e}")
+
 
 def carregar_blacklist() -> dict[str, set]:
     """
@@ -255,6 +576,7 @@ def carregar_blacklist() -> dict[str, set]:
         'NOME':     {'JOAO DA SILVA', ...},
         'TELEFONE': {'11999990000', ...},
         'EMAIL':    {'joao@email.com', ...},
+        'PROCESSO_INCIDENTE': {'0001234-56.2023.8.26.0100|123', ...},
     }
     """
     conn = conectar()
@@ -264,7 +586,13 @@ def carregar_blacklist() -> dict[str, set]:
     cur.close()
     conn.close()
 
-    bl: dict[str, set] = {"CPF": set(), "NOME": set(), "TELEFONE": set(), "EMAIL": set()}
+    bl: dict[str, set] = {
+        "CPF": set(),
+        "NOME": set(),
+        "TELEFONE": set(),
+        "EMAIL": set(),
+        "PROCESSO_INCIDENTE": set(),
+    }
     valid_tipos = frozenset(bl.keys())
     for tipo_raw, valor in rows:
         tipo = str(tipo_raw).strip().upper()
@@ -278,7 +606,8 @@ def carregar_blacklist() -> dict[str, set]:
     print(
         f"[BLACKLIST] {total} entradas ativas de `{DB_NAME}` "
         f"(CPF:{len(bl['CPF'])} | NOME:{len(bl['NOME'])} | "
-        f"TEL:{len(bl['TELEFONE'])} | EMAIL:{len(bl['EMAIL'])})"
+        f"TEL:{len(bl['TELEFONE'])} | EMAIL:{len(bl['EMAIL'])} | "
+        f"PROC+INC:{len(bl['PROCESSO_INCIDENTE'])})"
     )
     return bl
 
@@ -289,7 +618,7 @@ def importar_blacklist_txt(caminho_txt: str) -> None:
     Linhas que comecam com # sao ignoradas.
     Formato esperado: TIPO | VALOR | MOTIVO (motivo opcional)
     """
-    tipos_validos = {"CPF", "NOME", "TELEFONE", "EMAIL"}
+    tipos_validos = {"CPF", "NOME", "TELEFONE", "EMAIL", "PROCESSO_INCIDENTE"}
     importados = 0
     ignorados  = 0
 
@@ -321,8 +650,13 @@ def importar_blacklist_txt(caminho_txt: str) -> None:
 def adicionar_blacklist(tipo: str, valor: str, motivo: str = None) -> None:
     """
     Adiciona ou reativa uma entrada na blacklist.
-    tipo: 'CPF' | 'NOME' | 'TELEFONE' | 'EMAIL'
+    tipo: 'CPF' | 'NOME' | 'TELEFONE' | 'EMAIL' | 'PROCESSO_INCIDENTE'
     """
+    tipo_u = tipo.upper().strip()
+    valor_grav = valor.strip()
+    nv = normalizar_valor_para_blacklist(tipo_u, valor_grav)
+    if nv:
+        valor_grav = nv
     conn = conectar()
     cur  = conn.cursor()
     cur.execute("""
@@ -331,14 +665,14 @@ def adicionar_blacklist(tipo: str, valor: str, motivo: str = None) -> None:
         ON DUPLICATE KEY UPDATE
             ativo  = 1,
             motivo = COALESCE(%s, motivo)
-    """, (tipo.upper(), valor.strip(), motivo, motivo))
+    """, (tipo_u, valor_grav, motivo, motivo))
     conn.commit()
     cur.close()
     conn.close()
-    print(f"[BLACKLIST] Adicionado: tipo={tipo} | valor={valor}")
+    print(f"[BLACKLIST] Adicionado: tipo={tipo_u} | valor={valor_grav}")
 
 
-_TIPOS_BL = frozenset({"CPF", "NOME", "TELEFONE", "EMAIL"})
+_TIPOS_BL = frozenset({"CPF", "NOME", "TELEFONE", "EMAIL", "PROCESSO_INCIDENTE"})
 
 
 def _bl_csv_limpar_cell(v) -> str:
@@ -487,12 +821,23 @@ def importar_blacklist_csv(
                 continue
             if tipo not in _TIPOS_BL:
                 out["ignorados"] += 1
-                err = f"Linha {num}: tipo inválido `{tipo}` (use CPF, NOME, TELEFONE ou EMAIL)."
+                err = (
+                    f"Linha {num}: tipo inválido `{tipo}` "
+                    "(use CPF, NOME, TELEFONE, EMAIL ou PROCESSO_INCIDENTE)."
+                )
                 if len(out["erros"]) < 40:
                     out["erros"].append(err)
                 continue
 
-            cur.execute(sql, (tipo, valor, motivo, motivo))
+            valor_grav = valor
+            nv = normalizar_valor_para_blacklist(tipo, valor)
+            if nv:
+                valor_grav = nv
+            elif tipo == "PROCESSO_INCIDENTE":
+                out["ignorados"] += 1
+                continue
+
+            cur.execute(sql, (tipo, valor_grav, motivo, motivo))
             out["importados"] += 1
         conn.commit()
     finally:
