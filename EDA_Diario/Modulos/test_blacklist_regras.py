@@ -78,7 +78,8 @@ def test_separar_relatorio() -> None:
         {"processo": "P8", "numero_incidente": "", "telefone": "11977776666", "nome": "B"},
     ])
     ativos, bl_df = separar_relatorio_blacklist(df, bl, "Outros Resultados")
-    _assert(len(ativos) == 1 and ativos.iloc[0]["processo"] == "P8", "ativos")
+    _assert(len(ativos) == 2, "todas as linhas ficam na aba de resultado")
+    _assert(ativos.iloc[0]["processo"] == "P9" and ativos.iloc[1]["processo"] == "P8", "ativos")
     _assert(len(bl_df) == 1 and bl_df.iloc[0]["processo"] == "P9", "blacklist sheet")
     _assert(bl_df.iloc[0]["motivo_blacklist"] == "PROCESSO_INCIDENTE", "motivo col")
 

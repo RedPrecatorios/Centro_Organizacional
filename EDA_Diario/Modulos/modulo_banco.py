@@ -10,7 +10,11 @@ import os
 import pandas as pd
 import re
 
-from modulo_blacklist import normalizar_valor_para_blacklist
+from modulo_blacklist import (
+    normalizar_valor_para_blacklist,
+    normalizar_chave_processo_incidente,
+    processo_incidente_from_row,
+)
 
 # ─────────────────────────────────────────────
 # Configuracao da conexao
@@ -85,8 +89,9 @@ def criar_banco_e_tabelas() -> None:
         id                   INT AUTO_INCREMENT PRIMARY KEY,
         id_pessoa            INT          NOT NULL,
         cpf                  VARCHAR(11)  NOT NULL,
-        numero_processo      VARCHAR(100) NOT NULL UNIQUE,
-        numero_incidente     VARCHAR(100),
+        numero_processo      VARCHAR(100) NOT NULL,
+        numero_incidente     VARCHAR(100) NOT NULL DEFAULT '',
+        UNIQUE KEY uq_pj_processo_incidente (numero_processo, numero_incidente),
         natureza             VARCHAR(200),
         assunto              VARCHAR(300),
         ordem                VARCHAR(50),
@@ -154,7 +159,8 @@ def criar_banco_e_tabelas() -> None:
         cpf                  VARCHAR(11)  NOT NULL,
         telefone_hsm         VARCHAR(30)  NOT NULL,
         fornecedor           VARCHAR(30)  NOT NULL COMMENT 'Lemitti',
-        nome                 VARCHAR(300),
+        nome                 VARCHAR(300) COMMENT 'Nome do contato Lemitti (telefone HSM)',
+        requerente           VARCHAR(300) COMMENT 'Requerente do processo (planilha principal)',
         numero_processo      VARCHAR(100),
         numero_incidente     VARCHAR(100),
         primeira_aparicao    DATETIME     NOT NULL,
@@ -266,6 +272,8 @@ def criar_banco_e_tabelas() -> None:
     _migrar_blacklist_enum_processo_incidente(cur)
     _migrar_relatorio_discagem_colunas(cur)
     _migrar_relatorio_discagem_formato(cur)
+    _migrar_disparo_hsm_requerente(cur)
+    _migrar_processos_juridicos_chave_composta(cur)
     conn.commit()
     cur.close()
     conn.close()
@@ -345,6 +353,98 @@ _LIMITES_RELATORIO: dict[str, int | None] = {
     "aba_origem": 64,
     "motivo_blacklist": 50,
 }
+
+
+def _migrar_processos_juridicos_chave_composta(cur) -> None:
+    """
+    Um processo pode ter vários precatórios (incidentes) com requerentes distintos.
+    Substitui UNIQUE só em numero_processo por (numero_processo, numero_incidente).
+    """
+    try:
+        cur.execute(
+            "UPDATE processos_juridicos SET numero_incidente = '' "
+            "WHERE numero_incidente IS NULL"
+        )
+    except Exception as e:
+        print(f"[DB] Aviso: normalizar numero_incidente NULL — {e}")
+
+    cur.execute(
+        """
+        SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS cols
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'processos_juridicos'
+          AND NON_UNIQUE = 0
+          AND INDEX_NAME <> 'PRIMARY'
+        GROUP BY INDEX_NAME
+        """
+    )
+    for idx_name, cols in cur.fetchall():
+        col_list = (cols or "").split(",")
+        if col_list == ["numero_processo"]:
+            try:
+                cur.execute(f"ALTER TABLE processos_juridicos DROP INDEX `{idx_name}`")
+                print(
+                    f"[DB] Migracao: removido UNIQUE `{idx_name}` "
+                    "(apenas numero_processo)."
+                )
+            except Exception as e:
+                if getattr(e, "errno", None) != 1091:
+                    print(f"[DB] Aviso: DROP INDEX {idx_name} — {e}")
+
+    try:
+        cur.execute("""
+            ALTER TABLE processos_juridicos
+            ADD UNIQUE KEY uq_pj_processo_incidente (numero_processo, numero_incidente)
+        """)
+        print("[DB] Migracao: UNIQUE (numero_processo, numero_incidente) aplicada.")
+    except Exception as e:
+        errno = getattr(e, "errno", None)
+        if errno == 1061:
+            pass
+        elif errno == 1062:
+            print(
+                "[DB] AVISO: nao foi possivel criar UNIQUE composta — ha duplicatas "
+                "(mesmo processo+incidente). Revise processos_juridicos antes de reprocessar."
+            )
+        else:
+            print(f"[DB] Aviso: migracao uq_pj_processo_incidente — {e}")
+
+    try:
+        cur.execute(
+            "ALTER TABLE processos_juridicos "
+            "MODIFY numero_incidente VARCHAR(100) NOT NULL DEFAULT ''"
+        )
+    except Exception as e:
+        if getattr(e, "errno", None) not in (1060,):
+            print(f"[DB] Aviso: MODIFY numero_incidente — {e}")
+
+
+def _migrar_disparo_hsm_requerente(cur) -> None:
+    """Coluna requerente: vincula HSM ao requerente da aba Principal."""
+    try:
+        cur.execute(
+            "ALTER TABLE disparo_hsm ADD COLUMN requerente VARCHAR(300) NULL "
+            "COMMENT 'Requerente do processo (planilha principal)' AFTER nome"
+        )
+        print("[DB] Migracao disparo_hsm.requerente aplicada.")
+    except Exception as e:
+        if getattr(e, "errno", None) != 1060:
+            print(f"[DB] Aviso: migracao disparo_hsm.requerente — {e}")
+    try:
+        cur.execute("""
+            UPDATE disparo_hsm h
+            INNER JOIN processos_juridicos pj ON pj.id = h.id_processo_juridico
+            SET h.requerente = pj.requerente
+            WHERE h.requerente IS NULL OR TRIM(h.requerente) = ''
+        """)
+        if cur.rowcount:
+            print(
+                f"[DB] disparo_hsm: {cur.rowcount} linha(s) com requerente "
+                "preenchido (somente vazios)."
+            )
+    except Exception as e:
+        print(f"[DB] Aviso: backfill disparo_hsm.requerente — {e}")
 
 
 def _migrar_relatorio_discagem_formato(cur) -> None:
@@ -886,7 +986,7 @@ def exportar_por_periodo(
     entrada_fim:    str = None,
 ) -> dict:
     """
-    Retorna DataFrames {principal, sms, emails} com filtros opcionais de data.
+    Retorna DataFrames {principal, sms, emails, disparo_hsm} com filtros opcionais de data.
     Cada parametro e opcional; os que forem informados sao combinados com AND.
     Datas no formato 'YYYY-MM-DD'.
     """
@@ -924,6 +1024,7 @@ def exportar_por_periodo(
     where_pj, params_pj   = _where(["pj.ultimo_processamento"], ["pj.data_entrada"])
     where_sms, params_sms = _where(["s.ultimo_processamento"],  ["pj.data_entrada"])
     where_em, params_em   = _where(["e.ultimo_processamento"],  ["pj.data_entrada"])
+    where_hsm, params_hsm = _where(["h.ultimo_processamento"],  ["pj.data_entrada"])
 
     def _query(sql: str, params: list) -> pd.DataFrame:
         cur = conn.cursor(dictionary=True)
@@ -940,7 +1041,12 @@ def exportar_por_periodo(
             pj.principal_liquido, pj.juros_moratorio, pj.valor_requisitado,
             pj.calculo_atualizado, pj.entidade_devedora, pj.advogado,
             pj.requerente, pj.data_entrada, pj.ultimo_processamento,
-            pj.count_reprocessamentos
+            pj.count_reprocessamentos,
+            (
+                SELECT GROUP_CONCAT(DISTINCT h2.telefone_hsm ORDER BY h2.telefone_hsm SEPARATOR '; ')
+                FROM disparo_hsm h2
+                WHERE h2.id_processo_juridico = pj.id
+            ) AS telefones_hsm,
         FROM processos_juridicos pj
         JOIN pessoas p ON p.id = pj.id_pessoa
         {where_pj}
@@ -969,8 +1075,31 @@ def exportar_por_periodo(
         ORDER BY e.ultimo_processamento DESC
     """, params_em)
 
+    df_disparo_hsm = _query(f"""
+        SELECT
+            h.telefone_hsm AS `Telefone HSM`,
+            h.nome AS `Nome`,
+            COALESCE(NULLIF(TRIM(h.requerente), ''), h.nome, pj.requerente) AS `Requerente`,
+            h.numero_processo AS `Numero de Processo`,
+            h.numero_incidente AS `Incidente`,
+            h.cpf,
+            h.fornecedor,
+            h.primeira_aparicao,
+            h.ultimo_processamento,
+            h.count_aparicoes
+        FROM disparo_hsm h
+        JOIN processos_juridicos pj ON pj.id = h.id_processo_juridico
+        {where_hsm}
+        ORDER BY h.ultimo_processamento DESC
+    """, params_hsm)
+
     conn.close()
-    return {"principal": df_principal, "sms": df_sms, "emails": df_emails}
+    return {
+        "principal": df_principal,
+        "sms": df_sms,
+        "emails": df_emails,
+        "disparo_hsm": df_disparo_hsm,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1089,10 +1218,27 @@ def _decimal(row, col):
 # UPSERT PRINCIPAL
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _chave_mapa_processo(row) -> str:
+    """Chave processo+incidente (mesma regra da blacklist)."""
+    proc, inc = processo_incidente_from_row(row)
+    return normalizar_chave_processo_incidente(proc, inc)
+
+
+def _processo_incidente_db(row) -> tuple[str, str]:
+    """Par (numero_processo, numero_incidente) normalizado para gravacao e UNIQUE."""
+    chave = _chave_mapa_processo(row)
+    if not chave:
+        return "", ""
+    if "|" in chave:
+        proc, _, inc = chave.partition("|")
+        return proc, inc
+    return chave, ""
+
+
 def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
     """
     Insere ou atualiza pessoas e processos_juridicos a partir do DataFrame principal.
-    Retorna mapa {numero_processo: id_processo_juridico}.
+    Retorna mapa {chave_processo_incidente: id_processo_juridico}.
     """
     conn = conectar()
     cur  = conn.cursor(buffered=True)
@@ -1103,9 +1249,10 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
         cpf             = _val_cpf_cadastro(row)
         nome            = _val(row, "Requerente")
         data_nasc       = _data(row, "Data_de_Nascimento")
-        numero_processo = _val(row, "Numero_de_Processo") or ""
+        numero_processo, numero_incidente = _processo_incidente_db(row)
+        chave_mapa = _chave_mapa_processo(row)
 
-        if not cpf or len(cpf) != 11 or not numero_processo:
+        if not cpf or len(cpf) != 11 or not numero_processo or not chave_mapa:
             continue
 
         # ── Pessoa (upsert) — LAST_INSERT_ID(id) retorna o id mesmo no UPDATE ──
@@ -1134,10 +1281,27 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
                 id                     = LAST_INSERT_ID(id),
                 ultimo_processamento   = %s,
                 count_reprocessamentos = count_reprocessamentos + 1,
+                id_pessoa              = VALUES(id_pessoa),
+                cpf                    = VALUES(cpf),
+                requerente             = VALUES(requerente),
+                natureza               = VALUES(natureza),
+                assunto                = VALUES(assunto),
+                ordem                  = VALUES(ordem),
+                foro                   = VALUES(foro),
+                data_base              = VALUES(data_base),
+                data_decisao           = VALUES(data_decisao),
+                principal_liquido      = VALUES(principal_liquido),
+                juros_moratorio        = VALUES(juros_moratorio),
+                valor_requisitado      = VALUES(valor_requisitado),
+                calculo_atualizado     = VALUES(calculo_atualizado),
+                entidade_devedora      = VALUES(entidade_devedora),
+                advogado               = VALUES(advogado),
+                processo_codigo        = VALUES(processo_codigo),
+                data_preenchimento     = VALUES(data_preenchimento),
                 index_eda              = %s
         """, (
             id_pessoa, cpf, numero_processo,
-            _val(row, "Numero_do_Incidente"), _val(row, "Natureza"), _val(row, "Assunto"),
+            numero_incidente, _val(row, "Natureza"), _val(row, "Assunto"),
             _val(row, "Ordem"), _val(row, "Foro"),
             _data(row, "Data_Base"), _data(row, "Data_Decisao"),
             _decimal(row, "Principal_Liquido"), _decimal(row, "Juros_Moratorio"),
@@ -1149,7 +1313,7 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
             agora, _val(row, "INDEX"),
         ))
         id_proc = cur.lastrowid
-        mapa_ids[numero_processo] = id_proc
+        mapa_ids[chave_mapa] = id_proc
 
     conn.commit()
     cur.close()
@@ -1171,7 +1335,7 @@ def salvar_contatos(
 ) -> None:
     """
     Insere ou atualiza telefones e emails no banco.
-    Usa mapa_ids {numero_processo: id_processo_juridico} para vincular os registros.
+    Usa mapa_ids {chave_processo_incidente: id_processo_juridico} para vincular os registros.
     """
     conn = conectar()
     cur  = conn.cursor(buffered=True)
@@ -1179,16 +1343,15 @@ def salvar_contatos(
 
     total_tel = total_email = 0
 
-    for i, row in df.iterrows():
-        numero_processo = _val(row, "Numero_de_Processo") or ""
-        cpf             = _val_cpf_cadastro(row)
-        id_proc         = mapa_ids.get(numero_processo)
+    for idx, (_, row) in enumerate(df.iterrows()):
+        cpf     = _val_cpf_cadastro(row)
+        id_proc = mapa_ids.get(_chave_mapa_processo(row))
 
         if not id_proc or not cpf or len(cpf) != 11:
             continue
 
         # ── Telefones ─────────────────────────────────────────────────────────
-        for telefone, is_red in registros_tel[i]:
+        for telefone, is_red in registros_tel[idx]:
             fornecedor = FORNECEDOR_P2 if is_red else FORNECEDOR_P3
             cur.execute("""
                 INSERT INTO sms (id_processo_juridico, id_execucao, cpf, telefone, fornecedor,
@@ -1203,7 +1366,7 @@ def salvar_contatos(
             total_tel += 1
 
         # ── Emails ────────────────────────────────────────────────────────────
-        for email, is_red in registros_email[i]:
+        for email, is_red in registros_email[idx]:
             fornecedor = FORNECEDOR_P2 if is_red else FORNECEDOR_P3
             cur.execute("""
                 INSERT INTO emails (id_processo_juridico, id_execucao, cpf, email, fornecedor,
@@ -1223,6 +1386,13 @@ def salvar_contatos(
     print(f"[DB] Contatos salvos: {total_tel} telefones | {total_email} emails.")
 
 
+def _unpack_registro_hsm(item: tuple) -> tuple[str, bool]:
+    """(telefone, is_red) — opcional 3.º elemento legado é ignorado."""
+    tel = item[0]
+    is_red = item[1] if len(item) > 1 else True
+    return str(tel), bool(is_red)
+
+
 def salvar_disparo_hsm(
     df: pd.DataFrame,
     registros_hsm: list,
@@ -1232,6 +1402,8 @@ def salvar_disparo_hsm(
     """
     Insere/upserta telefones HSM (BA+BB Lemitti) na tabela `disparo_hsm`.
     Uma linha por (processo_juridico, telefone_hsm).
+    Vincula ao par processo+incidente da linha principal (precatório distinto por incidente).
+    ``nome`` e ``requerente`` = requerente do precatório na planilha principal.
     """
     conn = conectar()
     cur  = conn.cursor(buffered=True)
@@ -1239,45 +1411,51 @@ def salvar_disparo_hsm(
 
     total = 0
 
-    def _nome(row) -> str | None:
+    def _requerente(row) -> str | None:
         return _val(row, "Requerente") or _val(row, "NOME") or _val(row, "Nome")
 
-    def _proc(row) -> str:
-        return _val(row, "Numero_de_Processo") or _val(row, "Processo") or ""
-
-    def _inc(row) -> str | None:
-        return _val(row, "Numero_do_Incidente") or _val(row, "Incidente")
-
-    for i, row in df.iterrows():
-        numero_processo = _proc(row)
+    for idx, (_, row) in enumerate(df.iterrows()):
+        numero_processo, numero_incidente = _processo_incidente_db(row)
         cpf             = _val_cpf_cadastro(row)
-        id_proc         = mapa_ids.get(numero_processo)
+        id_proc         = mapa_ids.get(_chave_mapa_processo(row))
+        req             = _requerente(row)
 
         if not id_proc or not cpf or len(cpf) != 11 or not numero_processo:
             continue
 
-        for telefone_hsm, _is_red in registros_hsm[i]:
+        if idx < len(registros_hsm):
+            cur.execute(
+                "DELETE FROM disparo_hsm WHERE numero_processo = %s AND numero_incidente = %s",
+                (numero_processo, numero_incidente),
+            )
+
+        for item in registros_hsm[idx]:
+            telefone_hsm, _is_red = _unpack_registro_hsm(item)
             tel = _val({"x": telefone_hsm}, "x")
             if not tel:
                 continue
+            nome_gravar = req
             cur.execute("""
                 INSERT INTO disparo_hsm (
                     id_processo_juridico, id_execucao, cpf, telefone_hsm, fornecedor,
-                    nome, numero_processo, numero_incidente,
+                    nome, requerente, numero_processo, numero_incidente,
                     primeira_aparicao, ultimo_processamento, count_aparicoes
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
                 ON DUPLICATE KEY UPDATE
                     ultimo_processamento = %s,
                     count_aparicoes      = count_aparicoes + 1,
                     id_execucao          = %s,
-                    nome                 = COALESCE(%s, nome),
-                    numero_incidente     = COALESCE(%s, numero_incidente)
+                    cpf                  = %s,
+                    nome                 = %s,
+                    requerente           = %s,
+                    numero_processo      = %s,
+                    numero_incidente     = %s
             """, (
                 id_proc, id_execucao, cpf, tel, FORNECEDOR_P2,
-                _nome(row), numero_processo, _inc(row),
+                nome_gravar, req, numero_processo, numero_incidente,
                 agora, agora,
-                agora, id_execucao, _nome(row), _inc(row),
+                agora, id_execucao, cpf, nome_gravar, req, numero_processo, numero_incidente,
             ))
             total += 1
 

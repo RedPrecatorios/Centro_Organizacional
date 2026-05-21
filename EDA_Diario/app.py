@@ -702,12 +702,13 @@ def exportar_gerar():
     df_principal = dados["principal"]
     df_sms       = dados["sms"]
     df_emails    = dados["emails"]
+    df_hsm       = dados["disparo_hsm"]
 
-    if df_principal.empty and df_sms.empty and df_emails.empty:
+    if df_principal.empty and df_sms.empty and df_emails.empty and df_hsm.empty:
         flash("Nenhum registro encontrado para o periodo informado.", "warning")
         return redirect(url_for("exportar"))
 
-    # Gera Excel em memoria com 3 abas
+    # Gera Excel em memoria com 4 abas
     import openpyxl
 
     def _gravar_aba(wb, df, titulo):
@@ -725,6 +726,7 @@ def exportar_gerar():
     _gravar_aba(wb, df_principal, "Principal")
     _gravar_aba(wb, df_sms,       "sms")
     _gravar_aba(wb, df_emails,    "Emails")
+    _gravar_aba(wb, df_hsm,       "Disparo_HSM")
 
     buffer = io.BytesIO()
     wb.save(buffer)

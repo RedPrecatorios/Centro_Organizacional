@@ -10,8 +10,8 @@
       Lê um export de discagem em CSV (separador <code>;</code>, até <strong>100 MB</strong>), detecta o formato
       <strong>PRC TJSP</strong>, <strong>PRC CMP</strong> ou <strong>PRC IMP</strong>, e gera um Excel com quatro abas
       (ex.: <em>Inclusão Pré Cálculo</em> vai para <strong>Sem Interesse_Remover</strong>).
-      As três abas de resultado trazem linhas que ainda não estão na blacklist.
-      Registos já bloqueados vão para <strong>Localizados_Blacklist</strong>.
+      As três abas de resultado incluem <strong>todas</strong> as linhas do CSV (também as já na blacklist).
+      Os casos já bloqueados aparecem também em <strong>Localizados_Blacklist</strong> (com motivo).
       Ao processar, telefones/nomes novos das duas primeiras abas são gravados na blacklist (<code>{resultado}_SysCall</code>)
       e o CSV enviado grava em <code>relatorio_discagem</code> (o ficheiro é apagado da pasta após sucesso).
       <strong>Exportar Excel</strong> lê só a base, por tipo de mailing ou tudo.

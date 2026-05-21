@@ -213,26 +213,24 @@ def separar_relatorio_blacklist(
     aba_origem: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Divide o DataFrame do relatório em linhas activas (vão às abas normais)
-    e linhas já na blacklist (aba ``Localizados_Blacklist`` no Excel).
+    Mantém todas as linhas na aba de resultado (``df_ativos``).
+    Linhas já na blacklist são também copiadas para ``Localizados_Blacklist``
+    (com ``aba_origem`` e ``motivo_blacklist``).
     """
     if df.empty:
         return df.copy(), pd.DataFrame()
 
-    ativos: list[int] = []
     bl_rows: list[dict] = []
 
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         motivo = motivo_blacklist_linha_relatorio(row, bl)
         if motivo:
             item = row.to_dict()
             item["aba_origem"] = aba_origem
             item["motivo_blacklist"] = motivo
             bl_rows.append(item)
-        else:
-            ativos.append(idx)
 
-    df_ativos = df.loc[ativos].reset_index(drop=True) if ativos else df.iloc[0:0].copy()
+    df_ativos = df.reset_index(drop=True)
     if bl_rows:
         df_bl = pd.DataFrame(bl_rows)
     else:
@@ -453,7 +451,9 @@ def filtrar_hsm_por_blacklist(
             resultado.append([])
             continue
         linha_limpa = []
-        for telefone, is_red in registros_hsm[pos]:
+        for item in registros_hsm[pos]:
+            telefone = item[0]
+            is_red = item[1] if len(item) > 1 else True
             if _telefone_bloqueado(telefone, bl.get("TELEFONE", set())):
                 continue
             linha_limpa.append((telefone, is_red))

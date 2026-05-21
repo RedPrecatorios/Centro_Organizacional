@@ -8,6 +8,7 @@ Após separar as linhas:
   - Sem Interesse_Remover: grava TELEFONE e NOME na blacklist (mesmo motivo),
     acrescenta coluna Resultado no Excel.
   - Outros Resultados: apenas exportação no Excel (sem blacklist).
+  - Já na blacklist: permanecem na aba do resultado e também em Localizados_Blacklist.
 """
 from __future__ import annotations
 
@@ -344,20 +345,47 @@ def aba_por_resultado(resultado: str) -> str:
     return ABA_OUTROS
 
 
+def _chave_linha_relatorio(row: dict[str, Any]) -> tuple:
+    """Identifica a mesma linha de discagem entre abas (export/BD)."""
+    return (
+        row.get("arquivo"),
+        row.get("telefone"),
+        row.get("processo"),
+        row.get("numero_incidente"),
+        row.get("resultado"),
+    )
+
+
 def _reclassificar_abas_linhas_banco(linhas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Recalcula ``aba`` a partir de ``resultado`` (export e contagens).
-    Mantém ``Localizados_Blacklist``; corrige linhas antigas gravadas em Outros.
+    Recalcula ``aba`` a partir de ``resultado`` nas abas de resultado.
+    Mantém ``Localizados_Blacklist``; se só existir na blacklist (dados antigos),
+    duplica na aba de origem/resultado para aparecer nas outras páginas também.
     """
-    out: list[dict[str, Any]] = []
+    resultado: list[dict[str, Any]] = []
+    blacklist: list[dict[str, Any]] = []
+
     for row in linhas:
         item = dict(row)
         if (item.get("aba") or "").strip() == ABA_BLACKLIST_EXCEL:
-            out.append(item)
+            blacklist.append(item)
+        else:
+            item["aba"] = aba_por_resultado(item.get("resultado"))
+            resultado.append(item)
+
+    chaves_resultado = {_chave_linha_relatorio(r) for r in resultado}
+    for bl in blacklist:
+        if _chave_linha_relatorio(bl) in chaves_resultado:
             continue
-        item["aba"] = aba_por_resultado(item.get("resultado"))
-        out.append(item)
-    return out
+        copia = dict(bl)
+        origem = (copia.get("aba_origem") or "").strip()
+        copia["aba"] = origem if origem else aba_por_resultado(copia.get("resultado"))
+        copia.pop("aba_origem", None)
+        copia.pop("motivo_blacklist", None)
+        resultado.append(copia)
+        chaves_resultado.add(_chave_linha_relatorio(copia))
+
+    return resultado + blacklist
 
 
 def montar_dataframes(caminho_csv: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

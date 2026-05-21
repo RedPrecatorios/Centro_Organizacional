@@ -248,21 +248,35 @@ def _coletar_contatos(
     return telefones, emails
 
 
+def _deduplicar_hsm(
+    itens: list[tuple[str, bool]],
+) -> list[tuple[str, bool]]:
+    """Remove telefones HSM duplicados na mesma linha."""
+    vistos: set[str] = set()
+    resultado: list[tuple[str, bool]] = []
+    for tel, is_red in itens:
+        if tel not in vistos:
+            vistos.add(tel)
+            resultado.append((tel, is_red))
+    return resultado
+
+
 def _coletar_hsm_lemitti(
     df_p2: pd.DataFrame, chave_normalizada: str, modo_merge_p2: str
 ) -> list[tuple[str, bool]]:
-    """Telefones HSM vindos só da concatenação das colunas Excel BA+BB (série `_HSM_BA_BB`)."""
+    """Telefones HSM (BA+BB) Lemitti para o CPF/nome da linha principal (precatório)."""
     col_idx = "_CPF_NORM" if modo_merge_p2 == "cpf" else "_NOME_NORM"
     linhas = df_p2[df_p2[col_idx] == chave_normalizada]
     if linhas.empty:
         return []
-    hsms: list[str] = []
+    itens: list[tuple[str, bool]] = []
     for _, row in linhas.iterrows():
         v = row.get("_HSM_BA_BB")
         s = str(v).strip() if pd.notna(v) else ""
-        if s and s.lower() != "nan":
-            hsms.append(s)
-    return _deduplicar(hsms, is_red=True)
+        if not s or s.lower() == "nan":
+            continue
+        itens.append((s, True))
+    return _deduplicar_hsm(itens)
 
 
 def _aplicar_destaque_hsm_na_planilha(
@@ -384,7 +398,7 @@ def _criar_aba_disparo_hsm(
     registros_hsm: list[list[tuple]],
 ) -> None:
     """
-    Explosao por telefone HSM (BA+BB): Telefone HSM + Nome + Numero de Processo + Incidente.
+    Explosao por telefone HSM (BA+BB): Telefone HSM + Requerente + Processo + Incidente.
     """
     n = len(df)
     if len(registros_hsm) != n:
@@ -410,7 +424,8 @@ def _criar_aba_disparo_hsm(
 
     row_excel = 2
     for df_idx, (_, row) in enumerate(df.iterrows()):
-        for valor, _ in registros_hsm[df_idx]:
+        for item in registros_hsm[df_idx]:
+            valor = item[0]
             sval = str(valor).strip() if valor is not None else ""
             if not sval or sval.lower() == "nan":
                 continue
@@ -487,7 +502,8 @@ def _preencher_colunas(
         )
 
     for pos, itens in enumerate(registros):
-        for j, (val, _) in enumerate(itens):
+        for j, item in enumerate(itens):
+            val = item[0]
             col = colunas[j]
             df.iloc[pos, df.columns.get_loc(col)] = val
 
