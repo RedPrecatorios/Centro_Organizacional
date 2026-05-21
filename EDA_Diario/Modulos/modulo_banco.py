@@ -1352,6 +1352,11 @@ def salvar_contatos(
 
         # ── Telefones ─────────────────────────────────────────────────────────
         for telefone, is_red in registros_tel[idx]:
+            tel_d = re.sub(r"\D", "", str(telefone or ""))
+            if tel_d:
+                cmp = tel_d[-11:] if len(tel_d) > 11 else tel_d
+                if len(cmp) == 11 and cmp == cpf:
+                    continue
             fornecedor = FORNECEDOR_P2 if is_red else FORNECEDOR_P3
             cur.execute("""
                 INSERT INTO sms (id_processo_juridico, id_execucao, cpf, telefone, fornecedor,

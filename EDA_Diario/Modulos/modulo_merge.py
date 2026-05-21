@@ -61,7 +61,14 @@ from modulo_enriquecimento_contatos import (
     ler_serie_telefone_concat_colunas_excel,
     processar_enriquecimento_contatos,
 )
-from modulo_enriquecimento_relacionados import processar_enriquecimento_relacionados
+from modulo_enriquecimento_contatos import PADRAO_DDD, PADRAO_FONE
+from modulo_enriquecimento_relacionados import (
+    COLUNA_CPF as P3_COL_CPF,
+    COLUNA_NOME as P3_COL_NOME,
+    PADRAO_CELULAR as P3_PADRAO_CELULAR,
+    PADRAO_TELEFONE as P3_PADRAO_TELEFONE,
+    processar_enriquecimento_relacionados,
+)
 from modulo_banco import (
     criar_banco_e_tabelas, registrar_execucao, salvar_processos,
     salvar_contatos, salvar_disparo_hsm, carregar_blacklist,
@@ -82,6 +89,37 @@ ABA_DISPARO_HSM = "Disparo_HSM"
 
 # Detecta colunas de email nas planilhas de enriquecimento
 PADRAO_EMAIL_COL = re.compile(r"EMAIL", re.IGNORECASE)
+
+
+def _coluna_e_contato_email(nome_coluna: str) -> bool:
+    return bool(PADRAO_EMAIL_COL.search(str(nome_coluna)))
+
+
+def _coluna_e_contato_telefone(nome_coluna: str) -> bool:
+    """Só colunas de telefone/celular (Lemitti ou Assertiva) — nunca CPF/NOME."""
+    c = str(nome_coluna).strip()
+    if _coluna_e_contato_email(c):
+        return False
+    if c in (P2_COL_NOME, P2_COL_CPF, P3_COL_NOME, P3_COL_CPF, "_CPF_NORM", "_NOME_NORM"):
+        return False
+    if c.startswith(f"{PREFIXO_TELEFONE}_"):
+        return True
+    if PADRAO_DDD.match(c) or PADRAO_FONE.match(c):
+        return True
+    return bool(P3_PADRAO_TELEFONE.match(c) or P3_PADRAO_CELULAR.match(c))
+
+
+def _telefone_duplica_cpf(telefone: str, cpf_norm: str) -> bool:
+    if not cpf_norm or len(cpf_norm) != 11:
+        return False
+    d = re.sub(r"\D", "", str(telefone or ""))
+    if not d:
+        return False
+    if len(d) >= 12 and d.startswith("55"):
+        d = d[-11:]
+    elif len(d) > 11:
+        d = d[-11:]
+    return d == cpf_norm
 
 
 def _normalizar_cpf(cpf) -> str:
@@ -225,25 +263,32 @@ def _coletar_contatos(
     Retorna (telefones, emails) nao vazios para uma chave na planilha de enriquecimento.
 
     modo_merge_p2: ``\"cpf\"`` usa ``_CPF_NORM``; ``\"nome\"`` usa ``_NOME_NORM``.
+    Apenas colunas explicitamente de telefone/celular/email (a coluna CPF da Assertiva
+    nao entra como telefone).
     """
     col_idx = "_CPF_NORM" if modo_merge_p2 == "cpf" else "_NOME_NORM"
     linhas = df[df[col_idx] == chave_normalizada]
     if linhas.empty:
         return [], []
 
-    skip = {P2_COL_NOME, P2_COL_CPF, "_CPF_NORM", "_NOME_NORM"}
-    colunas_dados = [c for c in df.columns if c not in skip]
+    colunas_tel = [c for c in df.columns if _coluna_e_contato_telefone(c)]
+    colunas_email = [c for c in df.columns if _coluna_e_contato_email(c)]
     telefones, emails = [], []
+    cpf_ref = chave_normalizada if modo_merge_p2 == "cpf" else ""
 
     for _, row in linhas.iterrows():
-        for col in colunas_dados:
+        for col in colunas_tel:
             val = str(row[col]).strip() if pd.notna(row[col]) else ""
             if not val or val.lower() == "nan":
                 continue
-            if PADRAO_EMAIL_COL.search(col):
-                emails.append(val)
-            else:
-                telefones.append(val)
+            if _telefone_duplica_cpf(val, cpf_ref):
+                continue
+            telefones.append(val)
+        for col in colunas_email:
+            val = str(row[col]).strip() if pd.notna(row[col]) else ""
+            if not val or val.lower() == "nan":
+                continue
+            emails.append(val)
 
     return telefones, emails
 
