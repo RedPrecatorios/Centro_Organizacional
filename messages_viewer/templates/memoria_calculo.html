@@ -34,6 +34,11 @@
         <strong>API de cálculo não configurada.</strong> Defina <code>CALCULO_ATUALIZACAO_API_URL</code> no <code>.env</code> da plataforma (ex.: <code>http://127.0.0.1:5099</code>, igual ao <code>CALCULO_ATUALIZACAO_API_HOST/PORT</code> do serviço interno) e arranque a unidade systemd; o botão <em>Atualizar Cálculo</em> fica inactivo até isso.
       </p>
       {% endif %}
+      {% if not analise_processual_configured %}
+      <p class="memoria-skeleton-note" role="status" id="memoria-analise-hint">
+        <strong>Análise processual indisponível.</strong> Confirme <code>REFACTOR_TJSP</code> no servidor (<code>REFACTOR_TJSP_PATH</code> e <code>venv</code> com dependências).
+      </p>
+      {% endif %}
       {% endif %}
 
       <div class="memoria-linha" role="group" aria-label="Pesquisa e memória de cálculo">
@@ -105,6 +110,7 @@
                 <span>%</span>
               </div>
               <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
+              <button type="button" class="memoria-btn-analise-processual" id="memoria-btn-analise-processual" hidden {% if not analise_processual_configured %}disabled title="REFACTOR_TJSP não encontrado (REFACTOR_TJSP_PATH / venv)"{% endif %}>Análise Processual</button>
               <button type="button" class="memoria-btn-atualizar-calculo" id="memoria-btn-atualizar-calculo" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env (ex.: http://127.0.0.1:5099) e o serviço interno"{% endif %}>Atualizar Cálculo</button>
             </div>
 
@@ -210,10 +216,33 @@
     </div>
   </div>
 
+  <div class="memoria-modal-overlay" id="memoria-analise-modal" hidden>
+    <div class="memoria-modal memoria-analise-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-analise-title">
+      <div class="memoria-modal-top">
+        <div class="memoria-modal-title" id="memoria-analise-title">Análise Processual</div>
+        <button type="button" class="memoria-modal-x" id="memoria-analise-x" aria-label="Fechar">×</button>
+      </div>
+      <div class="memoria-modal-body memoria-analise-body">
+        <div class="memoria-analise-progress-wrap" id="memoria-analise-progress-wrap">
+          <div class="memoria-analise-progress-track" aria-hidden="true">
+            <div class="memoria-analise-progress-bar" id="memoria-analise-progress-bar" style="width:0%"></div>
+          </div>
+          <p class="memoria-analise-progress-pct" id="memoria-analise-progress-pct">0%</p>
+          <p class="memoria-analise-progress-msg" id="memoria-analise-progress-msg" role="status">A iniciar…</p>
+        </div>
+        <div class="memoria-analise-result" id="memoria-analise-result" hidden></div>
+      </div>
+      <div class="memoria-modal-actions">
+        <button type="button" class="memoria-btn-buscar" id="memoria-analise-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
   <div
     id="memoria-runtime-config"
     data-memoria-mysql-configured='{{ memoria_mysql_configured | tojson }}'
     data-calculo-atualizacao-configured='{{ calculo_atualizacao_configured | tojson }}'
+    data-analise-processual-configured='{{ analise_processual_configured | tojson }}'
     data-bloquear-calculo-mes-atual='{{ bloquear_calculo_mes_atual | tojson }}'
     hidden
   ></div>
@@ -223,23 +252,32 @@
     .memoria-modal-overlay{
       position:fixed;
       inset:0;
-      /* não bloqueia a UI; só o painel recebe cliques */
       pointer-events: none;
       background: transparent;
       display:flex;
-      align-items:center;
-      justify-content:center;
+      align-items: safe center;
+      justify-content: center;
       z-index: 260;
-      padding: 18px;
+      padding: max(12px, env(safe-area-inset-top, 0px)) 18px max(12px, env(safe-area-inset-bottom, 0px));
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .memoria-modal{
       pointer-events: auto;
-      width: min(520px, calc(100vw - 36px));
+      display: flex;
+      flex-direction: column;
+      width: min(520px, 100%);
+      max-width: calc(100vw - 36px);
+      max-height: min(88vh, 640px);
+      box-sizing: border-box;
+      overflow: hidden;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--r-lg);
       box-shadow: var(--shadow);
       color: var(--text);
+      margin: auto;
     }
     .memoria-modal-top{
       display:flex;
@@ -248,10 +286,14 @@
       gap: 12px;
       padding: 14px 16px;
       border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      min-width: 0;
     }
     .memoria-modal-title{
       font-weight: 700;
       letter-spacing: -0.01em;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .memoria-modal-x{
       width: 34px;
@@ -263,6 +305,7 @@
       cursor: pointer;
       font-size: 20px;
       line-height: 1;
+      flex-shrink: 0;
     }
     .memoria-modal-x:hover{ color: var(--text); }
     .memoria-modal-body{
@@ -270,6 +313,14 @@
       display:flex;
       gap: 12px;
       align-items:flex-start;
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .memoria-modal-spin{
       width: 18px;
@@ -278,16 +329,108 @@
       flex: 0 0 auto;
     }
     .memoria-modal-text{
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
       font-size: 14px;
       line-height: 1.5;
       color: var(--text);
+      overflow-wrap: anywhere;
       word-break: break-word;
+      white-space: pre-wrap;
     }
     .memoria-modal-actions{
       padding: 0 16px 16px;
       display:flex;
       justify-content:flex-end;
       gap: 10px;
+      flex-shrink: 0;
+      box-sizing: border-box;
+    }
+    .memoria-analise-modal-panel{
+      width: min(560px, 100%);
+      max-width: calc(100vw - 36px);
+      max-height: min(88vh, 680px);
+    }
+    .memoria-analise-body{
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+      min-width: 0;
+    }
+    .memoria-analise-progress-wrap{
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    .memoria-analise-progress-track{
+      height: 10px;
+      background: var(--border, #e5e7eb);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .memoria-analise-progress-bar{
+      height: 100%;
+      background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+    .memoria-analise-progress-pct{
+      margin: 10px 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .memoria-analise-progress-msg{
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted, #6b7280);
+    }
+    .memoria-analise-result{
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: var(--r, 8px);
+      border: 1px solid var(--border);
+      font-size: 14px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-x: auto;
+      overflow-y: visible;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .memoria-analise-result > div,
+    .memoria-analise-result p{
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .memoria-analise-result ul{
+      margin: 10px 0 0;
+      padding-left: 18px;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .memoria-analise-result li{
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .memoria-analise-result.apto{ background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+    .memoria-analise-result.inapto{ background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+    .memoria-analise-result.incompleto{ background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+    .memoria-analise-result.aviso{ background: #eff6ff; border-color: #93c5fd; color: #1e40af; }
+    .memoria-analise-result.erro,
+    .memoria-analise-result.ignorado{ background: #f3f4f6; border-color: #d1d5db; color: #374151; }
+    .memoria-analise-result h3{ margin: 0 0 8px; font-size: 16px; }
+    #memoria-analise-modal.memoria-modal-overlay{
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.35);
     }
   </style>
 
@@ -296,13 +439,21 @@
     var cfgEl = document.getElementById('memoria-runtime-config');
     var memoriaConfigured = cfgEl ? JSON.parse(cfgEl.dataset.memoriaMysqlConfigured || 'false') : false;
     var calculoAtualizacaoConfigured = cfgEl ? JSON.parse(cfgEl.dataset.calculoAtualizacaoConfigured || 'false') : false;
+    var analiseProcessualConfigured = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualConfigured || 'false') : false;
     var bloquearCalculoMesAtual = cfgEl ? JSON.parse(cfgEl.dataset.bloquearCalculoMesAtual || 'false') : false;
     var lastResults = [];
     var idPrecainfosnewSelecionado = null;
     var temRegistoCarregado = false;
     var currentRow = null;
-    var autoUpdateDone = {};
-    var base = { principalBruto: 0, juros: 0, descSaudePrev: 0, descIR: 0 };
+    var base = {
+      principalBruto: 0,
+      juros: 0,
+      descSaudePrev: 0,
+      descIR: 0,
+      totalBruto: 0,
+      reservaHonorarios: 0,
+      totalLiquido: 0
+    };
     var TAXA_PROPOSTA = [
       [0.35, 0.31],
       [0.33, 0.27],
@@ -329,6 +480,29 @@
     var metaInc = document.getElementById('memoria-meta-inc');
     var metaAtual = document.getElementById('memoria-meta-atual');
     var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
+    var btnAnaliseProcessual = document.getElementById('memoria-btn-analise-processual');
+    var analiseModal = document.getElementById('memoria-analise-modal');
+    var analiseProgressBar = document.getElementById('memoria-analise-progress-bar');
+    var analiseProgressPct = document.getElementById('memoria-analise-progress-pct');
+    var analiseProgressMsg = document.getElementById('memoria-analise-progress-msg');
+    var analiseProgressWrap = document.getElementById('memoria-analise-progress-wrap');
+    var analiseResult = document.getElementById('memoria-analise-result');
+    var analiseClose = document.getElementById('memoria-analise-close');
+    var analiseX = document.getElementById('memoria-analise-x');
+    var analisePollTimer = null;
+    var analiseActiveJobId = null;
+    var analiseOnComplete = null;
+    /** Após análise concluída, recarregar memória ao fechar o modal (Fechar / ×). */
+    var analiseRefreshOnClose = false;
+    /** Pesquisa sem registo em memoria_calculo, precainfosnew nem controle_coleta. */
+    var bloquearBotoesCasoAusente = false;
+    var TITULO_CASO_AUSENTE =
+      'Caso não localizado em memoria_calculo, precainfosnew nem controle_coleta_TJSP.';
+    /** Evita re-disparar análise automática para o mesmo processo/incidente na sessão. */
+    var analiseAutoJaDisparada = {};
+    /** Status em controle_coleta_TJSP que disparam análise automática (saldo remanescente). */
+    var CONTROLE_STATUS_AUTO_ANALISE = ['MLE'];
+    var MEMORIA_STATUS_SEM_SALDO = 'Sem Saldo';
     var modal = document.getElementById('memoria-modal');
     var modalText = document.getElementById('memoria-modal-text');
     var modalSpin = document.getElementById('memoria-modal-spin');
@@ -336,7 +510,6 @@
     var modalX = document.getElementById('memoria-modal-x');
 
     var modalAutoHideT = null;
-    var lastModalKind = '';
     function showModal(msg, isLoading) {
       if (!modal) return;
       if (modalText) modalText.textContent = msg || '';
@@ -351,7 +524,6 @@
       if (!modal) return;
       modal.setAttribute('hidden', '');
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
-      lastModalKind = '';
     }
     function bindModalClose() {
       if (modalClose) modalClose.addEventListener('click', hideModal);
@@ -385,10 +557,37 @@
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     }
 
+    function isCasoSemSaldo(row) {
+      if (!row) return false;
+      var sem = MEMORIA_STATUS_SEM_SALDO.toLowerCase();
+      var st = String(row.status || '').trim().toLowerCase();
+      var calc = String(row.calculo_atualizado || '').trim().toLowerCase();
+      return st === sem || calc === sem;
+    }
+
+    function markCasoAusenteTodasBases() {
+      bloquearBotoesCasoAusente = true;
+      resetMemoriaVazia({ manterBloqueioAusente: true });
+    }
+
+    function clearCasoAusenteTodasBases() {
+      bloquearBotoesCasoAusente = false;
+    }
+
     function syncAtualizarCalculoButtonState(row) {
       if (!btnAtualizarCalculo) return;
       // respeita bloqueio por config da API (server-side já desabilita via template)
       if (!calculoAtualizacaoConfigured) return;
+      if (bloquearBotoesCasoAusente) {
+        btnAtualizarCalculo.disabled = true;
+        btnAtualizarCalculo.title = TITULO_CASO_AUSENTE;
+        return;
+      }
+      if (isCasoSemSaldo(row || currentRow)) {
+        btnAtualizarCalculo.disabled = true;
+        btnAtualizarCalculo.title = 'Caso inapto (Sem Saldo).';
+        return;
+      }
       if (!bloquearCalculoMesAtual) {
         btnAtualizarCalculo.disabled = false;
         btnAtualizarCalculo.title = '';
@@ -423,9 +622,20 @@
       var pct = parseFloat(pctInput.value);
       if (isNaN(pct) || pct < 0) pct = 0;
       if (pct > 100) pct = 100;
-      var totalBruto = base.principalBruto + base.juros;
-      var honor = round2(-(totalBruto * (pct / 100)));
-      var liq = round2(totalBruto - base.descSaudePrev - base.descIR + honor);
+      var totalBruto = base.totalBruto > 0
+        ? base.totalBruto
+        : round2(base.principalBruto + base.juros);
+      var honor;
+      var liq;
+      if (currentRow && currentRow.source === 'memoria_calculo') {
+        honor = round2(base.reservaHonorarios);
+        liq = base.totalLiquido > 0
+          ? round2(base.totalLiquido)
+          : round2(totalBruto - base.descSaudePrev - base.descIR + honor);
+      } else {
+        honor = round2(-(totalBruto * (pct / 100)));
+        liq = round2(totalBruto - base.descSaudePrev - base.descIR + honor);
+      }
 
       var map = {
         principal: brl.format(base.principalBruto),
@@ -457,14 +667,68 @@
       });
     }
 
-    function resetMemoriaVazia() {
+    function shouldAutoAnaliseControle(status) {
+      var u = String(status || '').trim().toUpperCase();
+      return CONTROLE_STATUS_AUTO_ANALISE.indexOf(u) >= 0;
+    }
+
+    function casoAnaliseKey(processo, incidente) {
+      return String(processo || '').trim() + '|' + String(incidente || '').trim();
+    }
+
+    function jaDisparouAnaliseAuto(processo, incidente) {
+      return !!analiseAutoJaDisparada[casoAnaliseKey(processo, incidente)];
+    }
+
+    function markAnaliseAutoDisparada(processo, incidente) {
+      analiseAutoJaDisparada[casoAnaliseKey(processo, incidente)] = true;
+    }
+
+    function analiseEmCurso() {
+      return !!analisePollTimer || !!analiseActiveJobId;
+    }
+
+    function syncAnaliseProcessualButton() {
+      if (!btnAnaliseProcessual) return;
+      var procFromRow = temRegistoCarregado && currentRow && String(currentRow.numero_de_processo || '').trim();
+      var procFromInput = getModo() === 'processo' && inputProc && String(inputProc.value || '').trim();
+      var show = procFromRow || procFromInput;
+      if (show) {
+        btnAnaliseProcessual.removeAttribute('hidden');
+      } else {
+        btnAnaliseProcessual.setAttribute('hidden', '');
+      }
+      if (!analiseProcessualConfigured) {
+        btnAnaliseProcessual.disabled = true;
+        btnAnaliseProcessual.title = 'REFACTOR_TJSP não configurado no servidor';
+      } else if (bloquearBotoesCasoAusente) {
+        btnAnaliseProcessual.disabled = true;
+        btnAnaliseProcessual.title = TITULO_CASO_AUSENTE;
+      } else if (isCasoSemSaldo(currentRow)) {
+        btnAnaliseProcessual.disabled = true;
+        btnAnaliseProcessual.title = 'Caso inapto (Sem Saldo).';
+      } else {
+        btnAnaliseProcessual.disabled = !show;
+        btnAnaliseProcessual.title = show ? 'Validar caso no e-SAJ (REFACTOR_TJSP)' : 'Pesquise e carregue um caso primeiro';
+      }
+    }
+
+    function resetMemoriaVazia(opts) {
+      opts = opts || {};
+      if (!opts.manterBloqueioAusente) {
+        bloquearBotoesCasoAusente = false;
+      }
       temRegistoCarregado = false;
       idPrecainfosnewSelecionado = null;
       currentRow = null;
+      syncAnaliseProcessualButton();
       base.principalBruto = 0;
       base.juros = 0;
       base.descSaudePrev = 0;
       base.descIR = 0;
+      base.totalBruto = 0;
+      base.reservaHonorarios = 0;
+      base.totalLiquido = 0;
       pctInput.value = '0';
       showCaseMeta(null);
       syncAtualizarCalculoButtonState(null);
@@ -487,8 +751,50 @@
       }
     }
 
+    function showInaptoSemSaldoModal(row) {
+      var req = row && row.requerente ? String(row.requerente) : '—';
+      var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
+      var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
+        ? String(row.numero_do_incidente) : '—';
+      var origem = row && row.source === 'precainfosnew'
+        ? '(Calculo_Atualizado = Sem Saldo)'
+        : 'memoria_calculo (status = Sem Saldo)';
+      var txt =
+        'Este caso está inapto («Sem Saldo»).\n\n' +
+        'Requerente: ' + req + '\n' +
+        'Processo: ' + proc + '\n' +
+        'Incidente: ' + inc + '\n\n' +
+        'Os valores da memória de cálculo não serão exibidos. ' +
+        'Os botões Atualizar Cálculo e Análise Processual estão desativados.';
+      showModal(txt, false);
+      if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
+      setMsg('Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
+    }
+
+    function tryApplyRow(r) {
+      if (!r) return;
+      if (isCasoSemSaldo(r)) {
+        clearCasoAusenteTodasBases();
+        resetMemoriaVazia();
+        showCaseMeta(r);
+        escolher.setAttribute('hidden', '');
+        escolherList.innerHTML = '';
+        if (r.id_precainfosnew != null && r.id_precainfosnew !== '') {
+          var pInap = parseInt(r.id_precainfosnew, 10);
+          if (!isNaN(pInap)) { idPrecainfosnewSelecionado = pInap; }
+        }
+        currentRow = r;
+        syncAtualizarCalculoButtonState(r);
+        syncAnaliseProcessualButton();
+        showInaptoSemSaldoModal(r);
+        return;
+      }
+      applyRow(r);
+    }
+
     function applyRow(r) {
       if (!r) return;
+      clearCasoAusenteTodasBases();
       temRegistoCarregado = true;
       currentRow = r;
       idPrecainfosnewSelecionado = null;
@@ -500,6 +806,9 @@
       base.juros = n(r.juros);
       base.descSaudePrev = n(r.desc_saude_prev);
       base.descIR = n(r.desc_ir);
+      base.totalBruto = n(r.total_bruto);
+      base.reservaHonorarios = n(r.reserva_honorarios);
+      base.totalLiquido = n(r.total_liquido);
       if (r.percentual_honorarios != null && r.percentual_honorarios !== '') {
         pctInput.value = String(n(r.percentual_honorarios));
       } else {
@@ -510,27 +819,12 @@
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
       if (r.source === 'precainfosnew') {
-        if (r.auto_update) {
-          setMsg('Caso encontrado no precainfosnew. A gerar memória automaticamente (pode levar 1–2 minutos)…', false);
-        } else {
-          setMsg('Caso encontrado no precainfosnew. Clique em “Atualizar Cálculo” para gerar a memória.', false);
-        }
+        setMsg('Caso encontrado no precainfosnew. Clique em “Atualizar Cálculo” para gerar a memória.', false);
       } else {
-        setMsg('Memória carregada', false); //  (id ' + (r.id != null ? r.id : '') + ').
+        setMsg('Memória carregada', false);
       }
       recalc();
-
-      // Fallback automático: quando veio do precainfosnew e foi match único por processo/incidente,
-      // dispara o cálculo para preencher memoria_calculo.
-      var k = (r && r.id_precainfosnew != null) ? String(r.id_precainfosnew) : '';
-      if (r.auto_update && k && !autoUpdateDone[k] && btnAtualizarCalculo && !btnAtualizarCalculo.disabled) {
-        autoUpdateDone[k] = true;
-        lastModalKind = 'auto_update';
-        showModal('Gerando cálculo automaticamente (1–3 minutos)…', true);
-        setTimeout(function () {
-          try { btnAtualizarCalculo.click(); } catch (_) {}
-        }, 350);
-      }
+      syncAnaliseProcessualButton();
     }
 
     function getModo() {
@@ -554,7 +848,12 @@
       clearMsg();
     }
 
-    function doSearch() {
+    function doSearch(opts) {
+      opts = opts || {};
+      var skipAutoAnalise = !!opts.skipAutoAnalise;
+      if (!skipAutoAnalise) {
+        analiseAutoJaDisparada = {};
+      }
       if (!memoriaConfigured) return;
       if (searchBtn) searchBtn.disabled = true;
       if (searchBtnProc) searchBtnProc.disabled = true;
@@ -578,6 +877,7 @@
         u.set('nome', q);
       }
       clearMsg();
+      clearCasoAusenteTodasBases();
       setMsg('A pesquisar…', false);
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
@@ -612,23 +912,44 @@
                   fetch('/api/memoria-calculo/controle-coleta-status?' + u2.toString())
                     .then(function (r2) { return r2.json().then(function (d2) { return { ok: r2.ok, d: d2 }; }); })
                     .then(function (o2) {
-                      resetMemoriaVazia();
                       if (!o2.ok || !o2.d || !o2.d.ok) {
                         hideModal();
+                        markCasoAusenteTodasBases();
                         setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
                         return;
                       }
                       if (o2.d.found) {
-                        showModal('Controle de Coleta (Verificar o caso com mais detalhes) - Status: ' + String(o2.d.status), false);
-                        setMsg('Não localizado na memória/preca. Status no controle_coleta_TJSP: ' + String(o2.d.status), false);
+                        resetMemoriaVazia();
+                        var ctlStatus = String(o2.d.status || '');
+                        hideModal();
+                        setMsg('Não localizado na memória/preca. Status no controle_coleta_TJSP: ' + ctlStatus, false);
+                        if (
+                          !skipAutoAnalise &&
+                          analiseProcessualConfigured &&
+                          shouldAutoAnaliseControle(ctlStatus) &&
+                          !jaDisparouAnaliseAuto(p2, i2) &&
+                          !analiseEmCurso()
+                        ) {
+                          markAnaliseAutoDisparada(p2, i2);
+                          setMsg(
+                            'Não localizado na memória/preca (controle: ' + ctlStatus + '). ' +
+                            'A iniciar análise processual para validar saldo remanescente…',
+                            false
+                          );
+                          startAnaliseProcessual({
+                            processo: p2,
+                            incidente: i2
+                          });
+                        }
                       } else {
+                        markCasoAusenteTodasBases();
                         showModal('Controle de Coleta (Verificar o caso com mais detalhes): não localizado.', false);
                         setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
                       }
                     })
                     .catch(function () {
                       hideModal();
-                      resetMemoriaVazia();
+                      markCasoAusenteTodasBases();
                       setMsg('Nenhum registo com este processo e incidente. Memória zerada.', false);
                     });
                   return;
@@ -636,12 +957,12 @@
               } catch (_) {}
             }
 
+            markCasoAusenteTodasBases();
             setMsg(porNome ? 'Nenhum registo com esse requerente. Memória zerada.' : 'Nenhum registo com este processo e incidente. Memória zerada.', false);
-            resetMemoriaVazia();
             return;
           }
           if (lastResults.length === 1) {
-            applyRow(lastResults[0]);
+            tryApplyRow(lastResults[0]);
             return;
           }
           if (escolherTit) {
@@ -666,8 +987,14 @@
               (row.ultima_atualizacao ? (' · Últ. atual.: ' + formatUltimaAtualizacao(row.ultima_atualizacao)) : '');
             b.appendChild(n1);
             b.appendChild(n2);
+            if (isCasoSemSaldo(row)) {
+              var tagInap = document.createElement('span');
+              tagInap.className = 'memoria-escolher-tag';
+              tagInap.textContent = ' · Inapto (Sem Saldo)';
+              b.appendChild(tagInap);
+            }
             b.addEventListener('click', function () {
-              applyRow(lastResults[i]);
+              tryApplyRow(lastResults[i]);
             });
             li.appendChild(b);
             escolherList.appendChild(li);
@@ -723,6 +1050,14 @@
           setMsg('Defina CALCULO_ATUALIZACAO_API_URL no .env e o serviço interno (systemd).', true);
           return;
         }
+        if (bloquearBotoesCasoAusente) {
+          setMsg(TITULO_CASO_AUSENTE, true);
+          return;
+        }
+        if (isCasoSemSaldo(currentRow)) {
+          setMsg('Caso inapto (Sem Saldo). Atualização de cálculo não permitida.', true);
+          return;
+        }
         if (!temRegistoCarregado || idPrecainfosnewSelecionado == null) {
           setMsg('Pesquise e carregue um caso (requerente ou processo) antes de atualizar o cálculo.', true);
           return;
@@ -746,17 +1081,17 @@
           .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
           .then(function (o) {
             if (o.d && o.d.ok) {
-              setMsg((o.d.message) ? o.d.message : 'Cálculo atualizado com sucesso.', false);
-              if (lastModalKind === 'auto_update') {
-                showModal('Cálculo atualizado. Atualizando memória na tela…', false);
+              var okMsg = (o.d.message) ? o.d.message : 'Cálculo atualizado com sucesso.';
+              if (o.d.google_drive && o.d.google_drive.uploaded && o.d.google_drive.link) {
+                okMsg += ' Drive: ' + String(o.d.google_drive.link);
+              } else if (o.d.google_drive && o.d.google_drive.uploaded === false) {
+                okMsg += ' (planilha não enviada ao Drive — verifique logs do serviço 5099.)';
               }
+              setMsg(okMsg, false);
               setTimeout(function () { doSearch(); }, 500);
             } else {
               var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
               setMsg(err, true);
-              if (lastModalKind === 'auto_update') {
-                showModal('Falha ao gerar cálculo automaticamente. Verifique a mensagem na tela.', false);
-              }
 
               // Se não existe em precainfosnew, tenta buscar status no controle_coleta_TJSP
               // usando processo/incidente do registo carregado (memoria_calculo).
@@ -791,33 +1126,208 @@
           .catch(function (e) {
             if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
               setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
-              if (lastModalKind === 'auto_update') {
-                showModal('Tempo excedido ao gerar cálculo automaticamente.', false);
-              }
               return;
             }
             setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
-            if (lastModalKind === 'auto_update') {
-              showModal('Erro de rede ao gerar cálculo automaticamente.', false);
-            }
           })
           .finally(function () {
             if (tmr) clearTimeout(tmr);
             btnAtualizarCalculo.disabled = false;
             btnAtualizarCalculo.textContent = prev;
-            if (lastModalKind === 'auto_update') {
-              // Se ainda estiver em loading, fecha para não ficar preso.
-              // (Quando showModal(..., false) foi chamado acima, auto-hide já cuida.)
-              if (modal && !modal.hasAttribute('hidden') && modalSpin && modalSpin.style.display !== 'none') {
-                hideModal();
-              }
-            }
           });
       });
     }
+    function stopAnalisePoll() {
+      if (analisePollTimer) {
+        clearInterval(analisePollTimer);
+        analisePollTimer = null;
+      }
+      analiseActiveJobId = null;
+    }
+
+    function setAnaliseProgress(percent, message) {
+      var p = Math.max(0, Math.min(100, Number(percent) || 0));
+      if (analiseProgressBar) analiseProgressBar.style.width = p + '%';
+      if (analiseProgressPct) analiseProgressPct.textContent = Math.round(p) + '%';
+      if (analiseProgressMsg) analiseProgressMsg.textContent = message || '';
+    }
+
+    function showAnaliseModalLoading() {
+      if (!analiseModal) return;
+      analiseModal.removeAttribute('hidden');
+      if (analiseProgressWrap) analiseProgressWrap.removeAttribute('hidden');
+      if (analiseResult) {
+        analiseResult.setAttribute('hidden', '');
+        analiseResult.innerHTML = '';
+        analiseResult.className = 'memoria-analise-result';
+      }
+      setAnaliseProgress(0, 'A iniciar análise processual…');
+    }
+
+    function renderAnaliseOutcome(outcome, errText) {
+      if (!analiseResult) return;
+      if (analiseProgressWrap) analiseProgressWrap.setAttribute('hidden', '');
+      analiseResult.removeAttribute('hidden');
+      if (!outcome) {
+        analiseResult.className = 'memoria-analise-result erro';
+        analiseResult.innerHTML = '<h3>Erro</h3><p>' + (errText || 'Sem resultado da análise.') + '</p>';
+        return;
+      }
+      var conclusao = String(outcome.conclusao || 'erro');
+      analiseResult.className = 'memoria-analise-result ' + conclusao;
+      var titulo = outcome.titulo || 'Resultado';
+      var motivo = outcome.motivo ? ('<p><strong>Motivo / status:</strong> ' + outcome.motivo + '</p>') : '';
+      var resumo = outcome.resumo ? ('<div>' + String(outcome.resumo).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>') + '</div>') : '';
+      var det = outcome.detalhes || {};
+      var detHtml = '<ul class="memoria-analise-detalhes">';
+      if (det.requerente) detHtml += '<li><strong>Requerente:</strong> ' + det.requerente + '</li>';
+      if (det.numero_de_processo) detHtml += '<li><strong>Processo:</strong> ' + det.numero_de_processo + ' / ' + (det.numero_do_incidente || '—') + '</li>';
+      if (det.depre) detHtml += '<li><strong>DEPRE:</strong> ' + det.depre + '</li>';
+      if (det.termod_oficio) detHtml += '<li><strong>Termo/Ofício:</strong> ' + det.termod_oficio + '</li>';
+      if (det.prioridade) {
+        detHtml += '<li><strong>Prioridade DEPRE:</strong> ' + (det.prioridade_status || 'sim');
+        if (det.calculo_atualizado) detHtml += ' — cálculo: ' + det.calculo_atualizado;
+        detHtml += '</li>';
+      }
+      detHtml += '</ul>';
+      analiseResult.innerHTML = '<h3>' + titulo + '</h3>' + motivo + resumo + detHtml;
+    }
+
+    function pollAnaliseJob(jobId) {
+      fetch('/api/memoria-calculo/analise-processual/' + encodeURIComponent(jobId), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) {
+            stopAnalisePoll();
+            analiseOnComplete = null;
+            setAnaliseProgress(100, d.error || 'Erro');
+            renderAnaliseOutcome(null, d.error);
+            return;
+          }
+          setAnaliseProgress(d.percent, d.message);
+          if (d.done) {
+            stopAnalisePoll();
+            setAnaliseProgress(100, 'Concluído');
+            var outcome = d.outcome || (d.result && d.result.outcome) || null;
+            if (!outcome && d.error) {
+              renderAnaliseOutcome(null, d.error);
+            } else {
+              renderAnaliseOutcome(outcome, d.error);
+            }
+            syncAnaliseProcessualButton();
+            if (btnAnaliseProcessual) btnAnaliseProcessual.disabled = false;
+            analiseRefreshOnClose = true;
+            if (analiseOnComplete) {
+              var cb = analiseOnComplete;
+              analiseOnComplete = null;
+              try { cb(outcome); } catch (_) {}
+            }
+          }
+        })
+        .catch(function (e) {
+          stopAnalisePoll();
+          analiseOnComplete = null;
+          analiseRefreshOnClose = false;
+          renderAnaliseOutcome(null, e && e.message ? e.message : 'Falha de rede');
+        });
+    }
+
+    function startAnaliseProcessual(opts) {
+      opts = opts || {};
+      if (analiseEmCurso() && !opts.force) {
+        setMsg('Análise processual já em execução. Aguarde a conclusão.', false);
+        return;
+      }
+      if (!analiseProcessualConfigured) {
+        setMsg('Análise processual não configurada no servidor.', true);
+        return;
+      }
+      if (bloquearBotoesCasoAusente) {
+        setMsg(TITULO_CASO_AUSENTE, true);
+        return;
+      }
+      if (isCasoSemSaldo(currentRow)) {
+        setMsg('Caso inapto (Sem Saldo). Análise processual não permitida.', true);
+        return;
+      }
+      var processo = opts.processo != null
+        ? String(opts.processo).trim()
+        : (currentRow ? String(currentRow.numero_de_processo || '').trim() : '');
+      var incidente = opts.incidente != null
+        ? String(opts.incidente).trim()
+        : (currentRow ? String(currentRow.numero_do_incidente || '').trim() : '');
+      if (!processo && getModo() === 'processo' && inputProc) {
+        processo = String(inputProc.value || '').trim();
+        if (!incidente && inputInc) incidente = String(inputInc.value || '').trim();
+      }
+      if (!processo) {
+        setMsg('Indique processo (e incidente, se houver) para a análise processual.', true);
+        return;
+      }
+      analiseOnComplete = typeof opts.onComplete === 'function' ? opts.onComplete : null;
+      analiseRefreshOnClose = false;
+      stopAnalisePoll();
+      showAnaliseModalLoading();
+      if (btnAnaliseProcessual) btnAnaliseProcessual.disabled = true;
+      fetch('/api/memoria-calculo/analise-processual', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          numero_de_processo: processo,
+          numero_do_incidente: incidente
+        })
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok || !o.d.job_id) {
+            analiseOnComplete = null;
+            renderAnaliseOutcome(null, (o.d && o.d.error) ? o.d.error : 'Não foi possível iniciar a análise.');
+            if (btnAnaliseProcessual) btnAnaliseProcessual.disabled = false;
+            syncAnaliseProcessualButton();
+            return;
+          }
+          setAnaliseProgress(2, 'Análise iniciada…');
+          analiseActiveJobId = o.d.job_id;
+          analisePollTimer = setInterval(function () { pollAnaliseJob(o.d.job_id); }, 1200);
+          pollAnaliseJob(o.d.job_id);
+        })
+        .catch(function (e) {
+          analiseOnComplete = null;
+          renderAnaliseOutcome(null, e && e.message ? e.message : 'Falha de rede');
+          if (btnAnaliseProcessual) btnAnaliseProcessual.disabled = false;
+          syncAnaliseProcessualButton();
+        });
+    }
+
+    function hideAnaliseModal() {
+      stopAnalisePoll();
+      analiseOnComplete = null;
+      var refreshMemoria = analiseRefreshOnClose;
+      analiseRefreshOnClose = false;
+      if (analiseModal) analiseModal.setAttribute('hidden', '');
+      if (btnAnaliseProcessual) {
+        syncAnaliseProcessualButton();
+      }
+      if (refreshMemoria) {
+        setMsg('A atualizar memória de cálculo com os dados da base…', false);
+        doSearch({ skipAutoAnalise: true });
+      }
+    }
+
+    if (btnAnaliseProcessual) {
+      btnAnaliseProcessual.addEventListener('click', function () { startAnaliseProcessual(); });
+    }
+    if (analiseClose) analiseClose.addEventListener('click', hideAnaliseModal);
+    if (analiseX) analiseX.addEventListener('click', hideAnaliseModal);
+
     // Garantia: nunca iniciar aberto (cache/HTML antigo)
     hideModal();
     bindModalClose();
+    syncAnaliseProcessualButton();
   })();
   </script>
 </body>

@@ -315,7 +315,27 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
 
         calculation_automation = CalculationAutomation(main_dict, mgr.today)
         mgr.today = calculation_automation.check_day()
-        calculation_automation.edit_cells()
+        try:
+            planilha_ok = calculation_automation.edit_cells()
+        except Exception as e:
+            traceback.print_exc()
+            return {
+                "ok": False,
+                "error": (
+                    f"Falha ao gerar a planilha de cálculo: {e}. "
+                    f"Template: {calculation_automation.main_file_path!r}"
+                ),
+            }
+        if not planilha_ok:
+            return {
+                "ok": False,
+                "error": (
+                    "Não foi possível gerar a planilha de cálculo. "
+                    f"Template esperado: {calculation_automation.main_file_path!r}. "
+                    "Confirme o ficheiro .xlsm em calculation_automation/ ou defina "
+                    "CALCULO_PLANILHA_TEMPLATE no .env."
+                ),
+            }
         drive_link = getattr(calculation_automation, "google_drive_link", None)
 
         if not verificar_meses:

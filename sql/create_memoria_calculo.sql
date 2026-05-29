@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS `memoria_calculo` (
   `feito_por`                VARCHAR(200) NULL
     COMMENT 'Utilizador da plataforma (username) ou "automação" quando pelo robô/API sem utilizador.',
 
+  `status`                   VARCHAR(50) NULL DEFAULT NULL
+    COMMENT 'Sem Saldo = caso inapto; NULL ou vazio = memória numérica utilizável.',
+
   `criado_em`                TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `atualizado_em`            TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 

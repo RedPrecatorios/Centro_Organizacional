@@ -1094,6 +1094,38 @@ body.platform-body #app-toast {
   cursor: not-allowed;
 }
 
+.memoria-btn-analise-processual {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #1d4ed8;
+  background: #fff;
+  border: 1px solid #1d4ed8;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.memoria-btn-analise-processual:hover:not(:disabled) {
+  background: rgba(29, 78, 216, 0.08);
+}
+.memoria-btn-analise-processual:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25);
+}
+.memoria-btn-analise-processual:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.memoria-btn-analise-processual[hidden] {
+  display: none;
+}
+.memoria-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .memoria-search {
   max-width: 640px;
   margin-bottom: 20px;

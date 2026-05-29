@@ -1,17 +1,8 @@
 import os
 import sys
 import time
-import glob
-import shutil
-import tempfile
 import subprocess
 from datetime import datetime
-
-def _temp_glob_pattern():
-    t = os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP")
-    if not t:
-        t = tempfile.gettempdir()
-    return os.path.join(t, "*")
 
 def cronometro(timeout):
     start_time = time.time()
@@ -24,17 +15,10 @@ def cronometro(timeout):
         time.sleep(1)
         
 def clean_temp():
-    temp_folder_path = _temp_glob_pattern()
-    temp_files = glob.glob(temp_folder_path)
-    
-    for file in temp_files:
-        try:
-            if os.path.isfile(file):
-                os.remove(file)
-            elif os.path.isdir(file):
-                shutil.rmtree(file)
-        except Exception as e:
-            print(f"\nError deleting file: {file}\n\t{str(e)}")
+    """Remove só temporários do fluxo de cálculo (prefixo lo_memoria_), não todo o /tmp."""
+    from manager.manager import Manager
+
+    Manager(datetime.now()).clean_temp()
 
 if __name__ == "__main__":
     script = "main"

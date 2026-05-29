@@ -53,6 +53,7 @@ try:
 except ImportError:
     pass
 
+from messages_viewer.analise_processual_jobs import get_job_status, start_job
 from messages_viewer.plataforma_auth import (
     auth_bp,
     current_user,
@@ -186,6 +187,11 @@ def _memoria_calculo_ultima_atualizacao_field(cur) -> str | None:
         if p in fields:
             return p
     return None
+
+
+def _memoria_calculo_has_status_column(cur) -> bool:
+    cur.execute("SHOW COLUMNS FROM `memoria_calculo` LIKE 'status'")
+    return bool(cur.fetchone())
 
 
 def _memoria_row_to_api(row: dict) -> dict:
@@ -349,6 +355,18 @@ def _memoria_feito_por_plataforma() -> str:
     return name[:200] if name else "automação"
 
 
+def _refactor_analise_processual_configured() -> bool:
+    raw = (os.getenv("REFACTOR_TJSP_PATH") or "").strip()
+    root = Path(raw).resolve() if raw else (_PROJECT_ROOT.parent / "REFACTOR_TJSP").resolve()
+    script = root / "run_single_case.py"
+    if not script.is_file():
+        return False
+    py = (os.getenv("REFACTOR_TJSP_PYTHON") or "").strip()
+    if py:
+        return Path(py).is_file()
+    return (root / "venv" / "bin" / "python").is_file()
+
+
 @app.route("/memoria-calculo")
 def memoria_calculo():
     return render_template(
@@ -358,6 +376,7 @@ def memoria_calculo():
             (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
         ),
         bloquear_calculo_mes_atual=_bloquear_calculo_mes_atual_enabled(),
+        analise_processual_configured=_refactor_analise_processual_configured(),
     )
 
 
@@ -425,11 +444,17 @@ def api_memoria_buscar():
         return s.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
     if use_process:
-        where_sql = """
+        if inc:
+            where_sql = """
         TRIM(COALESCE(numero_de_processo, '')) = %s
         AND TRIM(COALESCE(numero_do_incidente, '')) = %s
         """
-        params_exec: list = [proc, inc]
+            params_exec: list = [proc, inc]
+        else:
+            where_sql = """
+        TRIM(COALESCE(numero_de_processo, '')) = %s
+        """
+            params_exec = [proc]
         order_by = """
             requerente ASC,
             COALESCE(numero_de_processo, '') ASC,
@@ -462,6 +487,8 @@ def api_memoria_buscar():
             ultima_sql = f", `{ultima_f}` AS ultima_atualizacao"
         else:
             ultima_sql = ", NULL AS ultima_atualizacao"
+        has_status = _memoria_calculo_has_status_column(cur)
+        status_sql = ", `status`" if has_status else ", NULL AS status"
         sql = f"""
         SELECT
             id,
@@ -478,6 +505,7 @@ def api_memoria_buscar():
             reserva_honorarios,
             total_liquido,
             feito_por
+            {status_sql}
             {ultima_sql}
         FROM memoria_calculo
         WHERE {where_sql}
@@ -518,7 +546,6 @@ def api_memoria_buscar():
         )
 
     # Fallback: se não houver memória, procura no precainfosnew (flaskdb).
-    # Se achou (principalmente por processo/incidente), o front pode auto-rodar o cálculo.
     fcfg = _flask_mysql_config()
     if not fcfg:
         return jsonify(
@@ -558,34 +585,52 @@ def api_memoria_buscar():
                 fields.add(str(r[0]))
 
         f_req = _pick_field(fields, "requerente", "Requerente")
-        f_proc = _pick_field(fields, "numero_de_processo", "Numero_de_processo", "processo", "Processo")
+        f_proc = _pick_field(
+            fields,
+            "numero_de_processo",
+            "Numero_de_processo",
+            "Numero_de_Processo",
+            "processo",
+            "Processo",
+        )
         f_inc = _pick_field(
             fields,
             "numero_do_incidente",
             "Numero_do_incidente",
+            "Numero_do_Incidente",
             "numero_de_incidente",
             "Numero_de_incidente",
             "incidente",
             "Incidente",
         )
-        if not f_proc:
+        f_calc = _pick_field(
+            fields,
+            "Calculo_Atualizado",
+            "calculo_atualizado",
+            "Calculo_atualizado",
+        )
+        calc_sql = (
+            f"`{f_calc}` AS calculo_atualizado" if f_calc else "NULL AS calculo_atualizado"
+        )
+        if use_process and not f_proc:
             return jsonify(
                 {
                     "ok": True,
-                    "modo": "processo" if use_process else "nome",
+                    "modo": "processo",
                     "source": "precainfosnew",
                     "results": [],
                 }
             )
 
         if use_process:
-            if f_inc:
+            if inc and f_inc:
                 cur2.execute(
                     f"""
                     SELECT id,
                            {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
                            `{f_proc}` AS numero_de_processo,
-                           `{f_inc}` AS numero_do_incidente
+                           `{f_inc}` AS numero_do_incidente,
+                           {calc_sql}
                     FROM precainfosnew
                     WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
                       AND TRIM(COALESCE(`{f_inc}`, '')) = %s
@@ -594,13 +639,20 @@ def api_memoria_buscar():
                     """,
                     (proc, inc),
                 )
+                rows = cur2.fetchall() or []
             else:
+                inc_sel = (
+                    f"`{f_inc}` AS numero_do_incidente"
+                    if f_inc
+                    else "NULL AS numero_do_incidente"
+                )
                 cur2.execute(
                     f"""
                     SELECT id,
                            {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
                            `{f_proc}` AS numero_de_processo,
-                           NULL AS numero_do_incidente
+                           {inc_sel},
+                           {calc_sql}
                     FROM precainfosnew
                     WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
                     ORDER BY id DESC
@@ -626,7 +678,8 @@ def api_memoria_buscar():
                 SELECT id,
                        `{f_req}` AS requerente,
                        {f"`{f_proc}` AS numero_de_processo" if f_proc else "NULL AS numero_de_processo"},
-                       {f"`{f_inc}` AS numero_do_incidente" if f_inc else "NULL AS numero_do_incidente"}
+                       {f"`{f_inc}` AS numero_do_incidente" if f_inc else "NULL AS numero_do_incidente"},
+                       {calc_sql}
                 FROM precainfosnew
                 WHERE `{f_req}` IS NOT NULL
                   AND TRIM(`{f_req}`) <> ''
@@ -637,13 +690,24 @@ def api_memoria_buscar():
                 (like_pat,),
             )
 
-        rows = cur2.fetchall() or []
+        if use_process and inc and f_inc:
+            # `rows` já foi definido no ramo acima.
+            pass
+        else:
+            rows = cur2.fetchall() or []
         out_rows: list[dict] = []
         for r in rows:
             try:
                 pid = int(r.get("id")) if r.get("id") is not None else None
             except (TypeError, ValueError):
                 pid = None
+            calc_raw = r.get("calculo_atualizado")
+            calc_str = str(calc_raw).strip() if calc_raw is not None else ""
+            row_status = (
+                "Sem Saldo"
+                if calc_str.casefold() == "sem saldo"
+                else None
+            )
             out_rows.append(
                 {
                     "id": None,
@@ -651,6 +715,8 @@ def api_memoria_buscar():
                     "requerente": r.get("requerente"),
                     "numero_de_processo": r.get("numero_de_processo"),
                     "numero_do_incidente": r.get("numero_do_incidente"),
+                    "calculo_atualizado": calc_str or None,
+                    "status": row_status,
                     "principal_bruto": 0,
                     "juros": 0,
                     "desc_saude_prev": 0,
@@ -661,8 +727,6 @@ def api_memoria_buscar():
                     "total_liquido": 0,
                     "ultima_atualizacao": None,
                     "source": "precainfosnew",
-                    # auto-run apenas quando der match único e houver id válido
-                    "auto_update": bool((len(rows) == 1) and (pid is not None)),
                 }
             )
         return jsonify(
@@ -810,6 +874,69 @@ def api_memoria_atualizar_calculo():
     return jsonify(out), 502
 
 
+@app.route("/api/memoria-calculo/analise-processual", methods=["POST"])
+def api_memoria_analise_processual_start():
+    """
+    Inicia análise processual REFACTOR_TJSP para o processo/incidente carregados na pesquisa.
+    Retorna job_id para polling de progresso.
+    """
+    if not _refactor_analise_processual_configured():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Análise processual indisponível. Verifique REFACTOR_TJSP_PATH, "
+                        "venv e run_single_case.py."
+                    ),
+                }
+            ),
+            503,
+        )
+    data = request.get_json(silent=True) or {}
+    processo = (
+        data.get("numero_de_processo")
+        or data.get("processo")
+        or ""
+    )
+    processo = str(processo).strip()
+    incidente = str(
+        data.get("numero_do_incidente") or data.get("incidente") or ""
+    ).strip()
+    if not processo:
+        return jsonify({"ok": False, "error": "numero_de_processo é obrigatório."}), 400
+    try:
+        started = start_job(processo=processo, incidente=incidente)
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, **started})
+
+
+@app.route("/api/memoria-calculo/analise-processual/<job_id>")
+def api_memoria_analise_processual_status(job_id: str):
+    job = get_job_status((job_id or "").strip())
+    if job is None:
+        return jsonify({"ok": False, "error": "Job não encontrado."}), 404
+    payload: dict = {
+        "ok": True,
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "done": bool(job.get("done")),
+        "message": job.get("message") or "A processar…",
+        "percent": float(job.get("percent") or 0.0),
+        "error": job.get("error"),
+    }
+    result = job.get("result")
+    if isinstance(result, dict):
+        payload["result"] = result
+        outcome = result.get("outcome")
+        if isinstance(outcome, dict):
+            payload["outcome"] = outcome
+    return jsonify(payload)
+
+
 @app.route("/api/memoria-calculo/controle-coleta-status")
 def api_memoria_controle_coleta_status():
     """
@@ -846,11 +973,19 @@ def api_memoria_controle_coleta_status():
             else:
                 fields.add(str(r[0]))
 
-        f_proc = _pick_field(fields, "numero_de_processo", "Numero_de_processo", "processo", "Processo")
+        f_proc = _pick_field(
+            fields,
+            "numero_de_processo",
+            "Numero_de_processo",
+            "Numero_de_Processo",
+            "processo",
+            "Processo",
+        )
         f_inc = _pick_field(
             fields,
             "numero_do_incidente",
             "Numero_do_incidente",
+            "Numero_do_Incidente",
             "numero_de_incidente",
             "Numero_de_incidente",
             "incidente",

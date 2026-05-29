@@ -78,20 +78,40 @@ class Manager:
             return None
 
     def clean_temp(self):
-        _tmp = os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP")
-        if not _tmp:
-            import tempfile
-            _tmp = tempfile.gettempdir()
-        temp_folder_path = os.path.join(_tmp, "*")
-        temp_files = glob.glob(temp_folder_path)
-        for file in temp_files:
-            try:
-                if os.path.isfile(file):
-                    os.remove(file)
-                elif os.path.isdir(file):
-                    shutil.rmtree(file)
-            except Exception as e:
-                print(f"\nError deleting file: {file}\n\t{str(e)}")
+        """
+        Remove apenas ficheiros temporários **deste** fluxo (LibreOffice / openpyxl),
+        nunca o conteúdo inteiro de ``/tmp`` (evita centenas de erros de permissão como
+        ``www-data`` e não apaga ficheiros de outros serviços).
+        """
+        import tempfile
+
+        tmp_root = (
+            os.environ.get("TMPDIR")
+            or os.environ.get("TEMP")
+            or os.environ.get("TMP")
+            or tempfile.gettempdir()
+        )
+        # Só artefactos criados pelo LibreOffice deste projecto (memoria_range_sync).
+        prefix = "lo_memoria_"
+        removed = 0
+        try:
+            for name in os.listdir(tmp_root):
+                if not name.startswith(prefix):
+                    continue
+                path = os.path.join(tmp_root, name)
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                        removed += 1
+                    elif os.path.isfile(path) or os.path.islink(path):
+                        os.remove(path)
+                        removed += 1
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        if removed:
+            print(f"\n[INFO] clean_temp: {removed} item(ns) removido(s) em {tmp_root!r}\n")
 
     def clean_numeric_value(self, value):
         """

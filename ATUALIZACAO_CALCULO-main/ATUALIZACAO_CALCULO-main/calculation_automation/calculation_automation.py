@@ -79,6 +79,42 @@ def format_calculo_atualizado_br(value) -> str:
     return s
 
 
+def resolve_planilha_template_path(calc_dir: str | None = None) -> str:
+    """
+    Localiza o .xlsm modelo em ``calculation_automation/``.
+    Ordem: ``CALCULO_PLANILHA_TEMPLATE`` no .env → nomes conhecidos → ficheiro
+    ``Planilha de Cálculos*.xlsm`` mais recente.
+    """
+    base = calc_dir or os.path.dirname(os.path.abspath(__file__))
+    env_raw = (os.getenv("CALCULO_PLANILHA_TEMPLATE") or "").strip()
+    if env_raw:
+        path = env_raw if os.path.isabs(env_raw) else os.path.join(base, env_raw)
+        if os.path.isfile(path):
+            return path
+
+    for name in (
+        "Planilha de Cálculos V32 25052026 (Pós PEC 66).xlsm",
+    ):
+        path = os.path.join(base, name)
+        if os.path.isfile(path):
+            return path
+
+    try:
+        import glob
+
+        hits = sorted(
+            glob.glob(os.path.join(base, "Planilha de Cálculos*.xlsm")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if hits:
+            return hits[0]
+    except OSError:
+        pass
+
+    return os.path.join(base, "Planilha de Cálculos V32 25052026 (Pós PEC 66).xlsm")
+
+
 class CalculationAutomation:
     def __init__(self, main_dict, today: datetime) -> None:
         self.txt = TxtHandler()
@@ -97,10 +133,7 @@ class CalculationAutomation:
         self.sheet_name = "(02.2) Mem Detalhada (DEPRE SP)"
 
         _calc_dir = os.path.dirname(os.path.abspath(__file__))
-        self.main_file_path = os.path.join(
-            _calc_dir,
-            "Planilha de Cálculos V31 (Pós PEC 66) 05052026.xlsm",
-        )
+        self.main_file_path = resolve_planilha_template_path(_calc_dir)
 
         self.municipais_list = [
             "MUNICIPIO",
@@ -172,7 +205,7 @@ class CalculationAutomation:
         try:
             from google_api.drive import upload_saved_spreadsheet
 
-            return upload_saved_spreadsheet(p)
+            return upload_saved_spreadsheet(p, main_dict=self.main_dict)
         except Exception as e:
             print(
                 f"\n{Fore.YELLOW}[google_drive] Erro ao importar ou enviar (planilha local mantida): {e}"
@@ -194,15 +227,15 @@ class CalculationAutomation:
 
     def get_calculo_atualizado(self, id, db_handler):
         try:
-            if self._last_calculo_value is not None:
-                calculo_atualizado = self._last_calculo_value
+            # Usar só O313 já recalculado (LibreOffice) em save_workbook — não cache openpyxl.
+            if self._last_calculo_value is not None and self._last_calculo_value > 0:
+                calculo_atualizado_fmt = format_calculo_atualizado_br(
+                    float(self._last_calculo_value)
+                )
                 db_handler = self.start_conn()
                 if not db_handler or not db_handler.ok:
                     self.update_error(id, None)
                     return
-                calculo_atualizado_fmt = format_calculo_atualizado_br(
-                    float(calculo_atualizado)
-                )
                 query = f"""
                     UPDATE precainfosnew
                     SET Calculo_Atualizado = '{calculo_atualizado_fmt}',
@@ -283,22 +316,15 @@ class CalculationAutomation:
             )
 
     def update_error(self, id, *_args):
+        """Falha grave: não sobrescreve ``Calculo_Atualizado`` com 0,00 (mantém valor anterior)."""
         h = self.start_conn()
         if not h or not h.ok:
             print(f"\n{Fore.RED}[x] update_error: sem conexão MySQL{Style.RESET_ALL}")
             return
-        query = f"""
-            UPDATE precainfosnew
-            SET Calculo_Atualizado = '0.00',
-                UPDATES_INDEX = UPDATES_INDEX + 1
-            WHERE id = {int(id)};
-        """
         try:
-            h.cursor.execute(query)
-            h.config.commit()
             print(
-                f"\n\t{Fore.BLUE}[ERRO] Calculo Atualizado:"
-                f" {Fore.LIGHTGREEN_EX}R$ 0.00{Style.RESET_ALL}"
+                f"\n\t{Fore.BLUE}[ERRO] Cálculo não actualizado para id={int(id)} "
+                f"(Calculo_Atualizado na BD mantido).{Style.RESET_ALL}"
             )
         finally:
             try:
@@ -407,19 +433,8 @@ class CalculationAutomation:
             self.output_path = os.path.join(output_dir, output_name)
 
             t_save = time.time()
-            try:
-                self._last_calculo_value = self._parse_number_from_cell(
-                    self._ws["O313"].value
-                )
-            except Exception:
-                self._last_calculo_value = None
-            if self._last_calculo_value is None:
-                try:
-                    v = self._ws["O313"].value
-                    if isinstance(v, (int, float)) and not isinstance(v, bool):
-                        self._last_calculo_value = float(v)
-                except Exception:
-                    self._last_calculo_value = None
+            # O313 só é fiável após LibreOffice; não preencher _last_calculo_value aqui.
+            self._last_calculo_value = None
 
             self._wb.save(self.output_path)
             print(f"\n\t[T] workbook.save(): {time.time() - t_save:.2f}s")
@@ -494,14 +509,14 @@ class CalculationAutomation:
             self._ws = None
             raise
 
-    def edit_cells(self):
+    def edit_cells(self) -> bool:
         if not self.main_dict:
-            return
+            return False
         if not os.path.isfile(self.main_file_path):
             print(
                 f"\n{Fore.RED}[x] Template não encontrado: {self.main_file_path}{Style.RESET_ALL}"
             )
-            return
+            return False
 
         t_edit_start = time.time()
         t_open = time.time()
@@ -581,9 +596,10 @@ class CalculationAutomation:
         ws["F32"] = self.main_dict["Despesas"]
         ws["I32"] = previdencia_total
         n_meses = int(self.main_dict.get("Numero_de_Meses", 0))
-        ws["F310"] = n_meses if n_meses > 0 else "100.000.000"
+        ws["F310"] = n_meses if n_meses > 0 else 1000
 
         print(
             f"\n\t[T] edit_cells (preenchimento openpyxl): {time.time() - t_edit_start:.2f}s"
         )
         self.save_workbook(self.main_dict["id"])
+        return bool(self.output_path and os.path.isfile(self.output_path))
