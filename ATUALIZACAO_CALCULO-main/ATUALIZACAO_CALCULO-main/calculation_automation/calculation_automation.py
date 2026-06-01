@@ -32,6 +32,7 @@ from db_handler.memoria_range_sync import (
     sync_memoria_calculo_to_db,
     total_liquido_arredondado,
 )
+from calculation_automation.previdencia_total import previdencia_total_from_main_dict
 from txt_handler.txt_handler import TxtHandler
 
 try:
@@ -576,21 +577,7 @@ class CalculationAutomation:
         except Exception:
             pass
 
-        previdencia_total = sum(
-            [
-                self.main_dict.get(k, 0)
-                for k in [
-                    "IPESP/IAMSP",
-                    "SPPREV",
-                    "IAMSPE",
-                    "IPESP",
-                    "ASSIT_MED_HOSPITAL",
-                    "INST_PREV_CAIXA_BENEF",
-                    "ASSIST_MED_CAIXA_BENEF",
-                    "INST_PREV",
-                ]
-            ]
-        )
+        previdencia_total = previdencia_total_from_main_dict(self.main_dict)
         ws["B32"] = self.main_dict["Principal_Liquido"]
         ws["D32"] = self.main_dict["Juros_Moratorio"]
         ws["F32"] = self.main_dict["Despesas"]

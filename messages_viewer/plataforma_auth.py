@@ -37,10 +37,23 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("eda", "EDA Diário", "Processamento e relatórios EDA (/eda/)"),
 )
 
+# Permissões extra (não aparecem no menu lateral; configuráveis em Utilizadores).
+FEATURE_PERMISSIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "analise_processual",
+        "Análise processual",
+        "Botão «Análise Processual» na Memória de cálculo (validação e-SAJ)",
+    ),
+)
+
+# Painéis do menu + funcionalidades extra (checkboxes em Utilizadores).
+PERMISSION_PANELS: tuple[tuple[str, str, str], ...] = TAB_PANELS + FEATURE_PERMISSIONS
+
 # Compat: (id, label) para loops antigos
 TAB_KEYS: tuple[tuple[str, str], ...] = tuple((p[0], p[1]) for p in TAB_PANELS)
 
 TAB_IDS = {p[0] for p in TAB_PANELS}
+PERMISSION_IDS = {p[0] for p in PERMISSION_PANELS}
 SESSION_USER_ID = "plataforma_uid"
 SESSION_VERSION = "plataforma_ver"
 
@@ -79,6 +92,45 @@ def _sync_auditoria_syscall_permission_for_campanha_users() -> None:
         c.commit()
 
 
+def _migrate_analise_processual_once() -> None:
+    """
+    Migração única: quem já tinha Memória de cálculo recebe Análise processual uma vez.
+    Não repetir em cada pedido — senão anula remoções feitas em Utilizadores.
+    """
+    with _connect() as c:
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        done = c.execute(
+            "SELECT 1 FROM platform_meta WHERE key = 'migrated_analise_processual_v1'"
+        ).fetchone()
+        if done:
+            return
+        # Instalação nova: ainda não há ninguém com a permissão → copiar de memoria_calculo.
+        # Já existia (ex.: sync antigo em cada pedido) → só marcar migrado, sem re-inserir.
+        had_any = c.execute(
+            "SELECT 1 FROM user_permissions WHERE tab_id = 'analise_processual' LIMIT 1"
+        ).fetchone()
+        if not had_any:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                SELECT user_id, 'analise_processual'
+                FROM user_permissions
+                WHERE tab_id = 'memoria_calculo'
+                """
+            )
+        c.execute(
+            "INSERT INTO platform_meta (key, value) VALUES ('migrated_analise_processual_v1', '1')"
+        )
+        c.commit()
+
+
 def init_db() -> None:
     p = _db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -100,10 +152,15 @@ def init_db() -> None:
                 PRIMARY KEY (user_id, tab_id),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         c.commit()
     _sync_auditoria_syscall_permission_for_campanha_users()
+    _migrate_analise_processual_once()
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -134,7 +191,7 @@ def get_user_tabs(uid: int) -> set[str]:
         rows = c.execute(
             "SELECT tab_id FROM user_permissions WHERE user_id = ?", (uid,)
         ).fetchall()
-    return {r["tab_id"] for r in rows if r["tab_id"] in TAB_IDS}
+    return {r["tab_id"] for r in rows if r["tab_id"] in PERMISSION_IDS}
 
 
 def _session_user() -> dict | None:
@@ -163,7 +220,7 @@ def user_can_tab(tab: str) -> bool:
         return False
     if u.get("role") == "admin":
         return True
-    if tab not in TAB_IDS:
+    if tab not in PERMISSION_IDS:
         return False
     return tab in get_user_tabs(int(u["id"]))
 
@@ -271,8 +328,9 @@ def _endpoint_to_tab() -> str | None:
         "get_messages": "conversas",
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
-        "api_memoria_analise_processual_start": "memoria_calculo",
-        "api_memoria_analise_processual_status": "memoria_calculo",
+        "api_memoria_atualizar_calculo_fila": "memoria_calculo",
+        "api_memoria_analise_processual_start": "analise_processual",
+        "api_memoria_analise_processual_status": "analise_processual",
         "api_memoria_controle_coleta_status": "memoria_calculo",
         "campanha_page": "campanha",
         "api_campanha_dominios": "campanha",
@@ -337,7 +395,7 @@ def handle_access_denied(needs: str) -> Any:
         qs = request.query_string.decode() if request.query_string else ""
         nxt = request.path + (("?" + qs) if qs else "")
         return redirect(url_for("auth.login", next=nxt))
-    if needs in TAB_IDS or needs in ("deny", "forbidden", "admin"):
+    if needs in PERMISSION_IDS or needs in ("deny", "forbidden", "admin"):
         return (
             render_template("acesso_negado.html", motivo=needs),
             403,
@@ -488,7 +546,7 @@ def admin_usuarios():
                             )
                             new_id = ins.lastrowid
                             if role == "colaborador" and new_id:
-                                for k, _ in TAB_KEYS:
+                                for k, _, _ in PERMISSION_PANELS:
                                     if request.form.get(f"new_tab_{k}"):
                                         c.execute(
                                             "INSERT INTO user_permissions (user_id, tab_id) VALUES (?, ?)",
@@ -534,7 +592,7 @@ def admin_usuarios():
                             "SELECT role FROM users WHERE id = ?", (puid,)
                         ).fetchone()
                         if ro and ro["role"] == "colaborador":
-                            for k, _ in TAB_KEYS:
+                            for k, _, _ in PERMISSION_PANELS:
                                 if request.form.get(f"tab_{k}"):
                                     c.execute(
                                         "INSERT INTO user_permissions (user_id, tab_id) VALUES (?, ?)",
@@ -560,7 +618,7 @@ def admin_usuarios():
     return render_template(
         "admin_usuarios.html",
         users=users,
-        panel_defs=TAB_PANELS,
+        panel_defs=PERMISSION_PANELS,
         error=err,
         ok_message=ok,
     )

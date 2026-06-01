@@ -110,7 +110,9 @@
                 <span>%</span>
               </div>
               <span id="honor-pct-hint" class="dash-sub" style="margin:0;">Sobre o Total Bruto</span>
+              {% if user_can('analise_processual') %}
               <button type="button" class="memoria-btn-analise-processual" id="memoria-btn-analise-processual" hidden {% if not analise_processual_configured %}disabled title="REFACTOR_TJSP não encontrado (REFACTOR_TJSP_PATH / venv)"{% endif %}>Análise Processual</button>
+              {% endif %}
               <button type="button" class="memoria-btn-atualizar-calculo" id="memoria-btn-atualizar-calculo" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env (ex.: http://127.0.0.1:5099) e o serviço interno"{% endif %}>Atualizar Cálculo</button>
             </div>
 
@@ -216,6 +218,20 @@
     </div>
   </div>
 
+  <div class="memoria-modal-overlay" id="memoria-fila-modal" hidden>
+    <div class="memoria-modal memoria-fila-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-fila-title">
+      <div class="memoria-modal-top">
+        <div class="memoria-modal-title" id="memoria-fila-title">Fila de atualização de cálculo</div>
+        <button type="button" class="memoria-modal-x" id="memoria-fila-x" aria-label="Fechar">×</button>
+      </div>
+      <div class="memoria-modal-body memoria-fila-body" id="memoria-fila-body"></div>
+      <div class="memoria-modal-actions memoria-fila-actions">
+        <button type="button" class="memoria-fila-btn memoria-fila-btn--ghost" id="memoria-fila-cancel">Cancelar</button>
+        <button type="button" class="memoria-fila-btn memoria-fila-btn--primary" id="memoria-fila-confirm">Entrar na fila</button>
+      </div>
+    </div>
+  </div>
+
   <div class="memoria-modal-overlay" id="memoria-analise-modal" hidden>
     <div class="memoria-modal memoria-analise-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-analise-title">
       <div class="memoria-modal-top">
@@ -243,6 +259,7 @@
     data-memoria-mysql-configured='{{ memoria_mysql_configured | tojson }}'
     data-calculo-atualizacao-configured='{{ calculo_atualizacao_configured | tojson }}'
     data-analise-processual-configured='{{ analise_processual_configured | tojson }}'
+    data-analise-processual-permitted='{{ user_can("analise_processual") | tojson }}'
     data-bloquear-calculo-mes-atual='{{ bloquear_calculo_mes_atual | tojson }}'
     hidden
   ></div>
@@ -428,6 +445,150 @@
     .memoria-analise-result.erro,
     .memoria-analise-result.ignorado{ background: #f3f4f6; border-color: #d1d5db; color: #374151; }
     .memoria-analise-result h3{ margin: 0 0 8px; font-size: 16px; }
+    .memoria-fila-modal-panel{
+      width: min(460px, 100%);
+    }
+    .memoria-fila-body{
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      padding: 18px 20px;
+    }
+    .memoria-fila-status{
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: var(--r);
+      color: #92400e;
+    }
+    .memoria-fila-status-icon{
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: rgba(252, 211, 77, 0.35);
+      color: #b45309;
+    }
+    .memoria-fila-status-icon svg{
+      width: 20px;
+      height: 20px;
+    }
+    .memoria-fila-status-title{
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 700;
+      color: #78350f;
+    }
+    .memoria-fila-status-sub{
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #92400e;
+    }
+    .memoria-fila-status-sub strong{
+      font-weight: 600;
+      color: #78350f;
+    }
+    .memoria-fila-stats{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 420px){
+      .memoria-fila-stats{
+        grid-template-columns: 1fr;
+      }
+    }
+    .memoria-fila-stat{
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 12px 8px;
+      background: var(--surface-elevated, #f8fafc);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      min-width: 0;
+    }
+    .memoria-fila-stat--highlight{
+      background: #eff6ff;
+      border-color: #93c5fd;
+    }
+    .memoria-fila-stat-value{
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+    .memoria-fila-stat--highlight .memoria-fila-stat-value{
+      color: #1d4ed8;
+    }
+    .memoria-fila-stat-label{
+      margin-top: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.3;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .memoria-fila-hint{
+      margin: 0;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+      background: var(--surface-elevated, #f8fafc);
+      border-radius: var(--r);
+      border-left: 3px solid var(--border);
+    }
+    .memoria-fila-actions{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+      padding-top: 4px;
+    }
+    .memoria-fila-btn{
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      border-radius: var(--r);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .memoria-fila-btn--ghost{
+      color: var(--text);
+      background: var(--surface);
+      border-color: var(--border);
+    }
+    .memoria-fila-btn--ghost:hover{
+      background: var(--surface-elevated, #f1f5f9);
+    }
+    .memoria-fila-btn--primary{
+      color: #fff;
+      background: #c41e1e;
+      border-color: #c41e1e;
+    }
+    .memoria-fila-btn--primary:hover{
+      background: #a81818;
+      border-color: #a81818;
+    }
+    #memoria-fila-modal.memoria-modal-overlay{
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.45);
+    }
     #memoria-analise-modal.memoria-modal-overlay{
       pointer-events: auto;
       background: rgba(15, 23, 42, 0.35);
@@ -440,6 +601,7 @@
     var memoriaConfigured = cfgEl ? JSON.parse(cfgEl.dataset.memoriaMysqlConfigured || 'false') : false;
     var calculoAtualizacaoConfigured = cfgEl ? JSON.parse(cfgEl.dataset.calculoAtualizacaoConfigured || 'false') : false;
     var analiseProcessualConfigured = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualConfigured || 'false') : false;
+    var analiseProcessualPermitted = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualPermitted || 'false') : false;
     var bloquearCalculoMesAtual = cfgEl ? JSON.parse(cfgEl.dataset.bloquearCalculoMesAtual || 'false') : false;
     var lastResults = [];
     var idPrecainfosnewSelecionado = null;
@@ -455,8 +617,8 @@
       totalLiquido: 0
     };
     var TAXA_PROPOSTA = [
-      [0.35, 0.31],
-      [0.33, 0.27],
+      [0.40, 0.31],
+      [0.37, 0.27],
       [0.30, 0.27],
       [0.28, 0.25]
     ];
@@ -489,6 +651,12 @@
     var analiseResult = document.getElementById('memoria-analise-result');
     var analiseClose = document.getElementById('memoria-analise-close');
     var analiseX = document.getElementById('memoria-analise-x');
+    var filaModal = document.getElementById('memoria-fila-modal');
+    var filaBody = document.getElementById('memoria-fila-body');
+    var filaConfirm = document.getElementById('memoria-fila-confirm');
+    var filaCancel = document.getElementById('memoria-fila-cancel');
+    var filaX = document.getElementById('memoria-fila-x');
+    var filaOnConfirm = null;
     var analisePollTimer = null;
     var analiseActiveJobId = null;
     var analiseOnComplete = null;
@@ -689,7 +857,7 @@
     }
 
     function syncAnaliseProcessualButton() {
-      if (!btnAnaliseProcessual) return;
+      if (!btnAnaliseProcessual || !analiseProcessualPermitted) return;
       var procFromRow = temRegistoCarregado && currentRow && String(currentRow.numero_de_processo || '').trim();
       var procFromInput = getModo() === 'processo' && inputProc && String(inputProc.value || '').trim();
       var show = procFromRow || procFromInput;
@@ -925,6 +1093,7 @@
                         setMsg('Não localizado na memória/preca. Status no controle_coleta_TJSP: ' + ctlStatus, false);
                         if (
                           !skipAutoAnalise &&
+                          analiseProcessualPermitted &&
                           analiseProcessualConfigured &&
                           shouldAutoAnaliseControle(ctlStatus) &&
                           !jaDisparouAnaliseAuto(p2, i2) &&
@@ -1040,6 +1209,195 @@
     syncModePanels();
     recalc();
 
+    function formatTempoSegundos(sec) {
+      var s = Math.max(0, Math.round(Number(sec) || 0));
+      if (s < 60) return s + ' s';
+      var m = Math.round(s / 60);
+      if (m < 60) return m + ' min';
+      var h = Math.floor(m / 60);
+      var rm = m % 60;
+      return rm ? h + ' h ' + rm + ' min' : h + ' h';
+    }
+
+    function escapeFilaHtml(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function buildFilaModalHtml(fila) {
+      fila = fila || {};
+      var op = fila.operador_atual ? String(fila.operador_atual).trim() : '';
+      var opLabel = op ? escapeFilaHtml(op) : 'outro operador';
+      var naFila = Number(fila.casos_na_fila) || 0;
+      var media = formatTempoSegundos(fila.media_segundos);
+      var est = formatTempoSegundos(fila.estimativa_espera_segundos);
+      var filaLabel = naFila === 1 ? 'caso' : 'casos';
+      var html = '';
+      html += '<div class="memoria-fila-status" role="status">';
+      html += '<span class="memoria-fila-status-icon" aria-hidden="true">';
+      html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+      html += '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>';
+      html += '</svg></span>';
+      html += '<div>';
+      html += '<p class="memoria-fila-status-title">Há um cálculo em execução</p>';
+      html += '<p class="memoria-fila-status-sub">Operador: <strong>' + opLabel + '</strong></p>';
+      html += '</div></div>';
+      html += '<div class="memoria-fila-stats">';
+      html += '<div class="memoria-fila-stat">';
+      html += '<span class="memoria-fila-stat-value">' + naFila + '</span>';
+      html += '<span class="memoria-fila-stat-label">À sua frente</span>';
+      html += '</div>';
+      html += '<div class="memoria-fila-stat">';
+      html += '<span class="memoria-fila-stat-value">~' + escapeFilaHtml(media) + '</span>';
+      html += '<span class="memoria-fila-stat-label">Média / caso</span>';
+      html += '</div>';
+      html += '<div class="memoria-fila-stat memoria-fila-stat--highlight">';
+      html += '<span class="memoria-fila-stat-value">~' + escapeFilaHtml(est) + '</span>';
+      html += '<span class="memoria-fila-stat-label">Até o seu turno</span>';
+      html += '</div></div>';
+      html += '<p class="memoria-fila-hint">';
+      if (naFila === 0) {
+        html += 'Não há outros pedidos à sua frente. Ao continuar, o sistema aguarda o fim do cálculo actual e inicia o seu em seguida — sem precisar clicar outra vez.';
+      } else {
+        html += 'Há <strong>' + naFila + '</strong> ' + filaLabel + ' à sua frente. Ao continuar, entra na fila e o processamento começa automaticamente quando for a sua vez.';
+      }
+      html += '</p>';
+      return html;
+    }
+
+    function hideFilaModal() {
+      filaOnConfirm = null;
+      if (filaModal) filaModal.setAttribute('hidden', '');
+    }
+
+    function showFilaModal(fila, onConfirm) {
+      if (!filaModal || !filaBody) {
+        if (typeof onConfirm === 'function') onConfirm();
+        return;
+      }
+      filaOnConfirm = typeof onConfirm === 'function' ? onConfirm : null;
+      filaBody.innerHTML = buildFilaModalHtml(fila);
+      if (filaConfirm) {
+        filaConfirm.style.display = filaOnConfirm ? '' : 'none';
+        filaConfirm.textContent = 'Entrar na fila';
+      }
+      if (filaCancel) {
+        filaCancel.textContent = filaOnConfirm ? 'Cancelar' : 'Fechar';
+      }
+      filaModal.removeAttribute('hidden');
+    }
+
+    function fetchFilaCalculo() {
+      return fetch('/api/memoria-calculo/atualizar-calculo/fila', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .catch(function () { return { ok: false, d: null }; });
+    }
+
+    function executarAtualizarCalculo() {
+      var prev = btnAtualizarCalculo.textContent;
+      btnAtualizarCalculo.disabled = true;
+      setMsg('A atualizar cálculo (pode levar vários minutos se houver fila)… Não feche a página.', false);
+      var ctl;
+      var tmr;
+      try {
+        ctl = new AbortController();
+        tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 600000);
+      } catch (_) {}
+      return fetch('/api/memoria-calculo/atualizar-calculo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ id_precainfosnew: idPrecainfosnewSelecionado }),
+        signal: ctl ? ctl.signal : undefined
+      })
+        .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
+        .then(function (o) {
+          if (o.d && o.d.ok) {
+            var okMsg = (o.d.message) ? o.d.message : 'Cálculo atualizado com sucesso.';
+            if (o.d.fila_ao_entrar && o.d.fila_ao_entrar.em_execucao) {
+              okMsg += ' (aguardou na fila; operador anterior: ' + String(o.d.fila_ao_entrar.operador_atual || '—') + ')';
+            }
+            if (o.d.google_drive && o.d.google_drive.uploaded && o.d.google_drive.link) {
+              okMsg += ' Drive: ' + String(o.d.google_drive.link);
+            } else if (o.d.google_drive && o.d.google_drive.uploaded === false) {
+              okMsg += ' (planilha não enviada ao Drive — verifique logs do serviço 5099.)';
+            }
+            setMsg(okMsg, false);
+            setTimeout(function () { doSearch(); }, 500);
+          } else {
+            var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
+            if (o.status === 504 || (o.d && o.d.timeout)) {
+              setMsg(err, true);
+              if (o.d && o.d.fila) showFilaModal(o.d.fila, null);
+            } else {
+              setMsg(err, true);
+            }
+            if (
+              o.status === 409 &&
+              (err.indexOf('em curso') >= 0 || err.indexOf('actualização') >= 0)
+            ) {
+              fetchFilaCalculo().then(function (fo) {
+                if (fo.d && fo.d.ok && fo.d.fila) showFilaModal(fo.d.fila, null);
+              });
+            }
+            if (err.indexOf('Não existe registo com id') >= 0 && currentRow && currentRow.numero_de_processo) {
+              try {
+                var u = new URLSearchParams();
+                u.set('numero_de_processo', String(currentRow.numero_de_processo || '').trim());
+                u.set('numero_do_incidente', String(currentRow.numero_do_incidente || '').trim());
+                showModal('Consultando controle_coleta_TJSP…', true);
+                fetch('/api/memoria-calculo/controle-coleta-status?' + u.toString())
+                  .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                  .then(function (o2) {
+                    if (!o2.ok || !o2.d || !o2.d.ok) {
+                      showModal(err + ' | Não foi possível consultar controle_coleta_TJSP.', false);
+                      return;
+                    }
+                    if (o2.d.found) {
+                      showModal('controle_coleta_TJSP.status: ' + String(o2.d.status), false);
+                      setMsg(err + ' | controle_coleta_TJSP.status: ' + String(o2.d.status), true);
+                    } else {
+                      showModal('controle_coleta_TJSP: não localizado.', false);
+                      setMsg(err + ' | controle_coleta_TJSP: não localizado.', true);
+                    }
+                  })
+                  .catch(function () {
+                    showModal(err + ' | Erro de rede ao consultar controle_coleta_TJSP.', false);
+                  });
+              } catch (_) {}
+            }
+          }
+        })
+        .catch(function (e) {
+          if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
+            setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
+            return;
+          }
+          setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
+        })
+        .finally(function () {
+          if (tmr) clearTimeout(tmr);
+          btnAtualizarCalculo.disabled = false;
+          btnAtualizarCalculo.textContent = prev;
+        });
+    }
+
+    if (filaConfirm) {
+      filaConfirm.addEventListener('click', function () {
+        var cb = filaOnConfirm;
+        hideFilaModal();
+        if (cb) cb();
+      });
+    }
+    if (filaCancel) filaCancel.addEventListener('click', hideFilaModal);
+    if (filaX) filaX.addEventListener('click', hideFilaModal);
+
     if (btnAtualizarCalculo) {
       btnAtualizarCalculo.addEventListener('click', function () {
         if (!memoriaConfigured) {
@@ -1062,79 +1420,14 @@
           setMsg('Pesquise e carregue um caso (requerente ou processo) antes de atualizar o cálculo.', true);
           return;
         }
-        var prev = btnAtualizarCalculo.textContent;
-        btnAtualizarCalculo.disabled = true;
-        setMsg('A atualizar cálculo (pode levar 1–2 minutos)… Não feche a página.', false);
-        var ctl;
-        var tmr;
-        try {
-          ctl = new AbortController();
-          tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 600000);
-        } catch (_) {}
-        fetch('/api/memoria-calculo/atualizar-calculo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ id_precainfosnew: idPrecainfosnewSelecionado }),
-          signal: ctl ? ctl.signal : undefined
-        })
-          .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
-          .then(function (o) {
-            if (o.d && o.d.ok) {
-              var okMsg = (o.d.message) ? o.d.message : 'Cálculo atualizado com sucesso.';
-              if (o.d.google_drive && o.d.google_drive.uploaded && o.d.google_drive.link) {
-                okMsg += ' Drive: ' + String(o.d.google_drive.link);
-              } else if (o.d.google_drive && o.d.google_drive.uploaded === false) {
-                okMsg += ' (planilha não enviada ao Drive — verifique logs do serviço 5099.)';
-              }
-              setMsg(okMsg, false);
-              setTimeout(function () { doSearch(); }, 500);
-            } else {
-              var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
-              setMsg(err, true);
-
-              // Se não existe em precainfosnew, tenta buscar status no controle_coleta_TJSP
-              // usando processo/incidente do registo carregado (memoria_calculo).
-              if (err.indexOf('Não existe registo com id') >= 0 && currentRow && currentRow.numero_de_processo) {
-                try {
-                  var u = new URLSearchParams();
-                  u.set('numero_de_processo', String(currentRow.numero_de_processo || '').trim());
-                  u.set('numero_do_incidente', String(currentRow.numero_do_incidente || '').trim());
-                  showModal('Consultando controle_coleta_TJSP…', true);
-                  fetch('/api/memoria-calculo/controle-coleta-status?' + u.toString())
-                    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-                    .then(function (o2) {
-                      if (!o2.ok || !o2.d || !o2.d.ok) {
-                        showModal(err + ' | Não foi possível consultar controle_coleta_TJSP.', false);
-                        return;
-                      }
-                      if (o2.d.found) {
-                        showModal('controle_coleta_TJSP.status: ' + String(o2.d.status), false);
-                        setMsg(err + ' | controle_coleta_TJSP.status: ' + String(o2.d.status), true);
-                      } else {
-                        showModal('controle_coleta_TJSP: não localizado.', false);
-                        setMsg(err + ' | controle_coleta_TJSP: não localizado.', true);
-                      }
-                    })
-                    .catch(function () {
-                      showModal(err + ' | Erro de rede ao consultar controle_coleta_TJSP.', false);
-                    });
-                } catch (_) {}
-              }
-            }
-          })
-          .catch(function (e) {
-            if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
-              setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
-              return;
-            }
-            setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
-          })
-          .finally(function () {
-            if (tmr) clearTimeout(tmr);
-            btnAtualizarCalculo.disabled = false;
-            btnAtualizarCalculo.textContent = prev;
-          });
+        fetchFilaCalculo().then(function (fo) {
+          var fila = fo.d && fo.d.ok && fo.d.fila ? fo.d.fila : null;
+          if (fila && (fila.em_execucao || (Number(fila.casos_na_fila) || 0) > 0)) {
+            showFilaModal(fila, function () { executarAtualizarCalculo(); });
+            return;
+          }
+          executarAtualizarCalculo();
+        });
       });
     }
     function stopAnalisePoll() {
@@ -1237,6 +1530,10 @@
 
     function startAnaliseProcessual(opts) {
       opts = opts || {};
+      if (!analiseProcessualPermitted) {
+        setMsg('Sem permissão para análise processual. Peça a um administrador (Utilizadores).', true);
+        return;
+      }
       if (analiseEmCurso() && !opts.force) {
         setMsg('Análise processual já em execução. Aguarde a conclusão.', false);
         return;

@@ -3,7 +3,9 @@
 API HTTP **interna** (localhost) para actualização de cálculo por ``id_precainfosnew``.
 
 - ``GET /health`` — verificação (systemd, balanceador)
+- ``GET /fila`` — estado da fila (operador actual, casos à espera, média e estimativa em segundos)
 - ``POST /atualizar`` — corpo JSON ``{"id_precainfosnew": <int>, "feito_por": "<opcional>"}`` (ou ``"id"``)
+  Pedidos entram na fila e aguardam a vez (um cálculo de cada vez).
   Se ``feito_por`` vier vazio ou omitido, assume-se **automação** (robô / chamada sem utilizador).
 
 Ambiente (``.env`` na mesma pasta que este ficheiro ou no cwd):
@@ -18,7 +20,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
 import traceback
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -33,7 +34,13 @@ from dotenv import load_dotenv
 load_dotenv(_ROOT / ".env")
 load_dotenv()
 
-_job_lock = threading.Lock()
+from calculo_job_queue import (
+    configure_runner,
+    enqueue,
+    get_fila_status,
+    get_prec_id_status,
+    submit_and_wait,
+)
 
 
 def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
@@ -59,6 +66,9 @@ def _run_atualizacao(prec_id: int, feito_por: str | None = None) -> dict[str, An
 
     m = Manager(datetime.now())
     return m.run_atualizacao_calculo(prec_id, feito_por=feito_por)
+
+
+configure_runner(_run_atualizacao)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -87,13 +97,33 @@ class _Handler(BaseHTTPRequestHandler):
         return got == expected
 
     def do_GET(self) -> None:
-        if self.path in ("/health", "/healthz"):
+        path = (self.path or "").split("?", 1)[0].rstrip("/") or "/"
+        if path in ("/health", "/healthz"):
             self._send(200, {"ok": True, "service": "atualizacao_calculo"})
+            return
+        if path in ("/fila", "/status"):
+            if not self._check_api_key():
+                self._send(403, {"ok": False, "error": "X-API-Key inválida ou em falta."})
+                return
+            fila = get_fila_status()
+            self._send(200, {"ok": True, "fila": fila})
+            return
+        if path.startswith("/status/"):
+            if not self._check_api_key():
+                self._send(403, {"ok": False, "error": "X-API-Key inválida ou em falta."})
+                return
+            try:
+                prec_id = int(path.split("/", 2)[2])
+            except (IndexError, ValueError):
+                self._send(400, {"ok": False, "error": "id_precainfosnew inválido na URL."})
+                return
+            self._send(200, get_prec_id_status(prec_id))
             return
         self._send(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
-        if self.path != "/atualizar" and self.path != "/atualizar/":
+        path = (self.path or "").split("?", 1)[0].rstrip("/") or "/"
+        if path != "/atualizar":
             self._send(404, {"ok": False, "error": "not found"})
             return
         if not self._check_api_key():
@@ -121,28 +151,37 @@ class _Handler(BaseHTTPRequestHandler):
             raw_fp = str(raw_fp)
         feito_por = (raw_fp.strip()[:200] if isinstance(raw_fp, str) and raw_fp.strip() else None)
 
-        if not _job_lock.acquire(blocking=False):
-            self._send(
-                409,
-                {
-                    "ok": False,
-                    "error": "Já existe uma actualização de cálculo em curso. Tente de novo após o fim.",
-                },
-            )
-            return
         try:
-            out = _run_atualizacao(prec_id, feito_por=feito_por)
+            timeout_raw = (os.getenv("CALCULO_ATUALIZACAO_API_TIMEOUT") or "600").strip()
+            timeout = float(timeout_raw.replace(",", "."))
+        except ValueError:
+            timeout = 600.0
+        if timeout < 60:
+            timeout = 600.0
+
+        wait_raw = data.get("wait", True)
+        wait_sync = wait_raw not in (False, "false", "False", "0", 0)
+
+        try:
+            if wait_sync:
+                out, fila_ao_entrar = submit_and_wait(
+                    prec_id, feito_por=feito_por, timeout=timeout
+                )
+                if fila_ao_entrar and fila_ao_entrar.get("em_execucao"):
+                    out = dict(out)
+                    out["fila_ao_entrar"] = fila_ao_entrar
+                if not out.get("ok"):
+                    self._send(400, out)
+                else:
+                    self._send(200, out)
+                return
+            out, _fila = enqueue(prec_id, feito_por=feito_por)
         except Exception as e:
             traceback.print_exc()
             self._send(500, {"ok": False, "error": str(e)})
             return
-        finally:
-            _job_lock.release()
 
-        if not out.get("ok"):
-            self._send(400, out)
-        else:
-            self._send(200, out)
+        self._send(202, out)
 
 
 def main() -> None:
@@ -155,7 +194,7 @@ def main() -> None:
         port = 5099
     print(
         f"[api_atualizacao_calculo] a escutar em http://{host}:{port}/ "
-        f"(POST /atualizar, GET /health)",
+        f"(POST /atualizar, GET /health, GET /fila, GET /status/<id>)",
         file=sys.stderr,
     )
     httpd = ThreadingHTTPServer((host, port), _Handler)

@@ -1,10 +1,13 @@
 import json
 import os
 import re
+import socket
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from pathlib import Path
+from http.client import RemoteDisconnected
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -758,6 +761,189 @@ def api_memoria_buscar():
             pass
 
 
+def _calculo_atualizacao_api_base() -> str | None:
+    base = (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
+    return base or None
+
+
+def _calculo_atualizacao_api_headers() -> dict[str, str]:
+    headers = {"Accept": "application/json"}
+    key = (os.getenv("CALCULO_ATUALIZACAO_API_KEY") or "").strip()
+    if key:
+        headers["X-API-Key"] = key
+    return headers
+
+
+def _calculo_atualizacao_api_timeout() -> int:
+    try:
+        timeout = int((os.getenv("CALCULO_ATUALIZACAO_API_TIMEOUT") or "1800").strip())
+    except ValueError:
+        timeout = 1800
+    return timeout if timeout >= 60 else 1800
+
+
+def _calculo_api_is_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", None)
+        return isinstance(reason, (TimeoutError, socket.timeout))
+    return False
+
+
+def _calculo_api_connection_error(url: str, exc: BaseException) -> tuple[dict, int]:
+    if _calculo_api_is_timeout(exc):
+        return (
+            {
+                "ok": False,
+                "timeout": True,
+                "error": (
+                    "Tempo esgotado à espera da API de cálculo. "
+                    "O processamento pode ainda estar na fila — aguarde alguns minutos "
+                    "e pesquise o caso de novo na memória."
+                ),
+            },
+            504,
+        )
+    return (
+        {
+            "ok": False,
+            "error": (
+                f"Não foi possível contactar a API de cálculo ({url}). "
+                f"Confirme se o serviço «atualizacao-calculo-api» está activo e reiniciado. "
+                f"Detalhe: {exc}"
+            ),
+        },
+        502,
+    )
+
+
+def _proxy_calculo_atualizacao_api_request(
+    method: str,
+    path: str,
+    *,
+    body: bytes | None = None,
+    timeout: int | None = None,
+) -> tuple[dict, int]:
+    base = _calculo_atualizacao_api_base()
+    if not base:
+        return (
+            {
+                "ok": False,
+                "error": (
+                    "API de cálculo não configurada. Defina CALCULO_ATUALIZACAO_API_URL no .env."
+                ),
+            },
+            503,
+        )
+    url = base.rstrip("/") + path
+    headers = _calculo_atualizacao_api_headers()
+    if body is not None:
+        headers = {
+            **headers,
+            "Content-Type": "application/json; charset=utf-8",
+        }
+    req = Request(url, data=body, method=method, headers=headers)
+    req_timeout = timeout if timeout is not None else _calculo_atualizacao_api_timeout()
+    try:
+        with urlopen(req, timeout=req_timeout) as resp:
+            raw = resp.read()
+            code = resp.getcode()
+    except HTTPError as e:
+        raw = e.read()
+        code = e.code
+    except (URLError, RemoteDisconnected, ConnectionResetError, TimeoutError, socket.timeout, OSError) as e:
+        return _calculo_api_connection_error(url, e)
+    try:
+        out = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return (
+            {"ok": False, "error": "Resposta inválida da API de cálculo (JSON esperado)."},
+            502,
+        )
+    if not isinstance(out, dict):
+        return ({"ok": False, "error": "Resposta inválida da API de cálculo."}, 502)
+    if code in (200, 202, 400, 403, 404, 409, 500):
+        return out, code
+    return out, 502
+
+
+def _proxy_calculo_atualizacao_api_get(path: str) -> tuple[dict, int]:
+    """GET na API interna (ex.: ``/fila``, ``/status/<id>``)."""
+    return _proxy_calculo_atualizacao_api_request(
+        "GET", path, timeout=min(30, _calculo_atualizacao_api_timeout())
+    )
+
+
+def _run_calculo_via_fila_async_poll(
+    prec_id: int,
+    *,
+    feito_por: str,
+    timeout_sec: int,
+) -> tuple[dict, int]:
+    """
+    Enfileira na API (resposta rápida) e faz polling até o caso terminar.
+    Evita ``TimeoutError`` numa única ligação HTTP longa.
+    """
+    post_body = json.dumps(
+        {
+            "id_precainfosnew": prec_id,
+            "feito_por": feito_por,
+            "wait": False,
+        }
+    ).encode("utf-8")
+    accepted, code = _proxy_calculo_atualizacao_api_request(
+        "POST",
+        "/atualizar",
+        body=post_body,
+        timeout=60,
+    )
+    if code not in (200, 202) or not accepted.get("accepted"):
+        return accepted, code if code >= 400 else 502
+
+    fila_ao_entrar = accepted.get("fila_ao_entrar")
+    deadline = time.monotonic() + float(timeout_sec)
+    poll_interval = 2.5
+    last_fila: dict | None = None
+
+    while time.monotonic() < deadline:
+        st, st_code = _proxy_calculo_atualizacao_api_get(f"/status/{prec_id}")
+        if isinstance(st.get("fila"), dict):
+            last_fila = st["fila"]
+        if st_code == 200 and st.get("done"):
+            result = st.get("result")
+            if not isinstance(result, dict):
+                return (
+                    {"ok": False, "error": "Resposta inválida ao concluir o cálculo."},
+                    502,
+                )
+            if fila_ao_entrar:
+                result = dict(result)
+                result["fila_ao_entrar"] = fila_ao_entrar
+            return result, 200 if result.get("ok") else 400
+        time.sleep(poll_interval)
+
+    return (
+        {
+            "ok": False,
+            "timeout": True,
+            "error": (
+                "Tempo esgotado à espera do cálculo. O processamento pode continuar na fila; "
+                "aguarde alguns minutos e pesquise o caso de novo."
+            ),
+            "fila": last_fila or accepted.get("fila"),
+        },
+        504,
+    )
+
+
+@app.route("/api/memoria-calculo/atualizar-calculo/fila", methods=["GET"])
+def api_memoria_atualizar_calculo_fila():
+    """Estado da fila do serviço de actualização (operador, tamanho, tempo médio)."""
+    out, code = _proxy_calculo_atualizacao_api_get("/fila")
+    return jsonify(out), code
+
+
 @app.route("/api/memoria-calculo/atualizar-calculo", methods=["POST"])
 def api_memoria_atualizar_calculo():
     """
@@ -799,7 +985,7 @@ def api_memoria_atualizar_calculo():
             409,
         )
 
-    base = (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
+    base = _calculo_atualizacao_api_base()
     if not base:
         return (
             jsonify(
@@ -813,65 +999,12 @@ def api_memoria_atualizar_calculo():
             ),
             503,
         )
-    try:
-        timeout = int((os.getenv("CALCULO_ATUALIZACAO_API_TIMEOUT") or "600").strip())
-    except ValueError:
-        timeout = 600
-    if timeout < 1:
-        timeout = 600
-
-    url = base.rstrip("/") + "/atualizar"
-    body = json.dumps(
-        {
-            "id_precainfosnew": prec_id,
-            "feito_por": _memoria_feito_por_plataforma(),
-        }
-    ).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "Accept": "application/json",
-    }
-    key = (os.getenv("CALCULO_ATUALIZACAO_API_KEY") or "").strip()
-    if key:
-        headers["X-API-Key"] = key
-    req = Request(url, data=body, method="POST", headers=headers)
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            code = resp.getcode()
-    except HTTPError as e:
-        raw = e.read()
-        code = e.code
-    except URLError as e:
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": f"Não foi possível contactar a API de cálculo ({url}): {e}",
-                }
-            ),
-            502,
-        )
-    try:
-        out = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": "Resposta inválida da API de cálculo (JSON esperado).",
-                }
-            ),
-            502,
-        )
-    if not isinstance(out, dict):
-        return (
-            jsonify({"ok": False, "error": "Resposta inválida da API de cálculo."}),
-            502,
-        )
-    if code in (200, 400, 403, 409, 500):
-        return jsonify(out), code
-    return jsonify(out), 502
+    out, code = _run_calculo_via_fila_async_poll(
+        prec_id,
+        feito_por=_memoria_feito_por_plataforma(),
+        timeout_sec=_calculo_atualizacao_api_timeout(),
+    )
+    return jsonify(out), code
 
 
 @app.route("/api/memoria-calculo/analise-processual", methods=["POST"])
