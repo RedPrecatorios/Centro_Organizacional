@@ -2158,6 +2158,56 @@ body.platform-body #app-toast {
   word-break: break-word;
 }
 
+/* Manutenção por módulo */
+.dash-nav-item--maintenance { opacity: 0.72; }
+.dash-nav-maint-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #9a3412;
+  background: #ffedd5;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.maint-card {
+  max-width: 36rem;
+  margin: 2rem auto;
+  padding: 2rem 1.75rem;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.maint-icon { color: #c2410c; margin-bottom: 0.75rem; }
+.maint-title { font-size: 1.35rem; font-weight: 700; margin: 0 0 0.75rem; }
+.maint-msg { font-size: 1rem; color: var(--text); margin: 0 0 0.75rem; line-height: 1.55; }
+.maint-hint { font-size: 0.85rem; color: var(--muted); margin: 0 0 1.25rem; line-height: 1.5; }
+.maint-actions { margin: 0; }
+.admin-maint-intro { margin: 0 0 1rem; max-width: 52rem; }
+.admin-maint-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+.admin-maint-row {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.admin-maint-row--on { border-color: #fdba74; background: #fff7ed; }
+.admin-maint-row--env { border-style: dashed; }
+.admin-maint-toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.admin-maint-row-desc { font-size: 0.8rem; color: var(--muted); margin: 6px 0 8px; }
+.admin-maint-env-note { font-size: 0.75rem; color: #9a3412; margin: 0 0 8px; }
+.admin-maint-msg-label { display: block; font-size: 0.75rem; color: var(--muted); }
+.admin-maint-msg { width: 100%; margin-top: 4px; min-height: 3rem; resize: vertical; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .camp-tabs { overflow-x: auto; }

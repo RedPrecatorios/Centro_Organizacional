@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Em manutenção — {{ module_title|e }} — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">{{ module_title|e }}</h1>
+        <p class="dash-sub">Módulo temporariamente indisponível</p>
+      </div>
+    </header>
+    <main class="dash-content">
+      <section class="maint-card" role="alert" aria-live="polite">
+        <div class="maint-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </div>
+        <h2 class="maint-title">Em manutenção</h2>
+        <p class="maint-msg">{{ maintenance_message|e }}</p>
+        <p class="maint-hint">Não é possível utilizar este módulo enquanto a manutenção estiver activa. Os restantes módulos continuam disponíveis conforme as suas permissões.</p>
+        <p class="maint-actions">
+          <a class="auth-link" href="{{ url_for('index') }}">Voltar ao início</a>
+          {% if is_plataforma_admin %}
+          <a class="auth-link" href="{{ url_for('auth.admin_usuarios') }}">Gerir manutenção (admin)</a>
+          {% endif %}
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -331,6 +331,7 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_atualizar_calculo_fila": "memoria_calculo",
         "api_memoria_analise_processual_start": "analise_processual",
         "api_memoria_analise_processual_status": "analise_processual",
+        "api_memoria_precainfos_detalhes": "memoria_calculo",
         "api_memoria_controle_coleta_status": "memoria_calculo",
         "campanha_page": "campanha",
         "api_campanha_dominios": "campanha",
@@ -428,6 +429,13 @@ def plataforma_before_request() -> Any | None:
         return None
     if needs == "deny":
         return handle_access_denied("deny")
+
+    from messages_viewer.page_maintenance import maintenance_block_for_tab
+
+    blocked = maintenance_block_for_tab(needs, u)
+    if blocked is not None:
+        return blocked
+
     if u.get("role") == "admin":
         return None
     if not user_can_tab(needs):
@@ -456,12 +464,24 @@ def wsgi_eda_session_guard(app, inner_wsgi):
             return inner_wsgi(environ, start_response)
         u = None
         allowed = False
+        maint_html: str | None = None
+        maint_status = 503
         with app.request_context(environ):
             u = _session_user()
             if u and u.get("active") and (
                 u.get("role") == "admin" or user_can_tab("eda")
             ):
                 allowed = True
+            if allowed:
+                from messages_viewer.page_maintenance import maintenance_block_for_tab
+
+                maint = maintenance_block_for_tab("eda", u)
+                if maint is not None:
+                    if isinstance(maint, tuple):
+                        maint_html, maint_status = maint[0], int(maint[1])
+                    else:
+                        maint_html = maint.get_data(as_text=True)
+                        maint_status = int(maint.status_code)
         if not u or not u.get("active"):
             req = Request(environ)
             nxt = req.path
@@ -469,6 +489,13 @@ def wsgi_eda_session_guard(app, inner_wsgi):
                 nxt += "?" + req.query_string.decode("latin-1", "replace")
             loc = f"/auth/login?next={quote(nxt, safe='')}"
             r = Response(status=302, headers=[("Location", loc)])
+            return r(environ, start_response)
+        if maint_html is not None:
+            r = Response(
+                maint_html,
+                status=maint_status,
+                mimetype="text/html; charset=utf-8",
+            )
             return r(environ, start_response)
         if allowed:
             return inner_wsgi(environ, start_response)
@@ -604,6 +631,11 @@ def admin_usuarios():
                         )
                         c.commit()
                     ok = "Permissões guardadas."
+            elif act == "save_maintenance":
+                from messages_viewer.page_maintenance import save_maintenance_from_form
+
+                save_maintenance_from_form(request.form)
+                ok = "Estado de manutenção dos módulos guardado."
         except Exception as e:
             err = str(e)
             traceback.print_exc()
@@ -615,21 +647,27 @@ def admin_usuarios():
             d = dict(r)
             d["tabs"] = get_user_tabs(int(d["id"]))
             users.append(d)
+    from messages_viewer.page_maintenance import list_maintenance_states
+
     return render_template(
         "admin_usuarios.html",
         users=users,
         panel_defs=PERMISSION_PANELS,
+        maintenance_states=list_maintenance_states(),
         error=err,
         ok_message=ok,
     )
 
 
 def inject_plataforma_template_globals():
+    from messages_viewer.page_maintenance import is_tab_in_maintenance
+
     u = _session_user()
     return {
         "plataforma_user": u,
         "user_can": user_can_tab,
         "is_plataforma_admin": bool(u and u.get("role") == "admin"),
+        "page_in_maintenance": is_tab_in_maintenance,
     }
 
 

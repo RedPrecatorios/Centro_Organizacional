@@ -64,6 +64,35 @@
         </form>
       </section>
 
+      <section class="admin-section" aria-labelledby="h-maint">
+        <h2 id="h-maint" class="dash-section-title">Manutenção por módulo</h2>
+        <p class="dash-sub admin-maint-intro">
+          Com a manutenção activa, ninguém utiliza o módulo (páginas e APIs), incluindo administradores.
+          Para desactivar, use esta página em <strong>Utilizadores</strong>. Também pode forçar via <code>PAGE_MAINTENANCE</code> no <code>.env</code>.
+        </p>
+        <form class="admin-form admin-maint-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+          <input type="hidden" name="action" value="save_maintenance" />
+          <div class="admin-maint-grid">
+            {% for m in maintenance_states %}
+            <article class="admin-maint-row{% if m.enabled %} admin-maint-row--on{% endif %}{% if m.env_enabled %} admin-maint-row--env{% endif %}">
+              <label class="admin-maint-toggle">
+                <input type="checkbox" name="maint_{{ m.tab_id }}" value="1"{% if m.db_enabled %} checked{% endif %}{% if m.env_enabled %} disabled{% endif %} />
+                <span class="admin-maint-row-title">{{ m.title }}</span>
+              </label>
+              <p class="admin-maint-row-desc">{{ m.description }}</p>
+              {% if m.env_enabled %}
+              <p class="admin-maint-env-note" role="status">Activado pelo <code>.env</code> (não editável aqui).</p>
+              {% endif %}
+              <label class="admin-maint-msg-label">Mensagem opcional (vista pelo utilizador)
+                <textarea class="auth-input admin-maint-msg" name="maint_msg_{{ m.tab_id }}" rows="2" placeholder="Texto personalizado; vazio = mensagem padrão.">{{ m.message or '' }}</textarea>
+              </label>
+            </article>
+            {% endfor %}
+          </div>
+          <button class="auth-submit" type="submit">Guardar manutenção</button>
+        </form>
+      </section>
+
       <section class="admin-section" aria-labelledby="h-list">
         <h2 id="h-list" class="dash-section-title">Contas existentes</h2>
         <div class="admin-user-list">

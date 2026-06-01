@@ -97,6 +97,9 @@
               <span class="l">Última atualização</span>
               <span class="v" id="memoria-meta-atual"></span>
             </div>
+            <div class="memoria-case-row memoria-case-row--action">
+              <button type="button" class="memoria-btn-mais-info" id="memoria-btn-mais-info" hidden {% if not flask_mysql_configured %}disabled title="Defina FLASK_MYSQL_* no .env"{% endif %}>Mais informações</button>
+            </div>
           </div>
         </div>
       </div>
@@ -232,6 +235,33 @@
     </div>
   </div>
 
+  <div class="memoria-modal-overlay" id="memoria-precainfos-modal" hidden>
+    <div class="memoria-modal memoria-precainfos-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-precainfos-title">
+      <div class="memoria-modal-top">
+        <div class="memoria-modal-title" id="memoria-precainfos-title">Mais informações</div>
+        <button type="button" class="memoria-modal-x" id="memoria-precainfos-x" aria-label="Fechar">×</button>
+      </div>
+      <div class="memoria-modal-body memoria-precainfos-body">
+        <div class="spin memoria-modal-spin" id="memoria-precainfos-spin" aria-hidden="true"></div>
+        <p class="memoria-precainfos-msg" id="memoria-precainfos-msg" role="status"></p>
+        <div class="memoria-precainfos-table-wrap" id="memoria-precainfos-table-wrap" hidden>
+          <table class="memoria-precainfos-table" aria-label="Detalhes do precainfosnew">
+            <thead>
+              <tr>
+                <th>Campo</th>
+                <th>Valor</th>
+              </tr>
+            </thead>
+            <tbody id="memoria-precainfos-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="memoria-modal-actions">
+        <button type="button" class="memoria-btn-buscar" id="memoria-precainfos-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="memoria-modal-overlay" id="memoria-analise-modal" hidden>
     <div class="memoria-modal memoria-analise-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-analise-title">
       <div class="memoria-modal-top">
@@ -261,6 +291,7 @@
     data-analise-processual-configured='{{ analise_processual_configured | tojson }}'
     data-analise-processual-permitted='{{ user_can("analise_processual") | tojson }}'
     data-bloquear-calculo-mes-atual='{{ bloquear_calculo_mes_atual | tojson }}'
+    data-flask-mysql-configured='{{ flask_mysql_configured | tojson }}'
     hidden
   ></div>
 
@@ -589,6 +620,73 @@
       pointer-events: auto;
       background: rgba(15, 23, 42, 0.45);
     }
+    #memoria-precainfos-modal.memoria-modal-overlay{
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .memoria-precainfos-modal-panel{ max-width: 62rem; width: min(96vw, 62rem); }
+    .memoria-precainfos-intro{ font-size: 0.82rem; color: var(--muted); margin: 0 0 0.75rem; line-height: 1.45; }
+    .memoria-precainfos-msg{ font-size: 0.9rem; margin: 0 0 0.5rem; }
+    .memoria-precainfos-msg.memoria-precainfos-msg--err{ color: var(--danger); }
+    .memoria-precainfos-table-wrap{
+      max-height: min(55vh, 420px);
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      margin: 0 auto;
+      max-width: 48rem;
+    }
+    .memoria-precainfos-table{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+    .memoria-precainfos-table thead th{
+      position: sticky;
+      top: 0;
+      background: var(--surface-elevated, #f8fafc);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      z-index: 1;
+    }
+    .memoria-precainfos-table td{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .memoria-precainfos-table td:first-child{
+      width: 14rem;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .memoria-precainfos-table td:last-child{
+      word-break: normal;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+    .memoria-precainfos-table tr:last-child td{ border-bottom: none; }
+    .memoria-btn-mais-info{
+      margin-top: 0.35rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .memoria-btn-mais-info:hover:not(:disabled){ background: var(--bg-chat); }
+    .memoria-btn-mais-info:disabled{ opacity: 0.5; cursor: not-allowed; }
+    .memoria-case-row--action{ border-top: 1px dashed var(--border); padding-top: 0.5rem; margin-top: 0.25rem; }
     #memoria-analise-modal.memoria-modal-overlay{
       pointer-events: auto;
       background: rgba(15, 23, 42, 0.35);
@@ -603,6 +701,7 @@
     var analiseProcessualConfigured = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualConfigured || 'false') : false;
     var analiseProcessualPermitted = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualPermitted || 'false') : false;
     var bloquearCalculoMesAtual = cfgEl ? JSON.parse(cfgEl.dataset.bloquearCalculoMesAtual || 'false') : false;
+    var flaskMysqlConfigured = cfgEl ? JSON.parse(cfgEl.dataset.flaskMysqlConfigured || 'false') : false;
     var lastResults = [];
     var idPrecainfosnewSelecionado = null;
     var temRegistoCarregado = false;
@@ -641,6 +740,14 @@
     var metaProc = document.getElementById('memoria-meta-proc');
     var metaInc = document.getElementById('memoria-meta-inc');
     var metaAtual = document.getElementById('memoria-meta-atual');
+    var btnMaisInfo = document.getElementById('memoria-btn-mais-info');
+    var precainfosModal = document.getElementById('memoria-precainfos-modal');
+    var precainfosSpin = document.getElementById('memoria-precainfos-spin');
+    var precainfosMsg = document.getElementById('memoria-precainfos-msg');
+    var precainfosTableWrap = document.getElementById('memoria-precainfos-table-wrap');
+    var precainfosTbody = document.getElementById('memoria-precainfos-tbody');
+    var precainfosClose = document.getElementById('memoria-precainfos-close');
+    var precainfosX = document.getElementById('memoria-precainfos-x');
     var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
     var btnAnaliseProcessual = document.getElementById('memoria-btn-analise-processual');
     var analiseModal = document.getElementById('memoria-analise-modal');
@@ -742,7 +849,119 @@
       bloquearBotoesCasoAusente = false;
     }
 
+    function syncMaisInfoButton() {
+      if (!btnMaisInfo) return;
+      if (!flaskMysqlConfigured) {
+        btnMaisInfo.hidden = true;
+        return;
+      }
+      if (bloquearBotoesCasoAusente || !currentRow) {
+        btnMaisInfo.hidden = true;
+        return;
+      }
+      var req = String(currentRow.requerente || '').trim();
+      var proc = String(currentRow.numero_de_processo || '').trim();
+      if (!req || !proc) {
+        btnMaisInfo.hidden = true;
+        return;
+      }
+      btnMaisInfo.hidden = false;
+      btnMaisInfo.disabled = false;
+      btnMaisInfo.title =
+        'Abrir mais informações do caso (processo, incidente e requerente).';
+    }
+
+    function hidePrecainfosModal() {
+      if (precainfosModal) precainfosModal.setAttribute('hidden', '');
+    }
+
+    function showPrecainfosModalLoading() {
+      if (!precainfosModal) return;
+      if (precainfosSpin) precainfosSpin.style.display = '';
+      if (precainfosMsg) {
+        // precainfosMsg.textContent = 'A consultar precainfosnew…';
+        precainfosMsg.className = 'memoria-precainfos-msg';
+      }
+      if (precainfosTbody) precainfosTbody.innerHTML = '';
+      if (precainfosTableWrap) precainfosTableWrap.setAttribute('hidden', '');
+      precainfosModal.removeAttribute('hidden');
+    }
+
+    function renderPrecainfosDetalhes(data) {
+      if (precainfosSpin) precainfosSpin.style.display = 'none';
+      if (!precainfosMsg || !precainfosTbody || !precainfosTableWrap) return;
+      if (!data || !data.ok) {
+        precainfosMsg.textContent = (data && data.error) ? data.error : 'Erro ao consultar.';
+        precainfosMsg.className = 'memoria-precainfos-msg memoria-precainfos-msg--err';
+        precainfosTableWrap.setAttribute('hidden', '');
+        return;
+      }
+      if (!data.found) {
+        precainfosMsg.textContent = data.error || 'Registo não encontrado.';
+        precainfosMsg.className = 'memoria-precainfos-msg memoria-precainfos-msg--err';
+        precainfosTableWrap.setAttribute('hidden', '');
+        return;
+      }
+      var items = data.items || [];
+      if (!items.length) {
+        precainfosMsg.textContent =
+          'Registo encontrado (id ' + (data.id_precainfosnew != null ? data.id_precainfosnew : '—') +
+          '), mas sem campos adicionais para exibir.';
+        precainfosMsg.className = 'memoria-precainfos-msg';
+        precainfosTableWrap.setAttribute('hidden', '');
+        return;
+      }
+      // precainfosMsg.textContent = 'Registo encontrado em precainfosnew.';
+      precainfosMsg.className = 'memoria-precainfos-msg';
+      precainfosTbody.innerHTML = '';
+      items.forEach(function (it) {
+        var tr = document.createElement('tr');
+        var td1 = document.createElement('td');
+        td1.textContent = it.label || it.column || '—';
+        var td2 = document.createElement('td');
+        td2.textContent = it.value != null ? String(it.value) : '—';
+        tr.appendChild(td1);
+        tr.appendChild(td2);
+        precainfosTbody.appendChild(tr);
+      });
+      precainfosTableWrap.removeAttribute('hidden');
+    }
+
+    function openMaisInformacoes() {
+      var r = currentRow;
+      if (!r || !flaskMysqlConfigured) return;
+      var proc = String(r.numero_de_processo || '').trim();
+      var inc = r.numero_do_incidente != null && r.numero_do_incidente !== ''
+        ? String(r.numero_do_incidente).trim()
+        : '';
+      var nome = String(r.requerente || '').trim();
+      if (!proc || !nome) {
+        setMsg('Para mais informações, carregue um caso com processo e requerente.', true);
+        return;
+      }
+      showPrecainfosModalLoading();
+      var qs = new URLSearchParams({
+        numero_de_processo: proc,
+        numero_do_incidente: inc,
+        requerente: nome
+      });
+      fetch('/api/memoria-calculo/precainfos-detalhes?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      })
+        .then(function (res) {
+          return res.json().then(function (d) { return { ok: res.ok, d: d }; });
+        })
+        .then(function (o) {
+          renderPrecainfosDetalhes(o.d);
+        })
+        .catch(function () {
+          renderPrecainfosDetalhes({ ok: false, error: 'Falha de rede ao consultar mais informações.' });
+        });
+    }
+
     function syncAtualizarCalculoButtonState(row) {
+      syncMaisInfoButton();
       if (!btnAtualizarCalculo) return;
       // respeita bloqueio por config da API (server-side já desabilita via template)
       if (!calculoAtualizacaoConfigured) return;
@@ -908,6 +1127,7 @@
       if (!r) {
         caseMeta.setAttribute('hidden', '');
         if (metaAtual) metaAtual.textContent = '—';
+        syncMaisInfoButton();
         return;
       }
       caseMeta.removeAttribute('hidden');
@@ -917,6 +1137,7 @@
       if (metaAtual) {
         metaAtual.textContent = formatUltimaAtualizacao(r.ultima_atualizacao);
       }
+      syncMaisInfoButton();
     }
 
     function showInaptoSemSaldoModal(row) {
@@ -1620,9 +1841,18 @@
     }
     if (analiseClose) analiseClose.addEventListener('click', hideAnaliseModal);
     if (analiseX) analiseX.addEventListener('click', hideAnaliseModal);
+    if (btnMaisInfo) btnMaisInfo.addEventListener('click', openMaisInformacoes);
+    if (precainfosClose) precainfosClose.addEventListener('click', hidePrecainfosModal);
+    if (precainfosX) precainfosX.addEventListener('click', hidePrecainfosModal);
+    if (precainfosModal) {
+      precainfosModal.addEventListener('click', function (e) {
+        if (e.target === precainfosModal) hidePrecainfosModal();
+      });
+    }
 
     // Garantia: nunca iniciar aberto (cache/HTML antigo)
     hideModal();
+    hidePrecainfosModal();
     bindModalClose();
     syncAnaliseProcessualButton();
   })();

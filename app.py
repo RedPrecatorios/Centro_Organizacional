@@ -375,6 +375,7 @@ def memoria_calculo():
     return render_template(
         "memoria_calculo.html",
         memoria_mysql_configured=bool((os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()),
+        flask_mysql_configured=bool((os.getenv("FLASK_MYSQL_DATABASE") or "").strip()),
         calculo_atualizacao_configured=bool(
             (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
         ),
@@ -1068,6 +1069,215 @@ def api_memoria_analise_processual_status(job_id: str):
         if isinstance(outcome, dict):
             payload["outcome"] = outcome
     return jsonify(payload)
+
+
+# Campos exibidos em «Mais informações» (precainfosnew), por ordem.
+# Mantemos APENAS os campos que o usuário pediu (mais legível).
+_PRECAINFOS_INFO_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Nº processo", ("Numero_de_Processo", "Numero_de_processo", "processo", "Processo")),
+    ("Nº incidente", ("Numero_do_Incidente", "Numero_do_incidente", "incidente", "Incidente")),
+    ("Ordem", ("Ordem", "ordem")),
+    ("DEPRE", ("DEPRE", "Depre")),
+    ("Cálculo atualizado", ("Calculo_Atualizado", "calculo_atualizado")),
+    ("Entidade devedora", ("Entidade_Devedora", "entidade_devedora")),
+    ("Advogado", ("Advogado", "advogado")),
+)
+
+
+def _serialize_precainfos_cell(value: object) -> object | None:
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.decode("latin-1", errors="replace")
+    return value
+
+
+def _precainfosnew_columns(cur) -> set[str]:
+    cur.execute("SHOW COLUMNS FROM `precainfosnew`")
+    raw_cols = cur.fetchall() or []
+    fields: set[str] = set()
+    for r in raw_cols:
+        if isinstance(r, dict):
+            nm = r.get("Field") or r.get("field")
+            if nm:
+                fields.add(str(nm))
+        else:
+            fields.add(str(r[0]))
+    return fields
+
+
+def _precainfosnew_row_to_info_items(row: dict, fields: set[str]) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen_cols: set[str] = set()
+    for label, candidates in _PRECAINFOS_INFO_SPECS:
+        col = _pick_field(fields, *candidates)
+        if col is None or col in seen_cols:
+            continue
+        seen_cols.add(col)
+        val = _serialize_precainfos_cell(row.get(col))
+        if val is None or (isinstance(val, str) and not val.strip()):
+            continue
+        items.append({"label": label, "column": col, "value": val})
+    return items
+
+
+@app.route("/api/memoria-calculo/precainfos-detalhes", methods=["GET"])
+def api_memoria_precainfos_detalhes():
+    """
+    Dados de ``precainfosnew`` (flaskdb) com correspondência exacta em processo,
+    incidente e requerente.
+    """
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    nome = (request.args.get("requerente") or request.args.get("nome") or "").strip()
+    if not proc:
+        return jsonify({"ok": False, "error": "Obrigatório: numero_de_processo."}), 400
+    if not nome:
+        return jsonify({"ok": False, "error": "Obrigatório: requerente (nome)."}), 400
+
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "MySQL do flaskdb não configurado (FLASK_MYSQL_*).",
+                }
+            ),
+            503,
+        )
+
+    try:
+        conn = mysql.connector.connect(**cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci")
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'precainfosnew'")
+        if not cur.fetchone():
+            return jsonify({"ok": True, "found": False, "error": "Tabela precainfosnew não existe."})
+
+        fields = _precainfosnew_columns(cur)
+        f_req = _pick_field(fields, "requerente", "Requerente")
+        f_proc = _pick_field(
+            fields,
+            "numero_de_processo",
+            "Numero_de_processo",
+            "Numero_de_Processo",
+            "processo",
+            "Processo",
+        )
+        f_inc = _pick_field(
+            fields,
+            "numero_do_incidente",
+            "Numero_do_incidente",
+            "Numero_do_Incidente",
+            "numero_de_incidente",
+            "incidente",
+            "Incidente",
+        )
+        if not f_proc or not f_req:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Tabela precainfosnew sem colunas de processo ou requerente.",
+                }
+            ),
+            500
+
+        if inc and not f_inc:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Tabela precainfosnew sem coluna de incidente; não é possível filtrar por incidente.",
+                }
+            ),
+            400
+
+        if f_inc:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM precainfosnew
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_req}`, '')) = %s
+                ORDER BY id DESC
+                LIMIT 2
+                """,
+                (proc, inc, nome),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM precainfosnew
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_req}`, '')) = %s
+                ORDER BY id DESC
+                LIMIT 2
+                """,
+                (proc, nome),
+            )
+
+        rows = cur.fetchall() or []
+        if not rows:
+            return jsonify(
+                {
+                    "ok": True,
+                    "found": False,
+                    "error": (
+                        "Nenhum registo em precainfosnew com este processo, incidente e requerente."
+                    ),
+                }
+            )
+        if len(rows) > 1:
+            ids = [r.get("id") for r in rows]
+            return jsonify(
+                {
+                    "ok": False,
+                    "found": True,
+                    "ambiguous": True,
+                    "error": (
+                        "Mais de um registo corresponde aos três critérios. "
+                        f"IDs: {', '.join(str(i) for i in ids if i is not None)}."
+                    ),
+                }
+            ),
+            409
+
+        row = dict(rows[0])
+        pid = row.get("id")
+        try:
+            pid_int = int(pid) if pid is not None else None
+        except (TypeError, ValueError):
+            pid_int = None
+        return jsonify(
+            {
+                "ok": True,
+                "found": True,
+                "id_precainfosnew": pid_int,
+                "items": _precainfosnew_row_to_info_items(row, fields),
+            }
+        )
+    except mysql.connector.Error as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.route("/api/memoria-calculo/controle-coleta-status")
