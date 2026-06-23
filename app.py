@@ -15,7 +15,7 @@ import mysql.connector
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, render_template, request, url_for
 
 # cd "c:\Users\justi\OneDrive\Documentos\Python Projects\PycharmProjects\View_Message"
 # python app.py
@@ -57,6 +57,14 @@ except ImportError:
     pass
 
 from messages_viewer.analise_processual_jobs import get_job_status, start_job
+from messages_viewer.proposta_pdf import gerar_pdf_proposta, nome_arquivo_proposta
+from messages_viewer.proposta_service import buscar_por_processo_incidente
+from messages_viewer.tabela_juros_calc import (
+    DEFAULTS as TABELA_JUROS_DEFAULTS,
+    TIPOS_ESFERA,
+    calcular_comparativo,
+    resultado_para_api,
+)
 from messages_viewer.plataforma_auth import (
     auth_bp,
     current_user,
@@ -194,6 +202,11 @@ def _memoria_calculo_ultima_atualizacao_field(cur) -> str | None:
 
 def _memoria_calculo_has_status_column(cur) -> bool:
     cur.execute("SHOW COLUMNS FROM `memoria_calculo` LIKE 'status'")
+    return bool(cur.fetchone())
+
+
+def _memoria_calculo_has_numero_de_meses_column(cur) -> bool:
+    cur.execute("SHOW COLUMNS FROM `memoria_calculo` LIKE 'numero_de_meses'")
     return bool(cur.fetchone())
 
 
@@ -493,6 +506,10 @@ def api_memoria_buscar():
             ultima_sql = ", NULL AS ultima_atualizacao"
         has_status = _memoria_calculo_has_status_column(cur)
         status_sql = ", `status`" if has_status else ", NULL AS status"
+        has_numero_de_meses = _memoria_calculo_has_numero_de_meses_column(cur)
+        numero_de_meses_sql = (
+            ", `numero_de_meses`" if has_numero_de_meses else ", NULL AS numero_de_meses"
+        )
         sql = f"""
         SELECT
             id,
@@ -510,6 +527,7 @@ def api_memoria_buscar():
             total_liquido,
             feito_por
             {status_sql}
+            {numero_de_meses_sql}
             {ultima_sql}
         FROM memoria_calculo
         WHERE {where_sql}
@@ -1577,7 +1595,7 @@ from campanha.api_templates import (
     remover_template,
 )
 from campanha.core import Recipient, parse_recipients_csv_bytes
-from messages_viewer.syscall_audit import get_audit_row, list_audit_rows
+from messages_viewer.syscall_audit import get_audit_row, list_audit_rows, platform_username_display_name
 from messages_viewer.localize import search_localize
 
 
@@ -2039,6 +2057,103 @@ def api_campanha_sincronizar_mailgun():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# TABELA DE JUROS (OC x Rendimento)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/tabela-juros")
+def tabela_juros_page():
+    return render_template(
+        "tabela_juros.html",
+        tipos_esfera=TIPOS_ESFERA,
+        defaults=TABELA_JUROS_DEFAULTS,
+    )
+
+
+@app.route("/api/tabela-juros/calcular", methods=["GET", "POST"])
+def api_tabela_juros_calcular():
+    data = request.get_json(silent=True) if request.method == "POST" else None
+    src = data if isinstance(data, dict) else request.args
+
+    def _arg(name: str, default: float | str):
+        v = src.get(name)
+        return default if v is None or v == "" else v
+
+    try:
+        r = calcular_comparativo(
+            tipo=str(_arg("tipo", TABELA_JUROS_DEFAULTS["tipo"])),
+            anos=float(_arg("anos", TABELA_JUROS_DEFAULTS["anos"])),
+            valor_atual=float(_arg("valor_atual", TABELA_JUROS_DEFAULTS["valor_atual"])),
+            valor_venda=float(_arg("valor_venda", TABELA_JUROS_DEFAULTS["valor_venda"])),
+            taxa_atual_anual_pct=float(
+                _arg("taxa_atual_anual_pct", TABELA_JUROS_DEFAULTS["taxa_atual_anual_pct"])
+            ),
+            taxa_venda_anual_pct=float(
+                _arg("taxa_venda_anual_pct", TABELA_JUROS_DEFAULTS["taxa_venda_anual_pct"])
+            ),
+            rotulo_atual=str(_arg("rotulo_atual", TABELA_JUROS_DEFAULTS["rotulo_atual"])),
+            rotulo_venda=str(_arg("rotulo_venda", TABELA_JUROS_DEFAULTS["rotulo_venda"])),
+        )
+    except (TypeError, ValueError) as e:
+        return jsonify({"ok": False, "error": f"Parâmetros inválidos: {e}"}), 400
+    return jsonify(resultado_para_api(r))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PROPOSTA — geração de PDF comercial (precainfosnew + memoria_calculo)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _proposta_mysql_configured() -> bool:
+    return bool((os.getenv("FLASK_MYSQL_DATABASE") or "").strip())
+
+
+@app.route("/proposta")
+def proposta_page():
+    return render_template(
+        "proposta.html",
+        proposta_mysql_configured=_proposta_mysql_configured(),
+    )
+
+
+@app.route("/api/proposta/buscar")
+def api_proposta_buscar():
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    out = buscar_por_processo_incidente(proc, inc)
+    if not out.get("ok"):
+        return jsonify(out), 503 if "não configurado" in str(out.get("error", "")).lower() else 400
+    return jsonify(out)
+
+
+@app.route("/api/proposta/gerar-pdf", methods=["POST"])
+def api_proposta_gerar_pdf():
+    data = request.get_json(silent=True) or {}
+    if not str(data.get("requerente") or "").strip():
+        return jsonify({"ok": False, "error": "Requerente é obrigatório."}), 400
+    if not str(data.get("numero_de_processo") or "").strip():
+        return jsonify({"ok": False, "error": "Nº do processo é obrigatório."}), 400
+    if data.get("valor_proposta") in (None, ""):
+        return jsonify({"ok": False, "error": "Valor da proposta é obrigatório."}), 400
+    try:
+        pdf_bytes = gerar_pdf_proposta(data)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Erro ao gerar PDF: {e}"}), 500
+    fn = nome_arquivo_proposta(
+        str(data.get("requerente") or ""),
+        str(data.get("numero_de_processo") or ""),
+    )
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fn}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # LOCALIZE — pesquisa e-mail / telefone (MySQL EDA)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2091,7 +2206,11 @@ def api_localize_pesquisar():
 
 @app.route("/auditoria-syscall")
 def auditoria_syscall_page():
-    return render_template("auditoria_syscall.html")
+    u = current_user()
+    nome_prefill = None
+    if u and u.get("role") != "admin":
+        nome_prefill = platform_username_display_name(str(u.get("username") or ""))
+    return render_template("auditoria_syscall.html", audit_nome_operador_prefill=nome_prefill)
 
 
 def _parse_audit_dt(raw: str | None) -> str | None:
@@ -2102,9 +2221,19 @@ def _parse_audit_dt(raw: str | None) -> str | None:
     return s
 
 
+def _audit_restrict_usuario() -> str | None:
+    """Colaboradores só veem registos do seu username (mapeado para login/nome Syscall)."""
+    u = current_user()
+    if not u or u.get("role") == "admin":
+        return None
+    name = str(u.get("username") or "").strip()
+    return name[:180] if name else ""
+
+
 @app.route("/api/auditoria-syscall/linhas", methods=["GET"], endpoint="api_auditoria_syscall_linhas")
 def api_auditoria_syscall_linhas():
     try:
+        restrict_usuario = _audit_restrict_usuario()
         lig = (request.args.get("ligacao_id") or "").strip()
         ligacao_id = int(lig) if lig.isdigit() else None
         req = (request.args.get("request_id") or "").strip() or None
@@ -2115,12 +2244,16 @@ def api_auditoria_syscall_linhas():
             "false",
             "no",
         )
+        is_scoped = restrict_usuario is not None
         rows, total = list_audit_rows(
             limit=lim,
             offset=off,
             ligacao_id=ligacao_id,
             request_id=req,
-            user_usuario=(request.args.get("user_usuario") or "").strip() or None,
+            user_usuario=None
+            if is_scoped
+            else ((request.args.get("user_usuario") or "").strip() or None),
+            restrict_to_user_usuario=restrict_usuario,
             user_nome=(request.args.get("user_nome") or "").strip() or None,
             credor_nome=(request.args.get("credor_nome") or "").strip() or None,
             credor_cpf=(request.args.get("credor_cpf") or "").strip() or None,
@@ -2148,7 +2281,7 @@ def api_auditoria_syscall_linhas():
 @app.route("/api/auditoria-syscall/<int:rid>", methods=["GET"], endpoint="api_auditoria_syscall_detalhe")
 def api_auditoria_syscall_detalhe(rid):
     try:
-        row = get_audit_row(rid)
+        row = get_audit_row(rid, restrict_to_user_usuario=_audit_restrict_usuario())
         if not row:
             return jsonify({"ok": False, "error": "Registro nao encontrado."}), 404
         return jsonify({"ok": True, "row": row})

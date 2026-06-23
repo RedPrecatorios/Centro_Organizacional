@@ -77,12 +77,7 @@ def _oauth_token_path() -> Path | None:
     candidates: list[Path] = []
     if raw:
         candidates.append(Path(raw))
-    candidates.extend(
-        [
-            _ROOT / "token.json",
-            Path("/mnt/volume_nyc1_1778499395037/API_CALCULO/secret/token.json"),
-        ]
-    )
+    candidates.append(_ROOT / "token.json")
     for p in candidates:
         if p.is_file():
             return p
@@ -97,13 +92,26 @@ def _oauth_credentials_path() -> Path | None:
     candidates.extend(
         [
             _ROOT / "credentials.json",
-            Path("/mnt/volume_nyc1_1778499395037/API_CALCULO/secret/credentials.json"),
+            _ROOT / "google_api" / "api-calculo-938de9086d6c.json",
         ]
     )
     for p in candidates:
         if p.is_file():
             return p
     return None
+
+
+def _persist_oauth_token(token_path: Path, creds: Any) -> None:
+    try:
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(creds.to_json(), encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"\n[google_drive] Aviso: não foi possível gravar token em {token_path}: {exc}. "
+            "O upload continua com o token renovado em memória; ajuste dono/permissões "
+            "(ex.: chown www-data:www-data token.json).\n",
+            flush=True,
+        )
 
 
 def _drive_auth_mode() -> str:
@@ -357,7 +365,12 @@ def _build_service() -> Any:
                 "token do API_CALCULO (secret/token.json). Execute authorize_drive.py no "
                 "API_CALCULO se necessário."
             )
-        creds = Credentials.from_authorized_user_file(str(token_path), list(_SCOPES))
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_path), list(_SCOPES))
+        except OSError as exc:
+            raise RuntimeError(
+                f"Drive OAuth: sem permissão para ler {token_path}: {exc}"
+            ) from exc
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
@@ -373,7 +386,7 @@ def _build_service() -> Any:
                     str(cred_path), list(_SCOPES)
                 )
                 creds = flow.run_local_server(port=0)
-            token_path.write_text(creds.to_json(), encoding="utf-8")
+            _persist_oauth_token(token_path, creds)
         print(
             f"\n[google_drive] Autenticação OAuth ({token_path.name})\n",
             flush=True,

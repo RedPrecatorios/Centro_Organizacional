@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gerar Proposta — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top prop-top">
+      <div class="prop-top-inner">
+        <img
+          class="prop-brand-logo"
+          src="{{ url_for('static', filename='img/red/logo-horizontal-claro.jpg') }}"
+          alt="RED Precatórios"
+          width="220"
+          height="52"
+        />
+        <div>
+          <h1 class="dash-h1">Gerar Proposta (PDF)</h1>
+          <p class="dash-sub">Pesquise o caso por <strong>processo + incidente</strong>, revise ou ajuste os dados <em>só nesta tela</em> (nada é gravado na base) e gere o PDF para o cliente.</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      {% if not proposta_mysql_configured %}
+      <p class="memoria-skeleton-note" role="status">
+        <strong>Base não configurada.</strong> Defina <code>FLASK_MYSQL_*</code> (precainfosnew) e, para o valor líquido, <code>MEMORIA_MYSQL_*</code> no <code>.env</code>.
+      </p>
+      {% endif %}
+
+      <div class="prop-card">
+        <p class="prop-hint">Pesquisa na base</p>
+        <div class="prop-search-grid">
+          <div class="prop-field">
+            <label for="prop-processo">Nº do processo</label>
+            <input type="text" id="prop-processo" class="auth-input" placeholder="Obrigatório" autocomplete="off" {% if not proposta_mysql_configured %}disabled{% endif %} />
+          </div>
+          <div class="prop-field">
+            <label for="prop-incidente">Nº do incidente</label>
+            <input type="text" id="prop-incidente" class="auth-input" placeholder="Opcional (vazio = sem incidente)" autocomplete="off" {% if not proposta_mysql_configured %}disabled{% endif %} />
+          </div>
+          <div class="prop-field prop-field--btn">
+            <label class="prop-sr" for="prop-btn-buscar">Pesquisar</label>
+            <button type="button" class="camp-btn camp-btn-primary" id="prop-btn-buscar" {% if not proposta_mysql_configured %}disabled{% endif %}>Pesquisar</button>
+          </div>
+        </div>
+        <p class="prop-msg" id="prop-msg" role="status" aria-live="polite"></p>
+        <div class="prop-escolher" id="prop-escolher" hidden>
+          <p class="prop-escolher-tit">Vários registos encontrados. Selecione:</p>
+          <ul class="prop-escolher-list" id="prop-escolher-list"></ul>
+        </div>
+      </div>
+
+      <form class="prop-card prop-form" id="prop-form" hidden>
+        <p class="prop-hint">Dados da proposta <span class="prop-edit-note">(editáveis apenas aqui — não alteram a base)</span></p>
+
+        <div class="prop-form-grid">
+          <div class="prop-field">
+            <label for="prop-ordem">Ordem</label>
+            <input type="text" id="prop-ordem" class="auth-input" name="ordem" />
+          </div>
+          <div class="prop-field">
+            <label for="prop-requerente">Requerente</label>
+            <input type="text" id="prop-requerente" class="auth-input" name="requerente" required />
+          </div>
+          <div class="prop-field">
+            <label for="prop-processo-f">Nº do processo</label>
+            <input type="text" id="prop-processo-f" class="auth-input" name="numero_de_processo" required />
+          </div>
+          <div class="prop-field">
+            <label for="prop-incidente-f">Nº do incidente</label>
+            <input type="text" id="prop-incidente-f" class="auth-input" name="numero_do_incidente" />
+          </div>
+          <div class="prop-field">
+            <label for="prop-liquido">Valor líquido atualizado (R$)</label>
+            <input type="number" id="prop-liquido" class="auth-input" name="valor_liquido_atualizado" min="0" step="0.01" inputmode="decimal" />
+          </div>
+          <div class="prop-field">
+            <label for="prop-calculo">Cálculo atualizado</label>
+            <input type="text" id="prop-calculo" class="auth-input" name="calculo_atualizado" />
+          </div>
+          <div class="prop-field prop-field--wide">
+            <label for="prop-entidade">Entidade devedora</label>
+            <input type="text" id="prop-entidade" class="auth-input" name="entidade_devedora" />
+          </div>
+          <div class="prop-field prop-field--wide">
+            <label for="prop-advogado">Advogado</label>
+            <input type="text" id="prop-advogado" class="auth-input" name="advogado" />
+          </div>
+        </div>
+
+        <div class="prop-divider" role="separator"></div>
+        <p class="prop-hint">Valores da oferta (PDF)</p>
+        <div class="prop-form-grid">
+          <div class="prop-field">
+            <label for="prop-valor-proposta">Valor da proposta — pagamento imediato (R$)</label>
+            <input type="number" id="prop-valor-proposta" class="auth-input" name="valor_proposta" min="0" step="0.01" inputmode="decimal" required />
+          </div>
+          <div class="prop-field">
+            <label for="prop-pct-honor">Honorários resguardados (%)</label>
+            <input type="number" id="prop-pct-honor" class="auth-input" name="percentual_honorarios" min="0" max="100" step="0.1" value="10" inputmode="decimal" />
+          </div>
+          <div class="prop-field">
+            <label for="prop-valor-honor">Valor dos honorários (R$)</label>
+            <input type="number" id="prop-valor-honor" class="auth-input" name="valor_honorarios" min="0" step="0.01" inputmode="decimal" />
+          </div>
+        </div>
+
+        <div class="prop-actions">
+          <button type="submit" class="camp-btn camp-btn-primary prop-btn-pdf" id="prop-btn-pdf">
+            Gerar PDF
+          </button>
+          <p class="prop-pdf-hint">O ficheiro segue o modelo RED Precatórios com as cores da marca.</p>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    var configured = {{ proposta_mysql_configured | tojson }};
+    var lastResults = [];
+    var honorManual = false;
+
+    var elProc = document.getElementById('prop-processo');
+    var elInc = document.getElementById('prop-incidente');
+    var elMsg = document.getElementById('prop-msg');
+    var elEscolher = document.getElementById('prop-escolher');
+    var elList = document.getElementById('prop-escolher-list');
+    var elForm = document.getElementById('prop-form');
+    var elLiquido = document.getElementById('prop-liquido');
+    var elPctHonor = document.getElementById('prop-pct-honor');
+    var elValorHonor = document.getElementById('prop-valor-honor');
+
+    function setMsg(t, err) {
+      if (!elMsg) return;
+      elMsg.textContent = t || '';
+      elMsg.className = 'prop-msg' + (err ? ' prop-msg--err' : '');
+    }
+
+    function n(v) {
+      var x = parseFloat(v);
+      return isNaN(x) ? null : x;
+    }
+
+    function syncHonorarios(auto) {
+      if (honorManual && !auto) return;
+      var liq = n(elLiquido && elLiquido.value);
+      var pct = n(elPctHonor && elPctHonor.value);
+      if (liq == null || pct == null || !elValorHonor) return;
+      elValorHonor.value = String(Math.round(liq * pct / 100 * 100) / 100);
+    }
+
+    function fillForm(row) {
+      if (!row || !elForm) return;
+      document.getElementById('prop-ordem').value = row.ordem != null ? String(row.ordem) : '';
+      document.getElementById('prop-requerente').value = row.requerente != null ? String(row.requerente) : '';
+      document.getElementById('prop-processo-f').value = row.numero_de_processo != null ? String(row.numero_de_processo) : '';
+      document.getElementById('prop-incidente-f').value = row.numero_do_incidente != null ? String(row.numero_do_incidente) : '';
+      elLiquido.value = row.valor_liquido_atualizado != null ? String(row.valor_liquido_atualizado) : '';
+      document.getElementById('prop-calculo').value = row.calculo_atualizado != null ? String(row.calculo_atualizado) : '';
+      document.getElementById('prop-entidade').value = row.entidade_devedora != null ? String(row.entidade_devedora) : '';
+      document.getElementById('prop-advogado').value = row.advogado != null ? String(row.advogado) : '';
+      honorManual = false;
+      syncHonorarios(true);
+      elForm.removeAttribute('hidden');
+      if (elEscolher) elEscolher.setAttribute('hidden', '');
+      setMsg('Dados carregados. Ajuste se necessário e gere o PDF.', false);
+    }
+
+    function doSearch() {
+      if (!configured) {
+        setMsg('MySQL não configurado.', true);
+        return;
+      }
+      var p = elProc ? String(elProc.value || '').trim() : '';
+      var i = elInc ? String(elInc.value || '').trim() : '';
+      if (!p) {
+        setMsg('Informe o nº do processo.', true);
+        return;
+      }
+      setMsg('A pesquisar…', false);
+      if (elEscolher) elEscolher.setAttribute('hidden', '');
+      if (elList) elList.innerHTML = '';
+      if (elForm) elForm.setAttribute('hidden', '');
+      lastResults = [];
+
+      var qs = new URLSearchParams();
+      qs.set('numero_de_processo', p);
+      qs.set('numero_do_incidente', i);
+
+      fetch('/api/proposta/buscar?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setMsg((o.d && o.d.error) ? o.d.error : 'Erro na pesquisa.', true);
+            return;
+          }
+          lastResults = o.d.results || [];
+          if (!lastResults.length) {
+            setMsg('Nenhum registo em precainfosnew com este processo e incidente.', true);
+            return;
+          }
+          if (lastResults.length === 1) {
+            fillForm(lastResults[0]);
+            return;
+          }
+          setMsg(lastResults.length + ' registos. Selecione abaixo.', false);
+          if (elEscolher) elEscolher.removeAttribute('hidden');
+          lastResults.forEach(function (row, ix) {
+            var li = document.createElement('li');
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'prop-escolher-item';
+            btn.textContent =
+              (row.requerente || '—') +
+              ' · Proc. ' + (row.numero_de_processo || '—') +
+              ' · Inc. ' + (row.numero_do_incidente || '—') +
+              (row.ordem ? (' · Ordem ' + row.ordem) : '');
+            btn.addEventListener('click', function () { fillForm(lastResults[ix]); });
+            li.appendChild(btn);
+            elList.appendChild(li);
+          });
+        })
+        .catch(function () {
+          setMsg('Falha de rede ou servidor.', true);
+        });
+    }
+
+    function formPayload() {
+      var f = elForm;
+      if (!f) return {};
+      return {
+        ordem: document.getElementById('prop-ordem').value,
+        requerente: document.getElementById('prop-requerente').value,
+        numero_de_processo: document.getElementById('prop-processo-f').value,
+        numero_do_incidente: document.getElementById('prop-incidente-f').value,
+        valor_liquido_atualizado: document.getElementById('prop-liquido').value,
+        calculo_atualizado: document.getElementById('prop-calculo').value,
+        entidade_devedora: document.getElementById('prop-entidade').value,
+        advogado: document.getElementById('prop-advogado').value,
+        valor_proposta: document.getElementById('prop-valor-proposta').value,
+        percentual_honorarios: document.getElementById('prop-pct-honor').value,
+        valor_honorarios: document.getElementById('prop-valor-honor').value
+      };
+    }
+
+    if (elForm) {
+      elForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var payload = formPayload();
+        if (!String(payload.requerente || '').trim()) {
+          setMsg('Informe o requerente.', true);
+          return;
+        }
+        if (!String(payload.numero_de_processo || '').trim()) {
+          setMsg('Informe o nº do processo.', true);
+          return;
+        }
+        if (!String(payload.valor_proposta || '').trim()) {
+          setMsg('Informe o valor da proposta (pagamento imediato).', true);
+          return;
+        }
+        var btn = document.getElementById('prop-btn-pdf');
+        if (btn) { btn.disabled = true; btn.textContent = 'A gerar PDF…'; }
+        setMsg('A gerar o PDF…', false);
+
+        fetch('/api/proposta/gerar-pdf', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/pdf' },
+          body: JSON.stringify(payload)
+        })
+          .then(function (res) {
+            if (!res.ok) {
+              return res.json().then(function (d) {
+                throw new Error((d && d.error) ? d.error : 'Falha ao gerar PDF.');
+              });
+            }
+            var cd = res.headers.get('Content-Disposition') || '';
+            var fn = 'Proposta_RED.pdf';
+            var m = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+            if (m && m[1]) fn = decodeURIComponent(m[1].replace(/"/g, ''));
+            return res.blob().then(function (blob) { return { blob: blob, fn: fn }; });
+          })
+          .then(function (o) {
+            var url = URL.createObjectURL(o.blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = o.fn;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+            setMsg('PDF gerado com sucesso.', false);
+          })
+          .catch(function (err) {
+            setMsg(err && err.message ? err.message : 'Erro ao gerar PDF.', true);
+          })
+          .finally(function () {
+            if (btn) { btn.disabled = false; btn.textContent = 'Gerar PDF'; }
+          });
+      });
+    }
+
+    if (elLiquido) elLiquido.addEventListener('input', function () { syncHonorarios(true); });
+    if (elPctHonor) elPctHonor.addEventListener('input', function () { syncHonorarios(true); });
+    if (elValorHonor) {
+      elValorHonor.addEventListener('input', function () { honorManual = true; });
+      elValorHonor.addEventListener('change', function () { honorManual = true; });
+    }
+
+    var btnBuscar = document.getElementById('prop-btn-buscar');
+    if (btnBuscar) btnBuscar.addEventListener('click', doSearch);
+    [elProc, elInc].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

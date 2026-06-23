@@ -33,6 +33,12 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("conversas", "Conversas", "WhatsApp, instâncias e histórico de mensagens"),
     ("outro_modulo", "2.º módulo", "Iframe extra na página Conversas (/embedded/)"),
     ("memoria_calculo", "Memória de cálculo", "Consulta e actualização de memórias"),
+    (
+        "tabela_juros",
+        "Tabela de Juros (OC x Rendimento)",
+        "Comparativo de rendimento: manter OC vs venda antecipada",
+    ),
+    ("proposta", "Gerar Proposta", "PDF comercial para formalização com o cliente"),
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
     ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
@@ -220,6 +226,58 @@ def _migrate_analise_processual_once() -> None:
         c.commit()
 
 
+def _migrate_tabela_juros_once() -> None:
+    """Quem já tem Memória de cálculo recebe a nova aba Tabela de Juros (uma vez)."""
+    with _connect() as c:
+        done = c.execute(
+            "SELECT 1 FROM platform_meta WHERE key = 'migrated_tabela_juros_v1'"
+        ).fetchone()
+        if done:
+            return
+        had_any = c.execute(
+            "SELECT 1 FROM user_permissions WHERE tab_id = 'tabela_juros' LIMIT 1"
+        ).fetchone()
+        if not had_any:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                SELECT user_id, 'tabela_juros'
+                FROM user_permissions
+                WHERE tab_id = 'memoria_calculo'
+                """
+            )
+        c.execute(
+            "INSERT INTO platform_meta (key, value) VALUES ('migrated_tabela_juros_v1', '1')"
+        )
+        c.commit()
+
+
+def _migrate_proposta_once() -> None:
+    """Quem já tem Memória de cálculo recebe Gerar Proposta (uma vez)."""
+    with _connect() as c:
+        done = c.execute(
+            "SELECT 1 FROM platform_meta WHERE key = 'migrated_proposta_v1'"
+        ).fetchone()
+        if done:
+            return
+        had_any = c.execute(
+            "SELECT 1 FROM user_permissions WHERE tab_id = 'proposta' LIMIT 1"
+        ).fetchone()
+        if not had_any:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                SELECT user_id, 'proposta'
+                FROM user_permissions
+                WHERE tab_id = 'memoria_calculo'
+                """
+            )
+        c.execute(
+            "INSERT INTO platform_meta (key, value) VALUES ('migrated_proposta_v1', '1')"
+        )
+        c.commit()
+
+
 def init_db() -> None:
     p = _db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +308,8 @@ def init_db() -> None:
         c.commit()
     _sync_auditoria_syscall_permission_for_campanha_users()
     _migrate_analise_processual_once()
+    _migrate_tabela_juros_once()
+    _migrate_proposta_once()
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -328,6 +388,8 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("index", "index"),
         ("conversas", "conversas"),
         ("memoria_calculo", "memoria_calculo"),
+        ("tabela_juros", "tabela_juros_page"),
+        ("proposta", "proposta_page"),
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
@@ -353,6 +415,10 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "conversas"
     if path.startswith("/memoria-calculo"):
         return "memoria_calculo"
+    if path.startswith("/tabela-juros"):
+        return "tabela_juros"
+    if path.startswith("/proposta"):
+        return "proposta"
     if path.startswith("/embedded"):
         return "outro_modulo"
     if path.startswith("/campanha"):
@@ -410,6 +476,11 @@ def _endpoint_to_tab() -> str | None:
         "index": "index",
         "conversas": "conversas",
         "memoria_calculo": "memoria_calculo",
+        "tabela_juros_page": "tabela_juros",
+        "api_tabela_juros_calcular": "tabela_juros",
+        "proposta_page": "proposta",
+        "api_proposta_buscar": "proposta",
+        "api_proposta_gerar_pdf": "proposta",
         "embedded.index": "outro_modulo",
         "get_summary": "index",
         "get_instances": "conversas",

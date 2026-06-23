@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tabela de Juros (OC x Rendimento) — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Tabela de Juros (OC x Rendimento)</h1>
+        <p class="dash-sub">Ajuste os parâmetros abaixo; o comparativo é atualizado automaticamente para encaminhar ao cliente.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <div class="tj-card tj-params">
+        <p class="tj-hint">Parâmetros da simulação</p>
+        <div class="tj-params-grid">
+          <div class="tj-field">
+            <label for="tj-tipo">Esfera</label>
+            <select id="tj-tipo" class="auth-input">
+              {% for t in tipos_esfera %}
+              <option value="{{ t }}"{% if t == defaults.tipo %} selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="tj-field">
+            <label for="tj-anos">Prazo (anos)</label>
+            <input type="number" id="tj-anos" class="auth-input" min="0" step="0.5" value="{{ defaults.anos }}" inputmode="decimal" />
+          </div>
+          <div class="tj-field">
+            <label for="tj-valor-atual">Valor — Aguardar Ordem Cronológica (R$)</label>
+            <input type="number" id="tj-valor-atual" class="auth-input" min="0" step="0.01" value="" inputmode="decimal" placeholder="Informe o valor" />
+          </div>
+          <div class="tj-field">
+            <label for="tj-valor-venda">Valor — Venda Antecipada (R$)</label>
+            <input type="number" id="tj-valor-venda" class="auth-input" min="0" step="0.01" value="" inputmode="decimal" placeholder="Informe o valor" />
+          </div>
+        </div>
+      </div>
+
+      <section class="tj-card tj-taxas-display" aria-labelledby="tj-taxas-title">
+        <h2 class="tj-taxas-title" id="tj-taxas-title">Taxas utilizadas no cálculo</h2>
+        <p class="tj-taxas-sub">Parâmetros fixos da tabela de referência. A taxa anual é convertida para mensal (÷ 12) nas fórmulas.</p>
+        <div class="tj-taxas-grid">
+          <div class="tj-taxa-chip tj-taxa-chip--atual">
+            <span class="tj-taxa-chip-tag">Linha «atual»</span>
+            <div class="tj-taxa-chip-rates">
+              <div class="tj-taxa-chip-rate">
+                <span class="tj-taxa-chip-num">{{ '%.2f'|format(defaults.taxa_atual_anual_pct)|replace('.', ',') }}</span>
+                <span class="tj-taxa-chip-unit">% a.a.</span>
+              </div>
+              <span class="tj-taxa-chip-arrow" aria-hidden="true">→</span>
+              <div class="tj-taxa-chip-rate tj-taxa-chip-rate--sm">
+                <span class="tj-taxa-chip-num">{{ '%.4f'|format(defaults.taxa_atual_anual_pct / 12)|replace('.', ',') }}</span>
+                <span class="tj-taxa-chip-unit">% a.m.</span>
+              </div>
+            </div>
+            <p class="tj-taxa-chip-meta"><strong>{{ defaults.rotulo_atual }}</strong> · juros simples</p>
+          </div>
+          <div class="tj-taxa-chip tj-taxa-chip--venda">
+            <span class="tj-taxa-chip-tag">Linha «venda»</span>
+            <div class="tj-taxa-chip-rates">
+              <div class="tj-taxa-chip-rate">
+                <span class="tj-taxa-chip-num">{{ '%.2f'|format(defaults.taxa_venda_anual_pct)|replace('.', ',') }}</span>
+                <span class="tj-taxa-chip-unit">% a.a.</span>
+              </div>
+              <span class="tj-taxa-chip-arrow" aria-hidden="true">→</span>
+              <div class="tj-taxa-chip-rate tj-taxa-chip-rate--sm">
+                <span class="tj-taxa-chip-num">{{ '%.4f'|format(defaults.taxa_venda_anual_pct / 12)|replace('.', ',') }}</span>
+                <span class="tj-taxa-chip-unit">% a.m.</span>
+              </div>
+            </div>
+            <p class="tj-taxa-chip-meta"><strong>{{ defaults.rotulo_venda }}</strong> · juros compostos</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="tj-report" aria-labelledby="tj-report-title">
+        <header class="tj-report-head">
+          <div>
+            <h2 class="tj-report-title" id="tj-report-title">Comparativo de rendimento</h2>
+            <p class="tj-report-meta" id="tj-report-meta">—</p>
+          </div>
+        </header>
+
+        <div class="dash-table-wrap tj-table-wrap tj-table-wrap--client">
+          <div class="dash-table-scroll">
+            <table class="dash-table tj-table tj-table--client" id="tj-table">
+              <thead>
+                <tr>
+                  <th scope="col">Cenário</th>
+                  <th scope="col" class="num">Valor inicial</th>
+                  <th scope="col" class="num">Juros mensal</th>
+                  <th scope="col" class="num">Meses</th>
+                  <th scope="col" class="num">Correção</th>
+                  <th scope="col" class="num">Valor final</th>
+                  <th scope="col">Tipo de juros</th>
+                  <th scope="col">Referência</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="tj-row-atual">
+                  <th scope="row"><span class="tj-scenario tj-scenario--atual">Aguardar Ordem Cronológica</span></th>
+                  <td class="num tj-display" id="tj-valor-atual-display">—</td>
+                  <td class="num tj-display" id="tj-jm-atual">—</td>
+                  <td class="num tj-display" id="tj-meses">—</td>
+                  <td class="num tj-display" id="tj-cor-atual">—</td>
+                  <td class="num tj-display tj-display--final" id="tj-vf-atual">—</td>
+                  <td class="tj-display-muted">Juros simples</td>
+                  <td class="tj-ref">{{ defaults.rotulo_atual }}</td>
+                </tr>
+                <tr class="tj-row-venda">
+                  <th scope="row"><span class="tj-scenario tj-scenario--venda">Venda antecipada</span></th>
+                  <td class="num tj-display" id="tj-valor-venda-display">—</td>
+                  <td class="num tj-display" id="tj-jm-venda">—</td>
+                  <td class="num tj-display" id="tj-meses-venda">—</td>
+                  <td class="num tj-display" id="tj-cor-venda">—</td>
+                  <td class="num tj-display tj-display--final" id="tj-vf-venda">—</td>
+                  <td class="tj-display-muted">Juros compostos</td>
+                  <td class="tj-ref">{{ defaults.rotulo_venda }}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="tj-foot">
+                  <td colspan="5" class="tj-foot-label">Diferença no final do prazo (venda − Aguardar Ordem Cronológica)</td>
+                  <td class="num tj-display tj-diff" id="tj-diff">—</td>
+                  <td colspan="2" class="tj-foot-note">Valor a mais ou a menos ao optar pela venda</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div
+    id="tj-runtime-config"
+    data-taxa-atual-anual-pct="{{ defaults.taxa_atual_anual_pct }}"
+    data-taxa-venda-anual-pct="{{ defaults.taxa_venda_anual_pct }}"
+    hidden
+  ></div>
+
+  <script>
+  (function () {
+    var cfgEl = document.getElementById('tj-runtime-config');
+    var taxaAtualAnualPct = cfgEl ? parseFloat(cfgEl.dataset.taxaAtualAnualPct) : 5;
+    var taxaVendaAnualPct = cfgEl ? parseFloat(cfgEl.dataset.taxaVendaAnualPct) : 15;
+    if (isNaN(taxaAtualAnualPct)) taxaAtualAnualPct = 5;
+    if (isNaN(taxaVendaAnualPct)) taxaVendaAnualPct = 15;
+
+    var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    var pct6 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+    var numFmt = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+
+    function n(el) {
+      var v = parseFloat(el && el.value);
+      return isNaN(v) ? 0 : v;
+    }
+
+    function nOptional(el) {
+      if (!el || String(el.value).trim() === '') return null;
+      var v = parseFloat(el.value);
+      return isNaN(v) ? null : v;
+    }
+
+    function fmtBrlOrDash(v) {
+      return v == null ? '—' : brl.format(v);
+    }
+
+    function fmtPctRate(r) {
+      return pct6.format(r * 100) + '%';
+    }
+
+    function fmtCorr(c) {
+      return Math.round(c * 100) + '%';
+    }
+
+    function recalc() {
+      var tipoEl = document.getElementById('tj-tipo');
+      var tipo = tipoEl ? String(tipoEl.value || '').trim() : '';
+      var anos = n(document.getElementById('tj-anos'));
+      var meses = Math.max(0, anos * 12);
+      var va = nOptional(document.getElementById('tj-valor-atual'));
+      var vv = nOptional(document.getElementById('tj-valor-venda'));
+      var ta = taxaAtualAnualPct / 100;
+      var tv = taxaVendaAnualPct / 100;
+      var jmA = ta / 12;
+      var jmV = tv / 12;
+      var corA = meses * jmA;
+      var corV = meses > 0 ? Math.pow(1 + jmV, meses) - 1 : 0;
+      var vfA = va != null ? va * corA + va : null;
+      var vfV = vv != null ? (1 + corV) * vv : null;
+      var diff = va != null && vv != null ? vfV - vfA : null;
+
+      var meta = document.getElementById('tj-report-meta');
+      if (meta) {
+        var anosTxt = numFmt.format(anos);
+        var mesesTxt = String(Math.round(meses));
+        meta.textContent = (tipo || '—') + ' · Prazo: ' + anosTxt + ' ' + (anos === 1 ? 'ano' : 'anos') + ' (' + mesesTxt + ' meses)';
+      }
+
+      document.getElementById('tj-valor-atual-display').textContent = fmtBrlOrDash(va);
+      document.getElementById('tj-valor-venda-display').textContent = fmtBrlOrDash(vv);
+      document.getElementById('tj-jm-atual').textContent = fmtPctRate(jmA);
+      document.getElementById('tj-jm-venda').textContent = fmtPctRate(jmV);
+      document.getElementById('tj-meses').textContent = String(Math.round(meses));
+      document.getElementById('tj-meses-venda').textContent = String(Math.round(meses));
+      document.getElementById('tj-cor-atual').textContent = fmtCorr(corA);
+      document.getElementById('tj-cor-venda').textContent = fmtCorr(corV);
+      document.getElementById('tj-vf-atual').textContent = fmtBrlOrDash(vfA);
+      document.getElementById('tj-vf-venda').textContent = fmtBrlOrDash(vfV);
+
+      var diffEl = document.getElementById('tj-diff');
+      diffEl.classList.remove('tj-diff--pos', 'tj-diff--neg', 'tj-diff--zero');
+      if (diff == null) {
+        diffEl.textContent = '—';
+        diffEl.classList.add('tj-diff--zero');
+      } else {
+        diffEl.textContent = brl.format(diff);
+        if (diff > 0.005) diffEl.classList.add('tj-diff--pos');
+        else if (diff < -0.005) diffEl.classList.add('tj-diff--neg');
+        else diffEl.classList.add('tj-diff--zero');
+      }
+    }
+
+    ['tj-anos', 'tj-valor-atual', 'tj-valor-venda'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', recalc);
+        el.addEventListener('change', recalc);
+      }
+    });
+    var tipo = document.getElementById('tj-tipo');
+    if (tipo) tipo.addEventListener('change', recalc);
+
+    recalc();
+  })();
+  </script>
+</body>
+</html>

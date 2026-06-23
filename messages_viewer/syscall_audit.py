@@ -88,6 +88,68 @@ def _only_digits(s: str, max_len: int = 64) -> str:
     return d[:max_len]
 
 
+_CAMEL_SPLIT = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _username_alnum(username: str) -> str:
+    return "".join(c for c in username.lower() if c.isalnum())
+
+
+def _username_display_parts(username: str) -> list[str]:
+    s = username.strip()
+    if not s:
+        return []
+    if " " in s:
+        return s.split()
+    parts = _CAMEL_SPLIT.sub(" ", s).split()
+    return parts if parts else [s]
+
+
+def platform_username_display_name(username: str) -> str:
+    """Nome legível a partir do login da plataforma (ex. ClauberSouza → Clauber Souza)."""
+    parts = _username_display_parts(username)
+    return " ".join(parts) if parts else username.strip()
+
+
+def _platform_username_scope_sql(username: str) -> tuple[str, list[Any]]:
+    """
+    Mapeia o username da plataforma para registos de auditoria.
+
+    Ex.: ClauberSouza → clauber.souza; Evely → evely.pereira (via prefixo ou user_nome).
+    """
+    name = username.strip()[:180]
+    if not name:
+        return "1=0", []
+
+    conds: list[str] = []
+    params: list[Any] = []
+
+    conds.append("LOWER(user_usuario) = LOWER(%s)")
+    params.append(name)
+
+    norm = _username_alnum(name)
+    if norm:
+        conds.append(
+            "LOWER(REPLACE(REPLACE(REPLACE(user_usuario, '.', ''), '_', ''), '-', '')) = %s"
+        )
+        params.append(norm)
+
+    parts = _username_display_parts(name)
+    if parts:
+        first = parts[0].lower()
+        conds.append("(LOWER(user_usuario) = %s OR LOWER(user_usuario) LIKE %s)")
+        params.extend([first, first + ".%"])
+
+        display = " ".join(parts)
+        conds.append("user_nome LIKE %s")
+        params.append(display + "%")
+        if len(parts) == 1:
+            conds.append("user_nome LIKE %s")
+            params.append(parts[0] + "%")
+
+    return "(" + " OR ".join(conds) + ")", params
+
+
 def list_audit_rows(
     *,
     limit: int = 15,
@@ -95,6 +157,7 @@ def list_audit_rows(
     ligacao_id: int | None = None,
     request_id: str | None = None,
     user_usuario: str | None = None,
+    restrict_to_user_usuario: str | None = None,
     user_nome: str | None = None,
     credor_nome: str | None = None,
     credor_cpf: str | None = None,
@@ -122,7 +185,11 @@ def list_audit_rows(
         if len(rid) <= 40:
             where.append("request_id = %s")
             params.append(rid)
-    if user_usuario:
+    if restrict_to_user_usuario is not None:
+        scope_sql, scope_params = _platform_username_scope_sql(restrict_to_user_usuario)
+        where.append(scope_sql)
+        params.extend(scope_params)
+    elif user_usuario:
         where.append("user_usuario LIKE %s")
         params.append("%" + user_usuario.strip()[:180] + "%")
     if user_nome:
@@ -179,13 +246,24 @@ def list_audit_rows(
     return [_serialize_row(dict(r)) for r in rows], total
 
 
-def get_audit_row(row_id: int) -> dict[str, Any] | None:
+def get_audit_row(
+    row_id: int,
+    *,
+    restrict_to_user_usuario: str | None = None,
+) -> dict[str, Any] | None:
     table = audit_table_name()
     kw = audit_mysql_connect_kwargs()
     conn = mysql.connector.connect(**kw)
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(f"SELECT * FROM `{table}` WHERE id = %s", (int(row_id),))
+        if restrict_to_user_usuario is not None:
+            scope_sql, scope_params = _platform_username_scope_sql(restrict_to_user_usuario)
+            cur.execute(
+                f"SELECT * FROM `{table}` WHERE id = %s AND {scope_sql}",
+                [int(row_id), *scope_params],
+            )
+        else:
+            cur.execute(f"SELECT * FROM `{table}` WHERE id = %s", (int(row_id),))
         row = cur.fetchone()
         cur.close()
     finally:

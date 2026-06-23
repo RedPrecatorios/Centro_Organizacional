@@ -16,7 +16,7 @@
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Auditoria syscall</h1>
-        <p class="dash-sub">Consulta à tabela MySQL configurada em <code>MYSQL_AUDIT_TABLE</code> (padrão <code>request_audit</code>), com as credenciais <code>EDA_MYSQL_*</code>. Filtros e paginação; clique numa linha para ver payload e cabeçalhos.</p>
+        <p class="dash-sub">Consulta à tabela MySQL configurada em <code>MYSQL_AUDIT_TABLE</code> (padrão <code>request_audit</code>), com as credenciais <code>EDA_MYSQL_*</code>. Filtros e paginação; clique numa linha para ver payload e cabeçalhos.{% if not is_plataforma_admin %} Só vê ligações associadas ao login <strong>{{ plataforma_user.username|e }}</strong> na plataforma (correspondência automática ao utilizador Syscall).{% endif %}</p>
       </div>
     </header>
 
@@ -32,13 +32,15 @@
             <label for="af-request">Request ID (UUID)</label>
             <input type="text" id="af-request" placeholder="cdd6b773-f0ec-..." />
           </div>
+          {% if is_plataforma_admin %}
           <div class="camp-field">
             <label for="af-user">Utilizador (login)</label>
             <input type="text" id="af-user" placeholder="usuario.syscall" />
           </div>
+          {% endif %}
           <div class="camp-field">
             <label for="af-nome">Nome operador</label>
-            <input type="text" id="af-nome" placeholder="Comprador RED" />
+            <input type="text" id="af-nome" placeholder="Comprador RED"{% if audit_nome_operador_prefill %} value="{{ audit_nome_operador_prefill|e }}" readonly{% endif %} />
           </div>
           <div class="camp-field">
             <label for="af-credor">Nome credor</label>
@@ -106,7 +108,7 @@
         <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="audit-modal-close">Fechar</button>
       </div>
       <div class="audit-modal-body">
-        <pre id="audit-modal-json" class="audit-json-pre"></pre>
+        <div id="audit-modal-content" class="audit-detail"></div>
       </div>
     </div>
   </div>
@@ -114,6 +116,7 @@
 <script>
 (function(){
   const PAGE = 15;
+  const DEFAULT_NOME = {{ audit_nome_operador_prefill|tojson if audit_nome_operador_prefill else 'null' }};
   let offset = 0;
   let lastTotal = 0;
   let hasSearched = false;
@@ -134,7 +137,8 @@
     const req = document.getElementById('af-request').value.trim();
     if (lig) p.set('ligacao_id', lig);
     if (req) p.set('request_id', req);
-    const u = document.getElementById('af-user').value.trim();
+    const afUser = document.getElementById('af-user');
+    const u = afUser ? afUser.value.trim() : '';
     const n = document.getElementById('af-nome').value.trim();
     const c = document.getElementById('af-credor').value.trim();
     const cpf = document.getElementById('af-cpf').value.trim();
@@ -221,22 +225,178 @@
       'Página ' + pageNum + ' de ' + pageCount;
   }
 
+  function fmtVal(v) {
+    if (v == null || v === '') return '—';
+    return String(v);
+  }
+
+  function fmtDt(v) {
+    if (v == null || v === '') return '—';
+    var s = String(v);
+    if (s.length >= 19) return s.slice(0, 19).replace('T', ' ');
+    return s;
+  }
+
+  function parseCustomData(raw) {
+    if (raw == null || raw === '') return [];
+    if (Array.isArray(raw)) return raw.map(String);
+    if (typeof raw === 'object') return Object.entries(raw).map(function(e) { return e[0] + ': ' + e[1]; });
+    var s = String(raw).trim();
+    if (!s) return [];
+    try {
+      var parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.map(String);
+      if (parsed && typeof parsed === 'object') {
+        return Object.entries(parsed).map(function(e) { return e[0] + ': ' + e[1]; });
+      }
+    } catch (e) { /* texto livre */ }
+    return s.split(/\r?\n/).filter(Boolean);
+  }
+
+  function detailGrid(items) {
+    var html = '<dl class="audit-detail-grid">';
+    var shown = 0;
+    items.forEach(function(item) {
+      if (item == null || item.hidden) return;
+      if (!item.keepEmpty && (item.value == null || item.value === '')) return;
+      shown++;
+      html += '<dt>' + esc(item.label) + '</dt><dd';
+      var cls = [];
+      if (item.mono) cls.push('audit-detail-mono');
+      if (item.full) cls.push('audit-detail-full');
+      if (cls.length) html += ' class="' + cls.join(' ') + '"';
+      html += '>' + (item.raw ? item.value : esc(fmtVal(item.value))) + '</dd>';
+    });
+    if (!shown) return '';
+    return html + '</dl>';
+  }
+
+  function detailSection(title, bodyHtml, opts) {
+    opts = opts || {};
+    if (!bodyHtml) return '';
+    return '<section class="audit-detail-section">' +
+      '<h3 class="audit-detail-section-title">' + esc(title) + '</h3>' +
+      bodyHtml +
+      '</section>';
+  }
+
+  function renderPayloadBlock(title, data) {
+    if (data == null || data === '') return '';
+    var pretty = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    return '<details class="audit-detail-collapse">' +
+      '<summary>' + esc(title) + '</summary>' +
+      '<pre class="audit-json-pre">' + esc(pretty) + '</pre>' +
+      '</details>';
+  }
+
+  function renderDetail(row) {
+    var payload = row.payload_json;
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch (e) { payload = null; }
+    }
+    var headers = row.headers_json;
+    if (typeof headers === 'string') {
+      try { headers = JSON.parse(headers); } catch (e) { headers = null; }
+    }
+    var p = payload && typeof payload === 'object' ? payload : {};
+    var customLines = parseCustomData(p.custom_data);
+
+    var acionamento = row.ligacao_acionamento || p.ligacao_acionamento || '';
+    var status = p.ligacao_status || '';
+    var badges = '';
+    if (acionamento) {
+      badges += '<span class="audit-detail-badge audit-detail-badge--acionamento">' + esc(acionamento) + '</span>';
+    }
+    if (status) {
+      badges += '<span class="audit-detail-badge audit-detail-badge--status">' + esc(status) + '</span>';
+    }
+
+    var html = '';
+    if (badges || row.credor_nome) {
+      html += '<div class="audit-detail-hero">' +
+        (row.credor_nome ? '<p class="audit-detail-hero-name">' + esc(row.credor_nome) + '</p>' : '') +
+        (badges ? '<div class="audit-detail-badges">' + badges + '</div>' : '') +
+        '<p class="audit-detail-hero-meta">' +
+        esc(fmtDt(row.ultima_ligacao_at)) +
+        (row.ligacao_id ? ' · Ligação #' + esc(row.ligacao_id) : '') +
+        '</p></div>';
+    }
+
+    html += detailSection('Operador', detailGrid([
+      { label: 'Login', value: row.user_usuario || p.user_usuario, mono: true },
+      { label: 'Nome', value: row.user_nome || p.user_nome },
+      { label: 'E-mail', value: p.user_email, mono: true },
+      { label: 'Tipo', value: p.user_tipo },
+      { label: 'Agente', value: p.user_agente, mono: true },
+    ]));
+
+    html += detailSection('Credor', detailGrid([
+      { label: 'Nome', value: row.credor_nome },
+      { label: 'CPF', value: row.credor_cpf, mono: true },
+      { label: 'Telefone', value: row.credor_telefone, mono: true },
+    ]));
+
+    html += detailSection('Ligação', detailGrid([
+      { label: 'ID ligação', value: row.ligacao_id, mono: true },
+      { label: 'Acionamento', value: row.ligacao_acionamento || p.ligacao_acionamento },
+      { label: 'Status', value: p.ligacao_status },
+      { label: 'Observação', value: p.ligacao_observacao, full: true },
+      { label: 'Mailing', value: row.mailing_nome },
+      { label: 'Total ligações', value: row.total_ligacoes },
+      { label: 'Primeira requisição', value: fmtDt(row.primeira_requisicao_at) },
+      { label: 'Última ligação', value: fmtDt(row.ultima_ligacao_at) },
+    ]));
+
+    if (customLines.length) {
+      var listHtml = '<ul class="audit-detail-list">';
+      customLines.forEach(function(line) {
+        listHtml += '<li>' + esc(line) + '</li>';
+      });
+      html += detailSection('Dados do processo / custom', listHtml + '</ul>');
+    }
+
+    var mondayItems = [
+      { label: 'Resultado', value: row.monday_resultado },
+      { label: 'Item ID', value: row.monday_item_id, mono: true },
+      { label: 'Erro', value: row.monday_erro, full: true },
+      { label: 'Processado em', value: fmtDt(row.monday_processado_em) },
+    ].filter(function(i) { return i.value != null && i.value !== ''; });
+    if (mondayItems.length) {
+      html += detailSection('Integração Monday', detailGrid(mondayItems));
+    }
+
+    html += detailSection('Requisição', detailGrid([
+      { label: 'ID registo', value: row.id, mono: true },
+      { label: 'Request ID', value: row.request_id, mono: true },
+      { label: 'Chave dedup', value: row.dedup_key, mono: true },
+      { label: 'IP cliente', value: row.client_ip, mono: true },
+    ]));
+
+    html += renderPayloadBlock('Payload JSON (completo)', payload || row.payload_json);
+    html += renderPayloadBlock('Cabeçalhos HTTP', headers || row.headers_json);
+
+    return html || '<p class="camp-empty">Sem detalhes.</p>';
+  }
+
   async function openDetail(id) {
     const modal = document.getElementById('audit-modal');
-    const pre = document.getElementById('audit-modal-json');
-    pre.textContent = 'A carregar...';
+    const content = document.getElementById('audit-modal-content');
+    content.innerHTML = '<p class="camp-hint">A carregar...</p>';
     modal.hidden = false;
     try {
       const r = await fetch('/api/auditoria-syscall/' + id);
       const d = await r.json();
       if (!d.ok) {
-        pre.textContent = d.error || 'Erro';
+        content.innerHTML = '<p class="camp-msg camp-msg-err">' + esc(d.error || 'Erro') + '</p>';
         return;
       }
-      document.getElementById('audit-modal-title').textContent = 'Registo #' + id;
-      pre.textContent = JSON.stringify(d.row, null, 2);
+      var row = d.row || {};
+      var title = 'Registo #' + id;
+      if (row.credor_nome) title += ' — ' + row.credor_nome;
+      document.getElementById('audit-modal-title').textContent = title;
+      content.innerHTML = renderDetail(row);
     } catch (e) {
-      pre.textContent = String(e);
+      content.innerHTML = '<p class="camp-msg camp-msg-err">' + esc(String(e)) + '</p>';
     }
   }
 
@@ -250,9 +410,16 @@
     load(true);
   });
   document.getElementById('af-limpar').addEventListener('click', function() {
-    ['af-ligacao','af-request','af-user','af-nome','af-credor','af-cpf','af-tel','af-desde','af-ate'].forEach(function(id) {
+    ['af-ligacao','af-request','af-credor','af-cpf','af-tel','af-desde','af-ate'].concat(
+      document.getElementById('af-user') ? ['af-user', 'af-nome'] : []
+    ).forEach(function(id) {
       document.getElementById(id).value = '';
     });
+    if (DEFAULT_NOME) {
+      document.getElementById('af-nome').value = DEFAULT_NOME;
+    } else {
+      document.getElementById('af-nome').value = '';
+    }
     offset = 0;
     lastTotal = 0;
     hasSearched = false;
@@ -277,6 +444,9 @@
   });
   document.getElementById('audit-modal-close').addEventListener('click', closeModal);
   document.getElementById('audit-modal-backdrop').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && !document.getElementById('audit-modal').hidden) closeModal();
+  });
 })();
 </script>
 </body>
