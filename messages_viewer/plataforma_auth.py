@@ -5,6 +5,8 @@ Autenticação da plataforma: SQLite, sessão Flask, admin e permissões por aba
 from __future__ import annotations
 
 import os
+import ipaddress
+import re
 import sqlite3
 import traceback
 from pathlib import Path
@@ -56,6 +58,7 @@ TAB_IDS = {p[0] for p in TAB_PANELS}
 PERMISSION_IDS = {p[0] for p in PERMISSION_PANELS}
 SESSION_USER_ID = "plataforma_uid"
 SESSION_VERSION = "plataforma_ver"
+COLLAB_ALLOWED_IPS_META_KEY = "collaborator_allowed_ips"
 
 
 def _project_root() -> Path:
@@ -76,6 +79,92 @@ def _connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+def _platform_meta_get(key: str, default: str = "") -> str:
+    with _connect() as c:
+        row = c.execute("SELECT value FROM platform_meta WHERE key = ?", (key,)).fetchone()
+    if not row:
+        return default
+    return str(row["value"] or "")
+
+
+def _platform_meta_set(key: str, value: str) -> None:
+    with _connect() as c:
+        c.execute(
+            """
+            INSERT INTO platform_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        c.commit()
+
+
+def _split_ip_entries(raw: str) -> list[str]:
+    entries: list[str] = []
+    for part in re.split(r"[\s,;]+", raw or ""):
+        part = part.strip()
+        if part:
+            entries.append(part)
+    return entries
+
+
+def _normalize_ip_entries(raw: str) -> str:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    invalid: list[str] = []
+    for entry in _split_ip_entries(raw):
+        try:
+            if "/" in entry:
+                parsed = ipaddress.ip_network(entry, strict=False)
+            else:
+                parsed = ipaddress.ip_address(entry)
+        except ValueError:
+            invalid.append(entry)
+            continue
+        text = str(parsed)
+        if text not in seen:
+            normalized.append(text)
+            seen.add(text)
+    if invalid:
+        raise ValueError(
+            "IP/faixa inválido em acesso de colaboradores: " + ", ".join(invalid[:5])
+        )
+    return "\n".join(normalized)
+
+
+def collaborator_allowed_ips_raw() -> str:
+    return _platform_meta_get(COLLAB_ALLOWED_IPS_META_KEY, "")
+
+
+def save_collaborator_allowed_ips(raw: str) -> None:
+    _platform_meta_set(COLLAB_ALLOWED_IPS_META_KEY, _normalize_ip_entries(raw))
+
+
+def _ip_matches_entry(ip: ipaddress._BaseAddress, entry: str) -> bool:
+    try:
+        if "/" in entry:
+            return ip in ipaddress.ip_network(entry, strict=False)
+        return ip == ipaddress.ip_address(entry)
+    except ValueError:
+        return False
+
+
+def collaborator_ip_allowed(remote_addr: str | None) -> bool:
+    entries = _split_ip_entries(collaborator_allowed_ips_raw())
+    if not entries:
+        return False
+    try:
+        client_ip = ipaddress.ip_address((remote_addr or "").strip())
+    except ValueError:
+        return False
+    return any(_ip_matches_entry(client_ip, entry) for entry in entries)
+
+
+def _current_remote_ip() -> str:
+    return str(request.remote_addr or "").strip()
 
 
 def _sync_auditoria_syscall_permission_for_campanha_users() -> None:
@@ -378,6 +467,16 @@ def handle_access_denied(needs: str) -> Any:
     from flask import jsonify
 
     if request.path.startswith("/api/"):
+        if needs == "ip_forbidden":
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Acesso negado para este IP. Contacte um administrador.",
+                    }
+                ),
+                403,
+            )
         if needs == "unauth":
             return (
                 jsonify(
@@ -396,6 +495,14 @@ def handle_access_denied(needs: str) -> Any:
         qs = request.query_string.decode() if request.query_string else ""
         nxt = request.path + (("?" + qs) if qs else "")
         return redirect(url_for("auth.login", next=nxt))
+    if needs == "ip_forbidden":
+        return (
+            render_template(
+                "acesso_negado.html",
+                motivo="Acesso negado para este IP. Contacte um administrador.",
+            ),
+            403,
+        )
     if needs in PERMISSION_IDS or needs in ("deny", "forbidden", "admin"):
         return (
             render_template("acesso_negado.html", motivo=needs),
@@ -419,6 +526,12 @@ def plataforma_before_request() -> Any | None:
         return handle_access_denied("unauth")
 
     ep = request.endpoint
+    if ep and ep.startswith("auth.") and ep != "auth.admin_usuarios":
+        return None
+
+    if u.get("role") == "colaborador" and not collaborator_ip_allowed(_current_remote_ip()):
+        return handle_access_denied("ip_forbidden")
+
     if ep == "auth.admin_usuarios":
         if u.get("role") != "admin":
             return handle_access_denied("admin")
@@ -464,14 +577,16 @@ def wsgi_eda_session_guard(app, inner_wsgi):
             return inner_wsgi(environ, start_response)
         u = None
         allowed = False
+        ip_forbidden = False
         maint_html: str | None = None
         maint_status = 503
         with app.request_context(environ):
             u = _session_user()
-            if u and u.get("active") and (
-                u.get("role") == "admin" or user_can_tab("eda")
-            ):
-                allowed = True
+            if u and u.get("active"):
+                if u.get("role") == "colaborador" and not collaborator_ip_allowed(_current_remote_ip()):
+                    ip_forbidden = True
+                elif u.get("role") == "admin" or user_can_tab("eda"):
+                    allowed = True
             if allowed:
                 from messages_viewer.page_maintenance import maintenance_block_for_tab
 
@@ -489,6 +604,13 @@ def wsgi_eda_session_guard(app, inner_wsgi):
                 nxt += "?" + req.query_string.decode("latin-1", "replace")
             loc = f"/auth/login?next={quote(nxt, safe='')}"
             r = Response(status=302, headers=[("Location", loc)])
+            return r(environ, start_response)
+        if ip_forbidden:
+            r = Response(
+                "Acesso negado para este IP. Contacte um administrador.",
+                status=403,
+                mimetype="text/html; charset=utf-8",
+            )
             return r(environ, start_response)
         if maint_html is not None:
             r = Response(
@@ -636,6 +758,11 @@ def admin_usuarios():
 
                 save_maintenance_from_form(request.form)
                 ok = "Estado de manutenção dos módulos guardado."
+            elif act == "save_ip_restriction":
+                save_collaborator_allowed_ips(
+                    request.form.get("collaborator_allowed_ips") or ""
+                )
+                ok = "IPs permitidos para colaboradores guardados."
         except Exception as e:
             err = str(e)
             traceback.print_exc()
@@ -654,6 +781,8 @@ def admin_usuarios():
         users=users,
         panel_defs=PERMISSION_PANELS,
         maintenance_states=list_maintenance_states(),
+        collaborator_allowed_ips=collaborator_allowed_ips_raw(),
+        current_remote_ip=_current_remote_ip(),
         error=err,
         ok_message=ok,
     )

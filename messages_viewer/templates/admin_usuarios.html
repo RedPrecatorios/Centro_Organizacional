@@ -64,6 +64,24 @@
         </form>
       </section>
 
+      <section class="admin-section" aria-labelledby="h-ip-access">
+        <h2 id="h-ip-access" class="dash-section-title">Acesso por IP dos colaboradores</h2>
+        <p class="dash-sub admin-maint-intro">
+          Todos os utilizadores do tipo <strong>Colaborador</strong> herdam esta lista. Administradores não têm limite de IP.
+          Informe um IP ou faixa CIDR por linha, vírgula ou espaço. IP actual desta sessão: <code>{{ current_remote_ip or 'desconhecido' }}</code>.
+        </p>
+        <form class="admin-form admin-ip-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+          <input type="hidden" name="action" value="save_ip_restriction" />
+          <label class="admin-maint-msg-label">IPs/faixas permitidos para colaboradores
+            <textarea class="auth-input admin-ip-textarea" name="collaborator_allowed_ips" rows="5" placeholder="Ex.:&#10;203.0.113.10&#10;198.51.100.0/24">{{ collaborator_allowed_ips or '' }}</textarea>
+          </label>
+          <p class="admin-maint-env-note" role="status">
+            Se a lista estiver vazia, nenhum colaborador acessa páginas protegidas até um administrador cadastrar ao menos um IP/faixa.
+          </p>
+          <button class="auth-submit" type="submit">Guardar IPs permitidos</button>
+        </form>
+      </section>
+
       <section class="admin-section" aria-labelledby="h-maint">
         <h2 id="h-maint" class="dash-section-title">Manutenção por módulo</h2>
         <p class="dash-sub admin-maint-intro">

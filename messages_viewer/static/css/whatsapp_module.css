@@ -2207,6 +2207,7 @@ body.platform-body #app-toast {
 .admin-maint-env-note { font-size: 0.75rem; color: #9a3412; margin: 0 0 8px; }
 .admin-maint-msg-label { display: block; font-size: 0.75rem; color: var(--muted); }
 .admin-maint-msg { width: 100%; margin-top: 4px; min-height: 3rem; resize: vertical; }
+.admin-ip-textarea { width: 100%; margin-top: 4px; min-height: 7rem; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 /* Responsive */
 @media (max-width: 768px) {
