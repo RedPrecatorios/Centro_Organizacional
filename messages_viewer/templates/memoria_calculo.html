@@ -79,26 +79,35 @@
           </div>
         </div>
 
-        <div class="memoria-col-valores">
-          <div class="memoria-case-meta" id="memoria-case-meta" hidden>
-            <div class="memoria-case-row">
-              <span class="l">Requerente</span>
-              <span class="v" id="memoria-meta-req"></span>
+        <div class="memoria-col-valores memoria-col-valores--aside">
+          <div class="memoria-case-aside-row">
+            <div class="memoria-case-meta" id="memoria-case-meta" hidden>
+              <div class="memoria-case-row">
+                <span class="l">Requerente</span>
+                <span class="v" id="memoria-meta-req"></span>
+              </div>
+              <div class="memoria-case-row">
+                <span class="l">Nº processo</span>
+                <span class="v" id="memoria-meta-proc"></span>
+              </div>
+              <div class="memoria-case-row">
+                <span class="l">Nº incidente</span>
+                <span class="v" id="memoria-meta-inc"></span>
+              </div>
+              <div class="memoria-case-row">
+                <span class="l">Última atualização</span>
+                <span class="v" id="memoria-meta-atual"></span>
+              </div>
+              <div class="memoria-case-row memoria-case-row--action">
+                <button type="button" class="memoria-btn-mais-info" id="memoria-btn-mais-info" hidden {% if not flask_mysql_configured %}disabled title="Defina FLASK_MYSQL_* no .env"{% endif %}>Mais informações</button>
+              </div>
             </div>
-            <div class="memoria-case-row">
-              <span class="l">Nº processo</span>
-              <span class="v" id="memoria-meta-proc"></span>
-            </div>
-            <div class="memoria-case-row">
-              <span class="l">Nº incidente</span>
-              <span class="v" id="memoria-meta-inc"></span>
-            </div>
-            <div class="memoria-case-row">
-              <span class="l">Última atualização</span>
-              <span class="v" id="memoria-meta-atual"></span>
-            </div>
-            <div class="memoria-case-row memoria-case-row--action">
-              <button type="button" class="memoria-btn-mais-info" id="memoria-btn-mais-info" hidden {% if not flask_mysql_configured %}disabled title="Defina FLASK_MYSQL_* no .env"{% endif %}>Mais informações</button>
+            <div class="memoria-verificar-meses" id="memoria-verificar-meses" hidden role="alert">
+              <span class="memoria-verificar-meses-icon" aria-hidden="true">!</span>
+              <div>
+                <p class="memoria-verificar-meses-tit">Correção de meses necessária</p>
+                <p class="memoria-verificar-meses-txt"><strong>É necessário </strong> conferir o número de meses no cadastro antes de utilizar os valores da memória.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -687,6 +696,45 @@
     .memoria-btn-mais-info:hover:not(:disabled){ background: var(--bg-chat); }
     .memoria-btn-mais-info:disabled{ opacity: 0.5; cursor: not-allowed; }
     .memoria-case-row--action{ border-top: 1px dashed var(--border); padding-top: 0.5rem; margin-top: 0.25rem; }
+    .memoria-verificar-meses{
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-top: 0;
+      padding: 12px 14px;
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      border-left: 4px solid #ea580c;
+      border-radius: var(--r);
+      color: #9a3412;
+    }
+    .memoria-verificar-meses[hidden]{ display: none !important; }
+    .memoria-verificar-meses-icon{
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #ffedd5;
+      color: #c2410c;
+      font-weight: 800;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .memoria-verificar-meses-tit{
+      margin: 0 0 4px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #9a3412;
+    }
+    .memoria-verificar-meses-txt{
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #c2410c;
+    }
     #memoria-analise-modal.memoria-modal-overlay{
       pointer-events: auto;
       background: rgba(15, 23, 42, 0.35);
@@ -778,6 +826,8 @@
     /** Status em controle_coleta_TJSP que disparam análise automática (saldo remanescente). */
     var CONTROLE_STATUS_AUTO_ANALISE = ['MLE'];
     var MEMORIA_STATUS_SEM_SALDO = 'Sem Saldo';
+    var NUMERO_MESES_VERIFICAR = 'Verificar Meses';
+    var verificarMesesAlert = document.getElementById('memoria-verificar-meses');
     var modal = document.getElementById('memoria-modal');
     var modalText = document.getElementById('memoria-modal-text');
     var modalSpin = document.getElementById('memoria-modal-spin');
@@ -838,6 +888,25 @@
       var st = String(row.status || '').trim().toLowerCase();
       var calc = String(row.calculo_atualizado || '').trim().toLowerCase();
       return st === sem || calc === sem;
+    }
+
+    function isVerificarMeses(row) {
+      if (!row) return false;
+      var alvo = NUMERO_MESES_VERIFICAR.toLowerCase();
+      var mesesRaw = row.numero_de_meses == null ? '' : row.numero_de_meses;
+      var meses = String(mesesRaw).trim().toLowerCase();
+      if (meses === alvo) return true;
+      var mesesNum = parseInt(meses, 10);
+      return !isNaN(mesesNum) && mesesNum <= 9;
+    }
+
+    function syncVerificarMesesAlert(row) {
+      if (!verificarMesesAlert) return;
+      if (row && isVerificarMeses(row)) {
+        verificarMesesAlert.removeAttribute('hidden');
+      } else {
+        verificarMesesAlert.setAttribute('hidden', '');
+      }
     }
 
     function markCasoAusenteTodasBases() {
@@ -1118,6 +1187,7 @@
       base.totalLiquido = 0;
       pctInput.value = '0';
       showCaseMeta(null);
+      syncVerificarMesesAlert(null);
       syncAtualizarCalculoButtonState(null);
       recalc();
     }
@@ -1128,6 +1198,7 @@
         caseMeta.setAttribute('hidden', '');
         if (metaAtual) metaAtual.textContent = '—';
         syncMaisInfoButton();
+        syncVerificarMesesAlert(null);
         return;
       }
       caseMeta.removeAttribute('hidden');
@@ -1138,6 +1209,7 @@
         metaAtual.textContent = formatUltimaAtualizacao(r.ultima_atualizacao);
       }
       syncMaisInfoButton();
+      syncVerificarMesesAlert(r);
     }
 
     function showInaptoSemSaldoModal(row) {
@@ -1174,6 +1246,7 @@
         }
         currentRow = r;
         syncAtualizarCalculoButtonState(r);
+        syncVerificarMesesAlert(r);
         syncAnaliseProcessualButton();
         showInaptoSemSaldoModal(r);
         return;
@@ -1382,6 +1455,12 @@
               tagInap.className = 'memoria-escolher-tag';
               tagInap.textContent = ' · Inapto (Sem Saldo)';
               b.appendChild(tagInap);
+            }
+            if (isVerificarMeses(row)) {
+              var tagMeses = document.createElement('span');
+              tagMeses.className = 'memoria-escolher-tag';
+              tagMeses.textContent = ' · Verificar Meses';
+              b.appendChild(tagMeses);
             }
             b.addEventListener('click', function () {
               tryApplyRow(lastResults[i]);

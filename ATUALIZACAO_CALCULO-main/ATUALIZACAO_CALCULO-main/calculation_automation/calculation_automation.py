@@ -22,8 +22,18 @@ from datetime import datetime
 import openpyxl
 import pytz
 from openpyxl import load_workbook
+from openpyxl.comments import Comment
+from openpyxl.styles import Font, PatternFill
 from colorama import Fore, Style
 
+from calculation_automation.sheet_constants import (
+    NUMERO_MESES_ALERTA_AUTOR,
+    NUMERO_MESES_ALERTA_PLANILHA,
+    NUMERO_MESES_CELULA,
+    NUMERO_MESES_FALLBACK,
+    NUMERO_MESES_OBSERVACAO_CELULA,
+    SHEET_NAME,
+)
 from db_handler.db_handler import DBHandler
 from db_handler.memoria_range_sync import (
     libreoffice_recalc_export_xlsx,
@@ -39,6 +49,28 @@ try:
     import psutil
 except ImportError:
     psutil = None
+
+_NUMERO_MESES_ALERTA_FILL = PatternFill(
+    start_color="FFC7CE",
+    end_color="FFC7CE",
+    fill_type="solid",
+)
+_NUMERO_MESES_ALERTA_FONT = Font(color="9C0006", bold=True)
+
+
+def _aplicar_alerta_numero_de_meses(worksheet) -> None:
+    observacao = worksheet[NUMERO_MESES_OBSERVACAO_CELULA]
+    observacao.value = NUMERO_MESES_ALERTA_PLANILHA
+    observacao.font = _NUMERO_MESES_ALERTA_FONT
+    observacao.fill = _NUMERO_MESES_ALERTA_FILL
+
+    meses = worksheet[NUMERO_MESES_CELULA]
+    meses.fill = _NUMERO_MESES_ALERTA_FILL
+    meses.font = _NUMERO_MESES_ALERTA_FONT
+    meses.comment = Comment(
+        NUMERO_MESES_ALERTA_PLANILHA,
+        NUMERO_MESES_ALERTA_AUTOR,
+    )
 
 
 def _thousands_br_int(n: int) -> str:
@@ -131,7 +163,7 @@ class CalculationAutomation:
         self.tz = pytz.timezone("America/Sao_Paulo")
         self.today = today
 
-        self.sheet_name = "(02.2) Mem Detalhada (DEPRE SP)"
+        self.sheet_name = SHEET_NAME
 
         _calc_dir = os.path.dirname(os.path.abspath(__file__))
         self.main_file_path = resolve_planilha_template_path(_calc_dir)
@@ -582,8 +614,17 @@ class CalculationAutomation:
         ws["D32"] = self.main_dict["Juros_Moratorio"]
         ws["F32"] = self.main_dict["Despesas"]
         ws["I32"] = previdencia_total
-        n_meses = int(self.main_dict.get("Numero_de_Meses", 0))
-        ws["F310"] = n_meses if n_meses > 0 else 1000
+        n_meses = int(self.main_dict.get("Numero_de_Meses", 0) or 0)
+        ws[NUMERO_MESES_CELULA] = (
+            n_meses if n_meses > 0 else NUMERO_MESES_FALLBACK
+        )
+        if n_meses <= 9:
+            _aplicar_alerta_numero_de_meses(ws)
+            print(
+                f"\n{Fore.YELLOW}[!] Numero de meses igual ou inferior a 9; "
+                f"{NUMERO_MESES_CELULA}={ws[NUMERO_MESES_CELULA].value} "
+                f"com alerta na planilha.{Style.RESET_ALL}"
+            )
 
         print(
             f"\n\t[T] edit_cells (preenchimento openpyxl): {time.time() - t_edit_start:.2f}s"

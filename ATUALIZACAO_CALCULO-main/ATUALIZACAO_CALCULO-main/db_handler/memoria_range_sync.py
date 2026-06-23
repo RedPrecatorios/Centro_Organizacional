@@ -42,6 +42,8 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 
+from calculation_automation.sheet_constants import NUMERO_MESES_DB_VERIFICAR
+
 # 307–313: 7 células de dados (O); percentual de honorários = meta na BD, não célula O
 O_COLUMN_TO_FIELD: tuple[tuple[str, str], ...] = (
     ("O307", "principal_bruto"),
@@ -507,6 +509,17 @@ def load_merged_memoria_valores(
     return merged
 
 
+def _resolve_numero_de_meses_db(main_dict: dict) -> str:
+    raw = main_dict.get("Numero_de_Meses")
+    try:
+        numero_meses = int(raw or 0)
+    except (TypeError, ValueError):
+        numero_meses = 0
+    if numero_meses <= 9:
+        return NUMERO_MESES_DB_VERIFICAR
+    return str(numero_meses)
+
+
 def total_liquido_arredondado(merged: dict[str, float | None]) -> float | None:
     """Valor de ``total_liquido`` após a mesma regra de arredondamento que o UPSERT."""
     v = merged.get("total_liquido")
@@ -594,6 +607,7 @@ def sync_memoria_calculo_to_db(
         fp_txt = _normalize_feito_por(
             main_dict.get("feito_por") if isinstance(main_dict, dict) else None
         )
+    numero_de_meses = _resolve_numero_de_meses_db(main_dict)
 
     if print_ok and max(abs(pb), abs(juros), abs(tb), abs(tliq), abs(reserva)) < 1e-9:
         print(
@@ -622,9 +636,10 @@ def sync_memoria_calculo_to_db(
             total_bruto,
             reserva_honorarios,
             total_liquido,
+            numero_de_meses,
             feito_por
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON DUPLICATE KEY UPDATE
             requerente = VALUES(requerente),
@@ -638,6 +653,7 @@ def sync_memoria_calculo_to_db(
             total_bruto = VALUES(total_bruto),
             reserva_honorarios = VALUES(reserva_honorarios),
             total_liquido = VALUES(total_liquido),
+            numero_de_meses = VALUES(numero_de_meses),
             feito_por = VALUES(feito_por),
             -- ON UPDATE CURRENT_TIMESTAMP só dispara se uma coluna mudar de valor;
             -- como recálculos costumam dar números idênticos, forçamos NOW(6) aqui
@@ -657,6 +673,7 @@ def sync_memoria_calculo_to_db(
         round(tb, 2),
         round(reserva, 2),
         round(tliq, 2),
+        numero_de_meses,
         fp_txt,
     )
 
@@ -681,7 +698,8 @@ def sync_memoria_calculo_to_db(
             if print_ok:
                 print(
                     f"\n\t[memoria_calculo] [{label}] "
-                    f"Registo salvo/actualizado: id_precainfosnew={pid} @ {database}\n"
+                    f"Registo salvo/actualizado: id_precainfosnew={pid} "
+                    f"numero_de_meses={numero_de_meses!r} @ {database}\n"
                 )
         except Exception as e:
             print(
