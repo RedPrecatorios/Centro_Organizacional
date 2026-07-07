@@ -87,6 +87,19 @@ app.config["MAX_CONTENT_LENGTH"] = max(
     int(app.config.get("MAX_CONTENT_LENGTH") or 0), _MAX_UPLOAD_BYTES
 )
 
+BLACKLIST_MOTIVOS_PADRAO = (
+    "Solicitou remoção",
+    "Fez Acordo",
+    "Acordo",
+    "Sem Interesse",
+    "Engano",
+    "PF",
+    "Já incluído",
+    "Telefone Incorreto",
+    "Inapto",
+    "Blacklist",
+)
+
 
 @app.errorhandler(413)
 def _upload_too_large(_exc=None):
@@ -360,6 +373,7 @@ def blacklist():
         total_paginas=total_paginas,
         total=total,
         por_pag=por_pag,
+        motivos_padrao=BLACKLIST_MOTIVOS_PADRAO,
     )
 
 
@@ -370,6 +384,9 @@ def blacklist_adicionar():
     tipo   = request.form.get("tipo", "").upper().strip()
     valor  = request.form.get("valor", "").strip()
     motivo = request.form.get("motivo", "").strip() or None
+    if motivo and motivo not in BLACKLIST_MOTIVOS_PADRAO:
+        flash("Motivo inválido. Selecione uma opção da lista padronizada.", "error")
+        return redirect(url_for("blacklist"))
 
     if tipo == "PROCESSO_INCIDENTE":
         processo = request.form.get("processo", "").strip()

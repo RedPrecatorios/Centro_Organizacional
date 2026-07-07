@@ -6,6 +6,7 @@ Uma passagem de actualização ( ``precainfosnew`` + planilha + ``memoria_calcul
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from typing import Any
 
@@ -327,15 +328,21 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
                 ),
             }
         if not planilha_ok:
-            return {
-                "ok": False,
-                "error": (
-                    "Não foi possível gerar a planilha de cálculo. "
-                    f"Template esperado: {calculation_automation.main_file_path!r}. "
+            if not os.path.isfile(calculation_automation.main_file_path):
+                err = (
+                    "Template de planilha não encontrado: "
+                    f"{calculation_automation.main_file_path!r}. "
                     "Confirme o ficheiro .xlsm em calculation_automation/ ou defina "
                     "CALCULO_PLANILHA_TEMPLATE no .env."
-                ),
-            }
+                )
+            else:
+                err = (
+                    "Não foi possível concluir a geração da planilha de cálculo "
+                    f"(modelo: {calculation_automation.main_file_path!r}). "
+                    "Verifique permissões em calculation_automation/OUTPUT e os logs "
+                    "do serviço atualizacao-calculo-api."
+                )
+            return {"ok": False, "error": err}
         drive_link = getattr(calculation_automation, "google_drive_link", None)
 
         if not verificar_meses:

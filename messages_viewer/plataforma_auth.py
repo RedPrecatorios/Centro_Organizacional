@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Autenticação da plataforma: SQLite, sessão Flask, admin e permissões por aba.
+Autenticação da plataforma: MySQL (plataforma_central), sessão Flask, admin e permissões por aba.
 """
 from __future__ import annotations
 
 import os
 import ipaddress
 import re
-import sqlite3
 import traceback
-from pathlib import Path
 from typing import Any
 
+import mysql.connector.errors
 from flask import (
     Blueprint,
     abort,
@@ -24,6 +23,15 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from messages_viewer.plataforma_auth_store import (
+    auth_connection,
+    auth_cursor,
+    init_auth_schema,
+    migrate_sqlite_to_mysql_if_needed,
+    platform_meta_get,
+    platform_meta_set,
+)
+
 auth_bp = Blueprint("auth", __name__, template_folder="templates")
 
 # Permissões por painel (colaborador): admin ignora a tabela e acede a tudo.
@@ -33,6 +41,11 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("conversas", "Conversas", "WhatsApp, instâncias e histórico de mensagens"),
     ("outro_modulo", "2.º módulo", "Iframe extra na página Conversas (/embedded/)"),
     ("memoria_calculo", "Memória de cálculo", "Consulta e actualização de memórias"),
+    (
+        "pre_analise_processual",
+        "PRÉ Análise Processual",
+        "Formulário inicial para triagem de processo/incidente",
+    ),
     (
         "tabela_juros",
         "Tabela de Juros (OC x Rendimento)",
@@ -52,6 +65,11 @@ FEATURE_PERMISSIONS: tuple[tuple[str, str, str], ...] = (
         "Análise processual",
         "Botão «Análise Processual» na Memória de cálculo (validação e-SAJ)",
     ),
+    (
+        "salvar_numero_meses",
+        "Salvar número de meses",
+        "Campo e botão «Salvar Número de Meses» na Memória de cálculo (precainfosnew)",
+    ),
 )
 
 # Painéis do menu + funcionalidades extra (checkboxes em Utilizadores).
@@ -67,45 +85,12 @@ SESSION_VERSION = "plataforma_ver"
 COLLAB_ALLOWED_IPS_META_KEY = "collaborator_allowed_ips"
 
 
-def _project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
-def _db_path() -> Path:
-    raw = (os.getenv("AUTH_SQLITE_PATH") or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    d = _project_root() / "instance"
-    d.mkdir(exist_ok=True)
-    return d / "plataforma_auth.db"
-
-
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_db_path()), timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
-
-
 def _platform_meta_get(key: str, default: str = "") -> str:
-    with _connect() as c:
-        row = c.execute("SELECT value FROM platform_meta WHERE key = ?", (key,)).fetchone()
-    if not row:
-        return default
-    return str(row["value"] or "")
+    return platform_meta_get(key, default)
 
 
 def _platform_meta_set(key: str, value: str) -> None:
-    with _connect() as c:
-        c.execute(
-            """
-            INSERT INTO platform_meta (key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (key, value),
-        )
-        c.commit()
+    platform_meta_set(key, value)
 
 
 def _split_ip_entries(raw: str) -> list[str]:
@@ -175,16 +160,17 @@ def _current_remote_ip() -> str:
 
 def _sync_auditoria_syscall_permission_for_campanha_users() -> None:
     """Quem já tem Campanha passa a ver Auditoria syscall sem reconfigurar cada conta."""
-    with _connect() as c:
-        c.execute(
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
             """
-            INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+            INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
             SELECT user_id, 'auditoria_syscall'
-            FROM user_permissions
+            FROM plataforma_user_permissions
             WHERE tab_id = 'campanha'
             """
         )
-        c.commit()
+        conn.commit()
 
 
 def _migrate_analise_processual_once() -> None:
@@ -192,120 +178,104 @@ def _migrate_analise_processual_once() -> None:
     Migração única: quem já tinha Memória de cálculo recebe Análise processual uma vez.
     Não repetir em cada pedido — senão anula remoções feitas em Utilizadores.
     """
-    with _connect() as c:
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS platform_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_analise_processual_v1'"
         )
-        done = c.execute(
-            "SELECT 1 FROM platform_meta WHERE key = 'migrated_analise_processual_v1'"
-        ).fetchone()
-        if done:
+        if cur.fetchone():
             return
-        # Instalação nova: ainda não há ninguém com a permissão → copiar de memoria_calculo.
-        # Já existia (ex.: sync antigo em cada pedido) → só marcar migrado, sem re-inserir.
-        had_any = c.execute(
-            "SELECT 1 FROM user_permissions WHERE tab_id = 'analise_processual' LIMIT 1"
-        ).fetchone()
+        cur.execute(
+            "SELECT 1 FROM plataforma_user_permissions WHERE tab_id = 'analise_processual' LIMIT 1"
+        )
+        had_any = cur.fetchone()
         if not had_any:
-            c.execute(
+            cur.execute(
                 """
-                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
                 SELECT user_id, 'analise_processual'
-                FROM user_permissions
+                FROM plataforma_user_permissions
                 WHERE tab_id = 'memoria_calculo'
                 """
             )
-        c.execute(
-            "INSERT INTO platform_meta (key, value) VALUES ('migrated_analise_processual_v1', '1')"
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_analise_processual_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
         )
-        c.commit()
+        conn.commit()
 
 
 def _migrate_tabela_juros_once() -> None:
     """Quem já tem Memória de cálculo recebe a nova aba Tabela de Juros (uma vez)."""
-    with _connect() as c:
-        done = c.execute(
-            "SELECT 1 FROM platform_meta WHERE key = 'migrated_tabela_juros_v1'"
-        ).fetchone()
-        if done:
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_tabela_juros_v1'"
+        )
+        if cur.fetchone():
             return
-        had_any = c.execute(
-            "SELECT 1 FROM user_permissions WHERE tab_id = 'tabela_juros' LIMIT 1"
-        ).fetchone()
+        cur.execute(
+            "SELECT 1 FROM plataforma_user_permissions WHERE tab_id = 'tabela_juros' LIMIT 1"
+        )
+        had_any = cur.fetchone()
         if not had_any:
-            c.execute(
+            cur.execute(
                 """
-                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
                 SELECT user_id, 'tabela_juros'
-                FROM user_permissions
+                FROM plataforma_user_permissions
                 WHERE tab_id = 'memoria_calculo'
                 """
             )
-        c.execute(
-            "INSERT INTO platform_meta (key, value) VALUES ('migrated_tabela_juros_v1', '1')"
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_tabela_juros_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
         )
-        c.commit()
+        conn.commit()
 
 
 def _migrate_proposta_once() -> None:
     """Quem já tem Memória de cálculo recebe Gerar Proposta (uma vez)."""
-    with _connect() as c:
-        done = c.execute(
-            "SELECT 1 FROM platform_meta WHERE key = 'migrated_proposta_v1'"
-        ).fetchone()
-        if done:
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_proposta_v1'"
+        )
+        if cur.fetchone():
             return
-        had_any = c.execute(
-            "SELECT 1 FROM user_permissions WHERE tab_id = 'proposta' LIMIT 1"
-        ).fetchone()
+        cur.execute(
+            "SELECT 1 FROM plataforma_user_permissions WHERE tab_id = 'proposta' LIMIT 1"
+        )
+        had_any = cur.fetchone()
         if not had_any:
-            c.execute(
+            cur.execute(
                 """
-                INSERT OR IGNORE INTO user_permissions (user_id, tab_id)
+                INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
                 SELECT user_id, 'proposta'
-                FROM user_permissions
+                FROM plataforma_user_permissions
                 WHERE tab_id = 'memoria_calculo'
                 """
             )
-        c.execute(
-            "INSERT INTO platform_meta (key, value) VALUES ('migrated_proposta_v1', '1')"
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_proposta_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
         )
-        c.commit()
+        conn.commit()
 
 
 def init_db() -> None:
-    p = _db_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with _connect() as c:
-        c.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL CHECK (role IN ('admin', 'colaborador')),
-                active INTEGER NOT NULL DEFAULT 1,
-                perms_version INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS user_permissions (
-                user_id INTEGER NOT NULL,
-                tab_id TEXT NOT NULL,
-                PRIMARY KEY (user_id, tab_id),
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS platform_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            """
-        )
-        c.commit()
+    with auth_connection() as conn:
+        init_auth_schema(conn)
+    migrate_sqlite_to_mysql_if_needed()
     _sync_auditoria_syscall_permission_for_campanha_users()
     _migrate_analise_processual_once()
     _migrate_tabela_juros_once()
@@ -317,29 +287,36 @@ def _bootstrap_admin_if_empty() -> None:
     p = (os.getenv("AUTH_BOOTSTRAP_PASSWORD") or "").strip()
     if not u or not p:
         return
-    with _connect() as c:
-        n = c.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute("SELECT COUNT(*) AS n FROM plataforma_users")
+        n = int((cur.fetchone() or {}).get("n") or 0)
         if n:
             return
-        c.execute(
-            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
+        cur.execute(
+            "INSERT INTO plataforma_users (username, password_hash, role) VALUES (%s, %s, 'admin')",
             (u, generate_password_hash(p)),
         )
-        c.commit()
+        conn.commit()
         print(f"[plataforma_auth] Utilizador admin inicial criado: {u!r} (defina outro e remova a variável do .env se quiser).")
 
 
 def get_user_by_id(uid: int) -> dict | None:
-    with _connect() as c:
-        r = c.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute("SELECT * FROM plataforma_users WHERE id = %s", (uid,))
+        r = cur.fetchone()
     return dict(r) if r else None
 
 
 def get_user_tabs(uid: int) -> set[str]:
-    with _connect() as c:
-        rows = c.execute(
-            "SELECT tab_id FROM user_permissions WHERE user_id = ?", (uid,)
-        ).fetchall()
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT tab_id FROM plataforma_user_permissions WHERE user_id = %s",
+            (uid,),
+        )
+        rows = cur.fetchall()
     return {r["tab_id"] for r in rows if r["tab_id"] in PERMISSION_IDS}
 
 
@@ -388,6 +365,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("index", "index"),
         ("conversas", "conversas"),
         ("memoria_calculo", "memoria_calculo"),
+        ("pre_analise_processual", "pre_analise_processual_page"),
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
         ("campanha", "campanha_page"),
@@ -415,6 +393,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "conversas"
     if path.startswith("/memoria-calculo"):
         return "memoria_calculo"
+    if path.startswith("/pre-analise-processual"):
+        return "pre_analise_processual"
     if path.startswith("/tabela-juros"):
         return "tabela_juros"
     if path.startswith("/proposta"):
@@ -476,6 +456,7 @@ def _endpoint_to_tab() -> str | None:
         "index": "index",
         "conversas": "conversas",
         "memoria_calculo": "memoria_calculo",
+        "pre_analise_processual_page": "pre_analise_processual",
         "tabela_juros_page": "tabela_juros",
         "api_tabela_juros_calcular": "tabela_juros",
         "proposta_page": "proposta",
@@ -491,6 +472,7 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_atualizar_calculo_fila": "memoria_calculo",
         "api_memoria_analise_processual_start": "analise_processual",
         "api_memoria_analise_processual_status": "analise_processual",
+        "api_memoria_salvar_numero_meses": "salvar_numero_meses",
         "api_memoria_precainfos_detalhes": "memoria_calculo",
         "api_memoria_controle_coleta_status": "memoria_calculo",
         "campanha_page": "campanha",
@@ -719,17 +701,22 @@ def login():
         nxt = (request.form.get("next") or "").strip() or nxt0
         if not nxt or not nxt.startswith("/") or nxt.startswith("//"):
             nxt = url_for("index")
-        with _connect() as c:
-            r = c.execute(
-                "SELECT * FROM users WHERE username = ? AND active = 1", (name,)
-            ).fetchone()
+        with auth_connection() as conn:
+            cur = auth_cursor(conn)
+            cur.execute(
+                "SELECT * FROM plataforma_users WHERE username = %s AND active = 1",
+                (name,),
+            )
+            r = cur.fetchone()
         if r and check_password_hash(r["password_hash"], password):
             login_user(int(r["id"]))
             return redirect(_safe_post_login_url(nxt))
         err = "Utilizador ou palavra-passe incorretos."
     n_users = 0
-    with _connect() as c:
-        n_users = c.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute("SELECT COUNT(*) AS n FROM plataforma_users")
+        n_users = int((cur.fetchone() or {}).get("n") or 0)
     return render_template("login.html", error=err, n_users=n_users, next_url=nxt0)
 
 
@@ -758,71 +745,86 @@ def admin_usuarios():
                 if len(new_u) < 2 or len(new_p) < 4:
                     err = "Utilizador (≥2 caracteres) e palavra-passe (≥4) obrigatórios."
                 else:
-                    with _connect() as c:
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
                         try:
-                            ins = c.execute(
-                                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                            cur.execute(
+                                "INSERT INTO plataforma_users (username, password_hash, role) VALUES (%s, %s, %s)",
                                 (new_u, generate_password_hash(new_p), role),
                             )
-                            new_id = ins.lastrowid
+                            new_id = int(cur.lastrowid or 0)
                             if role == "colaborador" and new_id:
                                 for k, _, _ in PERMISSION_PANELS:
                                     if request.form.get(f"new_tab_{k}"):
-                                        c.execute(
-                                            "INSERT INTO user_permissions (user_id, tab_id) VALUES (?, ?)",
+                                        cur.execute(
+                                            "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
                                             (new_id, k),
                                         )
-                            c.commit()
+                            conn.commit()
                             ok = f"Utilizador {new_u!r} criado."
-                        except sqlite3.IntegrityError:
+                        except mysql.connector.errors.IntegrityError:
                             err = "Esse nome de utilizador já existe."
             elif act == "delete":
                 del_id = int(request.form.get("user_id", 0))
                 if del_id and del_id != int(u0["id"]):
-                    with _connect() as c:
-                        c.execute("DELETE FROM users WHERE id = ?", (del_id,))
-                        c.commit()
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        cur.execute("DELETE FROM plataforma_users WHERE id = %s", (del_id,))
+                        conn.commit()
                     ok = "Utilizador removido."
             elif act == "toggle":
                 t_id = int(request.form.get("user_id", 0))
                 if t_id and t_id != int(u0["id"]):
-                    with _connect() as c:
-                        c.execute(
-                            "UPDATE users SET active = 1 - active WHERE id = ?", (t_id,)
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        cur.execute(
+                            "UPDATE plataforma_users SET active = 1 - active WHERE id = %s",
+                            (t_id,),
                         )
-                        c.commit()
+                        conn.commit()
                     ok = "Estado actualizado."
             elif act == "set_password":
                 sp_id = int(request.form.get("user_id", 0))
                 sp = request.form.get("new_pass") or ""
                 if sp_id and len(sp) >= 4:
-                    with _connect() as c:
-                        c.execute(
-                            "UPDATE users SET password_hash = ?, perms_version = perms_version + 1 WHERE id = ?",
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        cur.execute(
+                            """
+                            UPDATE plataforma_users
+                            SET password_hash = %s, perms_version = perms_version + 1
+                            WHERE id = %s
+                            """,
                             (generate_password_hash(sp), sp_id),
                         )
-                        c.commit()
+                        conn.commit()
                     ok = "Palavra-passe actualizada."
             elif act == "save_perms":
                 puid = int(request.form.get("user_id", 0))
                 if puid and puid != int(u0["id"]):
-                    with _connect() as c:
-                        c.execute("DELETE FROM user_permissions WHERE user_id = ?", (puid,))
-                        ro = c.execute(
-                            "SELECT role FROM users WHERE id = ?", (puid,)
-                        ).fetchone()
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        cur.execute(
+                            "DELETE FROM plataforma_user_permissions WHERE user_id = %s",
+                            (puid,),
+                        )
+                        cur.execute(
+                            "SELECT role FROM plataforma_users WHERE id = %s",
+                            (puid,),
+                        )
+                        ro = cur.fetchone()
                         if ro and ro["role"] == "colaborador":
                             for k, _, _ in PERMISSION_PANELS:
                                 if request.form.get(f"tab_{k}"):
-                                    c.execute(
-                                        "INSERT INTO user_permissions (user_id, tab_id) VALUES (?, ?)",
+                                    cur.execute(
+                                        "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
                                         (puid, k),
                                     )
-                        c.execute(
-                            "UPDATE users SET perms_version = perms_version + 1 WHERE id = ?",
+                        cur.execute(
+                            "UPDATE plataforma_users SET perms_version = perms_version + 1 WHERE id = %s",
                             (puid,),
                         )
-                        c.commit()
+                        conn.commit()
                     ok = "Permissões guardadas."
             elif act == "save_maintenance":
                 from messages_viewer.page_maintenance import save_maintenance_from_form
@@ -839,9 +841,10 @@ def admin_usuarios():
             traceback.print_exc()
 
     users: list[dict] = []
-    with _connect() as c:
-        rows = c.execute("SELECT * FROM users ORDER BY username").fetchall()
-        for r in rows:
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute("SELECT * FROM plataforma_users ORDER BY username")
+        for r in cur.fetchall():
             d = dict(r)
             d["tabs"] = get_user_tabs(int(d["id"]))
             users.append(d)

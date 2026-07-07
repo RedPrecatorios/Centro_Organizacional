@@ -2,7 +2,7 @@
 """
 Manutenção por módulo/página da plataforma.
 
-- Persistência em SQLite (tabela page_maintenance), editável em Utilizadores (admin).
+- Persistência em MySQL (plataforma_page_maintenance), editável em Utilizadores (admin).
 - Override por .env: PAGE_MAINTENANCE=memoria_calculo,campanha
   e/ou PAGE_MAINTENANCE_memoria_calculo=1
   Mensagem opcional: PAGE_MAINTENANCE_MSG ou PAGE_MAINTENANCE_MSG_<tab_id>
@@ -10,10 +10,10 @@ Manutenção por módulo/página da plataforma.
 from __future__ import annotations
 
 import os
-import sqlite3
 from typing import Any
 
-from messages_viewer.plataforma_auth import TAB_PANELS, _connect, init_db
+from messages_viewer.plataforma_auth import TAB_PANELS, init_db
+from messages_viewer.plataforma_auth_store import auth_connection, auth_cursor
 
 MAINTAINABLE_TAB_IDS = {p[0] for p in TAB_PANELS}
 
@@ -27,18 +27,6 @@ _DEFAULT_MESSAGE = (
 
 def _ensure_table() -> None:
     init_db()
-    with _connect() as c:
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS page_maintenance (
-                tab_id TEXT PRIMARY KEY,
-                enabled INTEGER NOT NULL DEFAULT 0,
-                message TEXT,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """
-        )
-        c.commit()
 
 
 def _env_enabled_tabs() -> set[str]:
@@ -64,13 +52,15 @@ def _env_message_for(tab_id: str) -> str | None:
     return general or None
 
 
-def _db_row(tab_id: str) -> sqlite3.Row | None:
+def _db_row(tab_id: str) -> dict[str, Any] | None:
     _ensure_table()
-    with _connect() as c:
-        return c.execute(
-            "SELECT tab_id, enabled, message FROM page_maintenance WHERE tab_id = ?",
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT tab_id, enabled, message FROM plataforma_page_maintenance WHERE tab_id = %s",
             (tab_id,),
-        ).fetchone()
+        )
+        return cur.fetchone()
 
 
 def is_tab_in_maintenance(tab_id: str) -> bool:
@@ -100,11 +90,11 @@ def list_maintenance_states() -> list[dict[str, Any]]:
     """Estado de cada módulo do menu (para admin e templates)."""
     _ensure_table()
     env_tabs = _env_enabled_tabs()
-    rows_by_id: dict[str, sqlite3.Row] = {}
-    with _connect() as c:
-        for r in c.execute(
-            "SELECT tab_id, enabled, message FROM page_maintenance"
-        ).fetchall():
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute("SELECT tab_id, enabled, message FROM plataforma_page_maintenance")
+        for r in cur.fetchall():
             rows_by_id[r["tab_id"]] = r
 
     result: list[dict[str, Any]] = []
@@ -134,22 +124,23 @@ def list_maintenance_states() -> list[dict[str, Any]]:
 def save_maintenance_from_form(form) -> None:
     """Grava flags e mensagens enviadas pelo formulário de admin."""
     _ensure_table()
-    with _connect() as c:
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
         for tab_id, _, _ in TAB_PANELS:
             enabled = 1 if form.get(f"maint_{tab_id}") else 0
             msg = (form.get(f"maint_msg_{tab_id}") or "").strip() or None
-            c.execute(
+            cur.execute(
                 """
-                INSERT INTO page_maintenance (tab_id, enabled, message, updated_at)
-                VALUES (?, ?, ?, datetime('now'))
-                ON CONFLICT(tab_id) DO UPDATE SET
-                    enabled = excluded.enabled,
-                    message = excluded.message,
-                    updated_at = excluded.updated_at
+                INSERT INTO plataforma_page_maintenance (tab_id, enabled, message, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                    enabled = VALUES(enabled),
+                    message = VALUES(message),
+                    updated_at = NOW()
                 """,
                 (tab_id, enabled, msg),
             )
-        c.commit()
+        conn.commit()
 
 
 def handle_maintenance_response(tab_id: str) -> Any:

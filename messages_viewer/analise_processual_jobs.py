@@ -35,7 +35,11 @@ def _refactor_python() -> Path:
 
 
 def _jobs_dir() -> Path:
-    d = _refactor_root() / "output" / "analise_processual_jobs"
+    raw = (os.getenv("REFACTOR_ANALISE_JOBS_DIR") or "").strip()
+    if raw:
+        d = Path(raw).resolve()
+    else:
+        d = (_PROJECT_ROOT / "instance" / "analise_processual_jobs").resolve()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -52,6 +56,22 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (json.JSONDecodeError, OSError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _refactor_logs_dir() -> Path:
+    raw = (os.getenv("REFACTOR_ANALISE_LOGS_DIR") or "").strip()
+    if raw:
+        d = Path(raw).resolve()
+    else:
+        d = (_PROJECT_ROOT / "instance" / "refactor_logs").resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _refactor_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["REFACTOR_LOGS_PATH"] = str(_refactor_logs_dir())
+    return env
 
 
 def _run_subprocess(
@@ -83,6 +103,7 @@ def _run_subprocess(
             cwd=str(root),
             capture_output=True,
             text=True,
+            env=_refactor_subprocess_env(),
             timeout=int((os.getenv("REFACTOR_ANALISE_TIMEOUT") or "1800").strip() or "1800"),
         )
         with _lock:

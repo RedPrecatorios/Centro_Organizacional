@@ -1140,6 +1140,46 @@ body.platform-body #app-toast {
 .memoria-btn-analise-processual[hidden] {
   display: none;
 }
+.memoria-meses-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.memoria-meses-wrap label {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.memoria-meses-wrap input[type="number"] {
+  width: 5.5rem;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.memoria-btn-salvar-meses {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #0f766e;
+  background: #fff;
+  border: 1px solid #0f766e;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.memoria-btn-salvar-meses:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.08);
+}
+.memoria-btn-salvar-meses:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
+}
+.memoria-btn-salvar-meses:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .memoria-toolbar {
   display: flex;
   flex-wrap: wrap;

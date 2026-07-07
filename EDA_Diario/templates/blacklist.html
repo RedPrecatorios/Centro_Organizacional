@@ -37,8 +37,13 @@
         <input type="text" name="incidente" id="incidente_bl" placeholder="Cumprimento / incidente" class="eda-input" style="width:100%;" />
       </div>
       <div class="eda-field eda-field--grow">
-        <label class="eda-label" for="motivo_bl">Motivo <span style="color:#94a3b8;font-weight:400;">(opcional)</span></label>
-        <input type="text" name="motivo" id="motivo_bl" placeholder="Ex.: Solicitou remoção" class="eda-input" style="width:100%;" />
+        <label class="eda-label" for="motivo_bl">Motivo</label>
+        <select name="motivo" id="motivo_bl" required class="eda-select" style="width:100%;">
+          <option value="" disabled selected>Selecione o motivo</option>
+          {% for motivo in motivos_padrao %}
+            <option value="{{ motivo }}">{{ motivo }}</option>
+          {% endfor %}
+        </select>
       </div>
       <button type="submit" class="eda-btn eda-btn-primary" style="align-self:flex-end;">+ Adicionar</button>
     </form>
@@ -64,7 +69,7 @@
             <span class="eda-mono" style="font-size:11px;">PROCESSO_INCIDENTE</span> (maiúsculas recomendadas).</li>
           <li><strong>valor</strong> — obrigatório. Para <span class="eda-mono" style="font-size:11px;">PROCESSO_INCIDENTE</span> use
             <span class="eda-mono" style="font-size:11px;">processo|incidente</span> (incidente pode ficar vazio após o <span class="eda-mono" style="font-size:11px;">|</span>).</li>
-          <li><strong>motivo</strong> — opcional: texto livre.</li>
+          <li><strong>motivo</strong> — obrigatório no cadastro manual; no CSV, use um dos motivos padronizados.</li>
           <li><strong>ativo</strong> — opcional: <span class="eda-mono" style="font-size:11px;">1</span> /
             <span class="eda-mono" style="font-size:11px;">true</span> / vazio importa;
             <span class="eda-mono" style="font-size:11px;">0</span> /

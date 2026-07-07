@@ -31,6 +31,14 @@
       Memória de Cálculo{% if page_in_maintenance('memoria_calculo') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
+    {% if user_can('pre_analise_processual') %}
+    <a class="dash-nav-item{% if request.endpoint == 'pre_analise_processual_page' %} active{% endif %}{% if page_in_maintenance('pre_analise_processual') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('pre_analise_processual_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </span>
+      PRÉ Análise Processual{% if page_in_maintenance('pre_analise_processual') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
     {% if user_can('tabela_juros') %}
     <a class="dash-nav-item{% if request.endpoint == 'tabela_juros_page' %} active{% endif %}{% if page_in_maintenance('tabela_juros') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('tabela_juros_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">

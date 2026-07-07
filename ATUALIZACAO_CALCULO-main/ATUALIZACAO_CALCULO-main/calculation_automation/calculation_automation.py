@@ -180,6 +180,7 @@ class CalculationAutomation:
 
         self.output_path = None
         self._last_calculo_value = None
+        self._save_completed = False
 
     def _get_sheet(self, wb: openpyxl.workbook.workbook.Workbook):
         if self.sheet_name in wb.sheetnames:
@@ -416,9 +417,11 @@ class CalculationAutomation:
             if os.path.exists(output_folder):
                 for filename in os.listdir(output_folder):
                     file_path = os.path.join(output_folder, filename)
-                    if os.path.isfile(file_path) and filename.lower().endswith(
-                        (".xlsx", ".xlsm")
-                    ):
+                    if not os.path.isfile(file_path):
+                        continue
+                    if filename.lower().endswith((".xlsx", ".xlsm")):
+                        if not os.path.isfile(file_path):
+                            continue
                         zip_name = get_current_zip()
                         with zipfile.ZipFile(
                             zip_name, "a", zipfile.ZIP_DEFLATED
@@ -436,14 +439,14 @@ class CalculationAutomation:
                                     f"\n{Fore.YELLOW}[WARNING] Skipped duplicate in ZIP: {filename}{Style.RESET_ALL}\n"
                                 )
                         dest_path = os.path.join(dated_plans_folder, filename)
-                        shutil.move(file_path, dest_path)
-                        print(
-                            f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Moved: {filename} → {dated_plans_folder}{Style.RESET_ALL}\n"
-                        )
-                    else:
                         if os.path.isfile(file_path):
-                            os.remove(file_path)
-                            print(f"[INFO] Removed non-Excel file: {filename}")
+                            shutil.move(file_path, dest_path)
+                            print(
+                                f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Moved: {filename} → {dated_plans_folder}{Style.RESET_ALL}\n"
+                            )
+                    else:
+                        os.remove(file_path)
+                        print(f"[INFO] Removed non-Excel file: {filename}")
         except Exception as e:
             print(f"\n{Fore.RED}[x] ERROR: clean()\n\t{e}{Style.RESET_ALL}")
 
@@ -514,6 +517,7 @@ class CalculationAutomation:
                     traceback.print_exc()
 
                 self._last_calculo_value = total_liquido_arredondado(merged)
+                self._save_completed = True
             finally:
                 if recalc_tmpdir and os.path.isdir(recalc_tmpdir):
                     try:
@@ -533,6 +537,7 @@ class CalculationAutomation:
         except Exception:
             traceback.print_exc()
             self._last_calculo_value = None
+            self._save_completed = False
             try:
                 if self._wb is not None:
                     self._wb.close()
@@ -630,4 +635,6 @@ class CalculationAutomation:
             f"\n\t[T] edit_cells (preenchimento openpyxl): {time.time() - t_edit_start:.2f}s"
         )
         self.save_workbook(self.main_dict["id"])
+        if self._save_completed:
+            return True
         return bool(self.output_path and os.path.isfile(self.output_path))

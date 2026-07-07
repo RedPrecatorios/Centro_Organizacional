@@ -125,6 +125,13 @@
               {% if user_can('analise_processual') %}
               <button type="button" class="memoria-btn-analise-processual" id="memoria-btn-analise-processual" hidden {% if not analise_processual_configured %}disabled title="REFACTOR_TJSP não encontrado (REFACTOR_TJSP_PATH / venv)"{% endif %}>Análise Processual</button>
               {% endif %}
+              {% if user_can('salvar_numero_meses') %}
+              <div class="memoria-meses-wrap" id="memoria-meses-wrap">
+                <label for="memoria-numero-meses">Nº meses</label>
+                <input type="number" id="memoria-numero-meses" min="2" step="1" inputmode="numeric" placeholder="ex.: 105" />
+                <button type="button" class="memoria-btn-salvar-meses" id="memoria-btn-salvar-meses" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env"{% endif %}>Salvar Número de Meses</button>
+              </div>
+              {% endif %}
               <button type="button" class="memoria-btn-atualizar-calculo" id="memoria-btn-atualizar-calculo" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env (ex.: http://127.0.0.1:5099) e o serviço interno"{% endif %}>Atualizar Cálculo</button>
             </div>
 
@@ -299,6 +306,7 @@
     data-calculo-atualizacao-configured='{{ calculo_atualizacao_configured | tojson }}'
     data-analise-processual-configured='{{ analise_processual_configured | tojson }}'
     data-analise-processual-permitted='{{ user_can("analise_processual") | tojson }}'
+    data-salvar-numero-meses-permitted='{{ user_can("salvar_numero_meses") | tojson }}'
     data-bloquear-calculo-mes-atual='{{ bloquear_calculo_mes_atual | tojson }}'
     data-flask-mysql-configured='{{ flask_mysql_configured | tojson }}'
     hidden
@@ -748,6 +756,7 @@
     var calculoAtualizacaoConfigured = cfgEl ? JSON.parse(cfgEl.dataset.calculoAtualizacaoConfigured || 'false') : false;
     var analiseProcessualConfigured = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualConfigured || 'false') : false;
     var analiseProcessualPermitted = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualPermitted || 'false') : false;
+    var salvarNumeroMesesPermitted = cfgEl ? JSON.parse(cfgEl.dataset.salvarNumeroMesesPermitted || 'false') : false;
     var bloquearCalculoMesAtual = cfgEl ? JSON.parse(cfgEl.dataset.bloquearCalculoMesAtual || 'false') : false;
     var flaskMysqlConfigured = cfgEl ? JSON.parse(cfgEl.dataset.flaskMysqlConfigured || 'false') : false;
     var lastResults = [];
@@ -798,6 +807,8 @@
     var precainfosX = document.getElementById('memoria-precainfos-x');
     var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
     var btnAnaliseProcessual = document.getElementById('memoria-btn-analise-processual');
+    var btnSalvarMeses = document.getElementById('memoria-btn-salvar-meses');
+    var inputNumeroMeses = document.getElementById('memoria-numero-meses');
     var analiseModal = document.getElementById('memoria-analise-modal');
     var analiseProgressBar = document.getElementById('memoria-analise-progress-bar');
     var analiseProgressPct = document.getElementById('memoria-analise-progress-pct');
@@ -1029,8 +1040,50 @@
         });
     }
 
+    function isPrecainfosMesesEditavel(row) {
+      if (!row) return false;
+      var raw = row.precainfos_numero_de_meses;
+      if (raw == null || raw === '') return true;
+      var n = parseInt(String(raw).trim(), 10);
+      if (isNaN(n)) return true;
+      return n === 0 || n === 1;
+    }
+
+    function syncSalvarMesesButtonState(row) {
+      if (!salvarNumeroMesesPermitted || !btnSalvarMeses) return;
+      if (!calculoAtualizacaoConfigured) {
+        btnSalvarMeses.disabled = true;
+        btnSalvarMeses.title = 'Defina CALCULO_ATUALIZACAO_API_URL no .env e o serviço interno.';
+        return;
+      }
+      if (bloquearBotoesCasoAusente) {
+        btnSalvarMeses.disabled = true;
+        btnSalvarMeses.title = TITULO_CASO_AUSENTE;
+        return;
+      }
+      if (isCasoSemSaldo(row || currentRow)) {
+        btnSalvarMeses.disabled = true;
+        btnSalvarMeses.title = 'Caso inapto (Sem Saldo).';
+        return;
+      }
+      if (!temRegistoCarregado || idPrecainfosnewSelecionado == null) {
+        btnSalvarMeses.disabled = true;
+        btnSalvarMeses.title = 'Pesquise e carregue um caso antes de salvar o número de meses.';
+        return;
+      }
+      if (!isPrecainfosMesesEditavel(row || currentRow)) {
+        btnSalvarMeses.disabled = true;
+        var atual = (row || currentRow).precainfos_numero_de_meses;
+        btnSalvarMeses.title = 'Numero_de_Meses já definido (' + String(atual == null ? 'vazio' : atual) + '). Só é editável quando vazio, 0 ou 1.';
+        return;
+      }
+      btnSalvarMeses.disabled = false;
+      btnSalvarMeses.title = 'Grava o número de meses em precainfosnew e executa Atualizar Cálculo.';
+    }
+
     function syncAtualizarCalculoButtonState(row) {
       syncMaisInfoButton();
+      syncSalvarMesesButtonState(row);
       if (!btnAtualizarCalculo) return;
       // respeita bloqueio por config da API (server-side já desabilita via template)
       if (!calculoAtualizacaoConfigured) return;
@@ -1217,23 +1270,63 @@
       var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
       var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
         ? String(row.numero_do_incidente) : '—';
-      var origem = row && row.source === 'precainfosnew'
+      var isBlacklist = row && row.source === 'blacklist';
+      var origem = isBlacklist
+        ? 'blacklist'
+        : row && row.source === 'precainfosnew'
         ? '(Calculo_Atualizado = Sem Saldo)'
         : 'memoria_calculo (status = Sem Saldo)';
+      var motivoBlacklist = row && row.blacklist_motivo ? '\nMotivo blacklist: ' + String(row.blacklist_motivo) : '';
       var txt =
-        'Este caso está inapto («Sem Saldo»).\n\n' +
+        (isBlacklist
+          ? 'Este caso consta na blacklist e está inapto.\nO cálculo não pode ser mostrado.\n\n'
+          : 'Este caso está inapto («Sem Saldo»).\n\n') +
         'Requerente: ' + req + '\n' +
         'Processo: ' + proc + '\n' +
-        'Incidente: ' + inc + '\n\n' +
+        'Incidente: ' + inc + motivoBlacklist + '\n\n' +
         'Os valores da memória de cálculo não serão exibidos. ' +
         'Os botões Atualizar Cálculo e Análise Processual estão desativados.';
       showModal(txt, false);
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
-      setMsg('Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
+      setMsg(isBlacklist ? 'Caso inapto por blacklist. Cálculo não exibido.' : 'Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
+    }
+
+    function requestBlacklistOverride(row) {
+      var req = row && row.requerente ? String(row.requerente) : '—';
+      var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
+      var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
+        ? String(row.numero_do_incidente) : '—';
+      var ok = window.confirm(
+        'ATENÇÃO: este caso consta na blacklist.\n\n' +
+        'Requerente: ' + req + '\n' +
+        'Processo: ' + proc + '\n' +
+        'Incidente: ' + inc + '\n\n' +
+        'Os valores só devem ser exibidos se você tem autorização e ciência do risco.\n' +
+        'Deseja prosseguir mesmo assim?'
+      );
+      if (!ok) return false;
+      var motivo = window.prompt(
+        'Informe o motivo/autorização para auditoria antes de liberar os valores:',
+        ''
+      );
+      motivo = motivo == null ? '' : String(motivo).trim();
+      if (motivo.length < 5) {
+        setMsg('Liberação cancelada: informe um motivo de auditoria com pelo menos 5 caracteres.', true);
+        return false;
+      }
+      doSearch({
+        skipAutoAnalise: true,
+        blacklistOverride: true,
+        blacklistReason: motivo
+      });
+      return true;
     }
 
     function tryApplyRow(r) {
       if (!r) return;
+      if (r.source === 'blacklist' && r.blacklist_can_override) {
+        if (requestBlacklistOverride(r)) return;
+      }
       if (isCasoSemSaldo(r)) {
         clearCasoAusenteTodasBases();
         resetMemoriaVazia();
@@ -1337,6 +1430,10 @@
           return;
         }
         u.set('nome', q);
+      }
+      if (opts.blacklistOverride) {
+        u.set('blacklist_override', '1');
+        u.set('blacklist_override_reason', String(opts.blacklistReason || '').trim());
       }
       clearMsg();
       clearCasoAusenteTodasBases();
@@ -1688,6 +1785,60 @@
         });
     }
 
+    function executarSalvarNumeroMeses(mesesVal) {
+      var prev = btnSalvarMeses ? btnSalvarMeses.textContent : '';
+      if (btnSalvarMeses) btnSalvarMeses.disabled = true;
+      if (btnAtualizarCalculo) btnAtualizarCalculo.disabled = true;
+      setMsg('A gravar número de meses e atualizar cálculo (pode levar vários minutos)…', false);
+      var ctl;
+      var tmr;
+      try {
+        ctl = new AbortController();
+        tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 600000);
+      } catch (_) {}
+      return fetch('/api/memoria-calculo/salvar-numero-meses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          id_precainfosnew: idPrecainfosnewSelecionado,
+          numero_de_meses: mesesVal
+        }),
+        signal: ctl ? ctl.signal : undefined
+      })
+        .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
+        .then(function (o) {
+          if (o.d && o.d.ok) {
+            var okMsg = (o.d.message) ? o.d.message : 'Número de meses gravado e cálculo actualizado.';
+            if (o.d.google_drive && o.d.google_drive.uploaded && o.d.google_drive.link) {
+              okMsg += ' Drive: ' + String(o.d.google_drive.link);
+            }
+            setMsg(okMsg, false);
+            if (inputNumeroMeses) inputNumeroMeses.value = '';
+            setTimeout(function () { doSearch(); }, 500);
+          } else {
+            var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao salvar número de meses.';
+            setMsg(err, true);
+            if (o.status === 504 && o.d && o.d.fila) showFilaModal(o.d.fila, null);
+          }
+        })
+        .catch(function (e) {
+          if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
+            setMsg('Tempo excedido (10 min). Tente de novo.', true);
+            return;
+          }
+          setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
+        })
+        .finally(function () {
+          if (tmr) clearTimeout(tmr);
+          if (btnSalvarMeses) {
+            btnSalvarMeses.disabled = false;
+            btnSalvarMeses.textContent = prev;
+          }
+          syncAtualizarCalculoButtonState(currentRow);
+        });
+    }
+
     if (filaConfirm) {
       filaConfirm.addEventListener('click', function () {
         var cb = filaOnConfirm;
@@ -1697,6 +1848,48 @@
     }
     if (filaCancel) filaCancel.addEventListener('click', hideFilaModal);
     if (filaX) filaX.addEventListener('click', hideFilaModal);
+
+    if (btnSalvarMeses) {
+      btnSalvarMeses.addEventListener('click', function () {
+        if (!memoriaConfigured) {
+          setMsg('MySQL (memoria) não configurado.', true);
+          return;
+        }
+        if (!calculoAtualizacaoConfigured) {
+          setMsg('Defina CALCULO_ATUALIZACAO_API_URL no .env e o serviço interno (systemd).', true);
+          return;
+        }
+        if (bloquearBotoesCasoAusente) {
+          setMsg(TITULO_CASO_AUSENTE, true);
+          return;
+        }
+        if (isCasoSemSaldo(currentRow)) {
+          setMsg('Caso inapto (Sem Saldo).', true);
+          return;
+        }
+        if (!temRegistoCarregado || idPrecainfosnewSelecionado == null) {
+          setMsg('Pesquise e carregue um caso antes de salvar o número de meses.', true);
+          return;
+        }
+        if (!isPrecainfosMesesEditavel(currentRow)) {
+          setMsg('Numero_de_Meses só pode ser alterado quando o valor actual é vazio, 0 ou 1.', true);
+          return;
+        }
+        var mesesVal = inputNumeroMeses ? parseInt(String(inputNumeroMeses.value || '').trim(), 10) : NaN;
+        if (isNaN(mesesVal) || mesesVal < 2) {
+          setMsg('Informe um número inteiro de meses maior ou igual a 2.', true);
+          return;
+        }
+        fetchFilaCalculo().then(function (fo) {
+          var fila = fo.d && fo.d.ok && fo.d.fila ? fo.d.fila : null;
+          if (fila && (fila.em_execucao || (Number(fila.casos_na_fila) || 0) > 0)) {
+            showFilaModal(fila, function () { executarSalvarNumeroMeses(mesesVal); });
+            return;
+          }
+          executarSalvarNumeroMeses(mesesVal);
+        });
+      });
+    }
 
     if (btnAtualizarCalculo) {
       btnAtualizarCalculo.addEventListener('click', function () {
@@ -1786,6 +1979,21 @@
       analiseResult.innerHTML = '<h3>' + titulo + '</h3>' + motivo + resumo + detHtml;
     }
 
+    function markCurrentRowInaptoFromAnalise(outcome) {
+      if (!outcome || String(outcome.conclusao || '').toLowerCase() !== 'inapto') return;
+      if (!currentRow) currentRow = {};
+      currentRow.status = MEMORIA_STATUS_SEM_SALDO;
+      currentRow.calculo_atualizado = MEMORIA_STATUS_SEM_SALDO;
+      if (outcome.detalhes) {
+        currentRow.requerente = currentRow.requerente || outcome.detalhes.requerente;
+        currentRow.numero_de_processo = currentRow.numero_de_processo || outcome.detalhes.numero_de_processo;
+        currentRow.numero_do_incidente = currentRow.numero_do_incidente || outcome.detalhes.numero_do_incidente;
+      }
+      syncAtualizarCalculoButtonState(currentRow);
+      syncAnaliseProcessualButton();
+      setMsg('Caso inapto (Sem Saldo). Atualização de cálculo e análise processual bloqueadas.', false);
+    }
+
     function pollAnaliseJob(jobId) {
       fetch('/api/memoria-calculo/analise-processual/' + encodeURIComponent(jobId), {
         credentials: 'same-origin',
@@ -1809,10 +2017,13 @@
               renderAnaliseOutcome(null, d.error);
             } else {
               renderAnaliseOutcome(outcome, d.error);
+              markCurrentRowInaptoFromAnalise(outcome);
             }
             syncAnaliseProcessualButton();
-            if (btnAnaliseProcessual) btnAnaliseProcessual.disabled = false;
             analiseRefreshOnClose = true;
+            if (outcome && String(outcome.conclusao || '').toLowerCase() === 'aviso') {
+              setMsg('Análise concluída com avisos — nada foi gravado na base.', true);
+            }
             if (analiseOnComplete) {
               var cb = analiseOnComplete;
               analiseOnComplete = null;

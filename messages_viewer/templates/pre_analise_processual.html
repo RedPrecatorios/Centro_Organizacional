@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PRÉ Análise Processual — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">PRÉ Análise Processual</h1>
+        <p class="dash-sub">Informe os dados iniciais do caso para envio posterior ao destino que será definido.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <form class="prop-card prop-form" id="pre-analise-form">
+        <p class="prop-hint">Dados do caso</p>
+
+        <div class="prop-form-grid">
+          <div class="prop-field">
+            <label for="pre-processo">Número de Processo <span aria-hidden="true">*</span></label>
+            <input
+              type="text"
+              id="pre-processo"
+              class="auth-input"
+              name="numero_de_processo"
+              placeholder="Digite o número do processo"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="prop-field">
+            <label for="pre-incidente">Número do Incidente <span aria-hidden="true">*</span></label>
+            <input
+              type="text"
+              id="pre-incidente"
+              class="auth-input"
+              name="numero_do_incidente"
+              placeholder="Digite o número do incidente"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="prop-field">
+            <label for="pre-nome">Nome <span class="prop-edit-note">(opcional)</span></label>
+            <input
+              type="text"
+              id="pre-nome"
+              class="auth-input"
+              name="nome"
+              placeholder="Digite o nome, se houver"
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="prop-field">
+            <label for="pre-depre">DEPRE <span class="prop-edit-note">(opcional)</span></label>
+            <input
+              type="text"
+              id="pre-depre"
+              class="auth-input"
+              name="depre"
+              placeholder="Digite o DEPRE, se houver"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+
+        <div class="prop-actions">
+          <button type="submit" class="camp-btn camp-btn-primary camp-btn-lg" id="pre-submit">
+            Enviar dados
+          </button>
+          <p class="prop-pdf-hint">Destino ainda não configurado. Por enquanto, o formulário apenas captura e valida os dados.</p>
+        </div>
+
+        <p class="prop-msg" id="pre-msg" role="status" aria-live="polite"></p>
+      </form>
+
+      <section class="prop-card pre-list-card" aria-labelledby="pre-list-title">
+        <div class="pre-list-header">
+          <div>
+            <p class="prop-hint" id="pre-list-title">Processos cadastrados</p>
+            <p class="pre-list-sub">Lista temporária dos dados inputados neste painel.</p>
+          </div>
+          <span class="pre-list-count" id="pre-list-count">0 processos</span>
+        </div>
+
+        <div class="pre-table-wrap">
+          <table class="dash-table pre-table">
+            <thead>
+              <tr>
+                <th scope="col" class="pre-col-toggle">Detalhes</th>
+                <th scope="col">Número de Processo</th>
+                <th scope="col">Número do Incidente</th>
+                <th scope="col">Nome</th>
+                <th scope="col">DEPRE</th>
+                <th scope="col">Criado em</th>
+              </tr>
+            </thead>
+            <tbody id="pre-table-body">
+              <tr>
+                <td colspan="6" class="dash-empty">Nenhum processo cadastrado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pre-pagination" id="pre-pagination" hidden>
+          <button type="button" class="camp-btn camp-btn-ghost" id="pre-prev-page">Anterior</button>
+          <span class="pre-page-info" id="pre-page-info">Página 1 de 1</span>
+          <button type="button" class="camp-btn camp-btn-ghost" id="pre-next-page">Próxima</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <style>
+    .pre-list-card {
+      margin-top: 16px;
+    }
+    .pre-list-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+    .pre-list-sub {
+      margin: -6px 0 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .pre-list-count {
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .pre-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+    }
+    .pre-table {
+      min-width: 840px;
+      margin: 0;
+    }
+    .pre-col-toggle {
+      width: 72px;
+      text-align: center;
+    }
+    .pre-toggle-btn {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--accent);
+      cursor: pointer;
+      transition: transform .15s ease, background .15s ease;
+    }
+    .pre-toggle-btn:hover {
+      background: var(--accent-ghost);
+    }
+    .pre-toggle-btn[aria-expanded="true"] {
+      transform: rotate(90deg);
+      background: var(--accent-ghost);
+    }
+    .pre-detail-row td {
+      background: var(--surface-muted);
+      border-top: 1px solid var(--border);
+    }
+    .pre-detail-box {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px 16px;
+      padding: 10px 12px;
+      font-size: 0.88rem;
+    }
+    .pre-detail-box strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pre-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .pre-page-info {
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+    @media (max-width: 760px) {
+      .pre-list-header,
+      .pre-pagination {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
+  </style>
+
+  <script>
+  (function () {
+    var STORAGE_KEY = 'preAnaliseProcessualItems';
+    var PAGE_SIZE = 15;
+
+    var form = document.getElementById('pre-analise-form');
+    var msg = document.getElementById('pre-msg');
+    var tbody = document.getElementById('pre-table-body');
+    var countEl = document.getElementById('pre-list-count');
+    var pagination = document.getElementById('pre-pagination');
+    var pageInfo = document.getElementById('pre-page-info');
+    var prevBtn = document.getElementById('pre-prev-page');
+    var nextBtn = document.getElementById('pre-next-page');
+    var currentPage = 1;
+    var expandedId = null;
+    var items = loadItems();
+
+    function setMsg(text, isError) {
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.className = 'prop-msg' + (isError ? ' prop-msg--err' : '');
+    }
+
+    function esc(value) {
+      return (value == null ? '' : String(value))
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function display(value) {
+      var text = value == null ? '' : String(value).trim();
+      return text ? esc(text) : '<span class="dash-muted">-</span>';
+    }
+
+    function loadItems() {
+      try {
+        var raw = window.localStorage.getItem(STORAGE_KEY);
+        var parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveItems() {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      } catch (e) {
+        console.warn('Não foi possível salvar a lista temporária.', e);
+      }
+    }
+
+    function formatDate(value) {
+      if (!value) return '-';
+      try {
+        return new Intl.DateTimeFormat('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(new Date(value));
+      } catch (e) {
+        return value;
+      }
+    }
+
+    function totalPages() {
+      return Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    }
+
+    function normalizePage() {
+      currentPage = Math.min(Math.max(1, currentPage), totalPages());
+    }
+
+    function detailRow(item) {
+      return '' +
+        '<tr class="pre-detail-row">' +
+          '<td colspan="6">' +
+            '<div class="pre-detail-box">' +
+              '<div><strong>Número de Processo</strong>' + display(item.numero_de_processo) + '</div>' +
+              '<div><strong>Número do Incidente</strong>' + display(item.numero_do_incidente) + '</div>' +
+              '<div><strong>Nome</strong>' + display(item.nome) + '</div>' +
+              '<div><strong>DEPRE</strong>' + display(item.depre) + '</div>' +
+              '<div><strong>Criado em</strong>' + esc(formatDate(item.criado_em)) + '</div>' +
+              '<div><strong>Status</strong>Aguardando destino de envio</div>' +
+            '</div>' +
+          '</td>' +
+        '</tr>';
+    }
+
+    function renderTable() {
+      if (!tbody) return;
+      normalizePage();
+      if (countEl) {
+        countEl.textContent = items.length + ' processo' + (items.length === 1 ? '' : 's');
+      }
+
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="dash-empty">Nenhum processo cadastrado.</td></tr>';
+      } else {
+        var start = (currentPage - 1) * PAGE_SIZE;
+        var pageItems = items.slice(start, start + PAGE_SIZE);
+        tbody.innerHTML = pageItems.map(function (item) {
+          var isExpanded = item.id === expandedId;
+          var row = '' +
+            '<tr>' +
+              '<td class="pre-col-toggle">' +
+                '<button type="button" class="pre-toggle-btn" data-id="' + esc(item.id) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" title="Ampliar informações">›</button>' +
+              '</td>' +
+              '<td>' + display(item.numero_de_processo) + '</td>' +
+              '<td>' + display(item.numero_do_incidente) + '</td>' +
+              '<td>' + display(item.nome) + '</td>' +
+              '<td>' + display(item.depre) + '</td>' +
+              '<td>' + esc(formatDate(item.criado_em)) + '</td>' +
+            '</tr>';
+          return row + (isExpanded ? detailRow(item) : '');
+        }).join('');
+      }
+
+      var pages = totalPages();
+      if (pagination) pagination.hidden = items.length <= PAGE_SIZE;
+      if (pageInfo) pageInfo.textContent = 'Página ' + currentPage + ' de ' + pages;
+      if (prevBtn) prevBtn.disabled = currentPage <= 1;
+      if (nextBtn) nextBtn.disabled = currentPage >= pages;
+    }
+
+    if (!form) return;
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
+
+      var data = Object.fromEntries(new FormData(form).entries());
+      var item = {
+        id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
+        numero_de_processo: String(data.numero_de_processo || '').trim(),
+        numero_do_incidente: String(data.numero_do_incidente || '').trim(),
+        nome: String(data.nome || '').trim(),
+        depre: String(data.depre || '').trim(),
+        criado_em: new Date().toISOString()
+      };
+
+      items.unshift(item);
+      expandedId = item.id;
+      currentPage = 1;
+      saveItems();
+      renderTable();
+      form.reset();
+      setMsg('Dados adicionados à lista temporária. Defina o destino para ativar o envio definitivo.', false);
+    });
+
+    if (tbody) {
+      tbody.addEventListener('click', function (event) {
+        var btn = event.target.closest && event.target.closest('.pre-toggle-btn');
+        if (!btn) return;
+        var id = btn.getAttribute('data-id');
+        expandedId = expandedId === id ? null : id;
+        renderTable();
+      });
+    }
+
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        currentPage -= 1;
+        expandedId = null;
+        renderTable();
+      });
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        currentPage += 1;
+        expandedId = null;
+        renderTable();
+      });
+    }
+
+    renderTable();
+  })();
+  </script>
+</body>
+</html>

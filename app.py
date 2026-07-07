@@ -210,6 +210,587 @@ def _memoria_calculo_has_numero_de_meses_column(cur) -> bool:
     return bool(cur.fetchone())
 
 
+def _precainfos_numero_de_meses_column(fields: set[str]) -> str | None:
+    return _pick_field(fields, "Numero_de_Meses", "numero_de_meses")
+
+
+def _precainfos_numero_de_meses_termo_column(fields: set[str]) -> str | None:
+    return _pick_field(
+        fields,
+        "Numero_de_Meses_TERMO",
+        "numero_de_meses_termo",
+    )
+
+
+def _parse_precainfos_numero_de_meses(raw: object) -> int | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text or text.lower() in ("null", "none", "nan"):
+        return None
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _precainfos_numero_de_meses_editavel(raw: object) -> bool:
+    """Só permite gravar quando precainfosnew.Numero_de_Meses é NULL, 0 ou 1."""
+    parsed = _parse_precainfos_numero_de_meses(raw)
+    return parsed is None or parsed in (0, 1)
+
+
+def _enrich_results_precainfos_numero_de_meses(results: list[dict]) -> None:
+    """Anexa ``precainfos_numero_de_meses`` (flaskdb) a cada resultado com id_precainfosnew."""
+    if not results:
+        return
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return
+    ids: list[int] = []
+    for row in results:
+        pid = row.get("id_precainfosnew")
+        if pid is None:
+            continue
+        try:
+            ids.append(int(pid))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        fields = _precainfosnew_columns(cur)
+        f_meses = _precainfos_numero_de_meses_column(fields)
+        if not f_meses:
+            return
+        placeholders = ",".join(["%s"] * len(ids))
+        cur.execute(
+            f"""
+            SELECT id, `{f_meses}` AS precainfos_numero_de_meses
+            FROM precainfosnew
+            WHERE id IN ({placeholders})
+            """,
+            tuple(ids),
+        )
+        by_id = {
+            int(r["id"]): r.get("precainfos_numero_de_meses")
+            for r in (cur.fetchall() or [])
+            if r.get("id") is not None
+        }
+        for row in results:
+            pid = row.get("id_precainfosnew")
+            try:
+                pid_int = int(pid) if pid is not None else None
+            except (TypeError, ValueError):
+                pid_int = None
+            if pid_int is not None and pid_int in by_id:
+                row["precainfos_numero_de_meses"] = by_id[pid_int]
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] enrich precainfos_numero_de_meses: {e}")
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _update_precainfos_numero_de_meses(prec_id: int, meses: int) -> tuple[bool, str | None]:
+    """
+    Grava ``Numero_de_Meses`` e ``Numero_de_Meses_TERMO`` em precainfosnew (flaskdb).
+    Retorna (ok, mensagem_erro).
+    """
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return False, "MySQL do flaskdb não configurado (FLASK_MYSQL_*)."
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'precainfosnew'")
+        if not cur.fetchone():
+            return False, "Tabela precainfosnew não existe."
+        fields = _precainfosnew_columns(cur)
+        f_meses = _precainfos_numero_de_meses_column(fields)
+        if not f_meses:
+            return False, "Coluna Numero_de_Meses não encontrada em precainfosnew."
+        f_meses_termo = _precainfos_numero_de_meses_termo_column(fields)
+        cur.execute(
+            f"SELECT `{f_meses}` AS meses FROM precainfosnew WHERE id = %s LIMIT 1",
+            (prec_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False, f"Não existe registo com id {prec_id} em precainfosnew."
+        atual = row.get("meses")
+        if not _precainfos_numero_de_meses_editavel(atual):
+            atual_txt = "vazio" if atual is None or str(atual).strip() == "" else str(atual)
+            return (
+                False,
+                (
+                    "Numero_de_Meses só pode ser alterado quando o valor actual é "
+                    f"vazio, 0 ou 1 (actual: {atual_txt})."
+                ),
+            )
+        if f_meses_termo:
+            cur.execute(
+                f"UPDATE precainfosnew SET `{f_meses}` = %s, `{f_meses_termo}` = %s WHERE id = %s",
+                (meses, meses, prec_id),
+            )
+        else:
+            cur.execute(
+                f"UPDATE precainfosnew SET `{f_meses}` = %s WHERE id = %s",
+                (meses, prec_id),
+            )
+        conn.commit()
+        return True, None
+    except mysql.connector.Error as e:
+        return False, f"Erro ao gravar Numero_de_Meses: {e}"
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _eda_mysql_config() -> dict | None:
+    name = (os.getenv("EDA_MYSQL_DATABASE") or "plataforma_central").strip()
+    if not name:
+        return None
+    raw_to = (os.getenv("EDA_MYSQL_CONNECT_TIMEOUT") or "10").strip()
+    try:
+        connect_timeout = int(raw_to)
+    except ValueError:
+        connect_timeout = 10
+    if connect_timeout < 1:
+        connect_timeout = 10
+    if connect_timeout > 30:
+        connect_timeout = 30
+    return {
+        "host": (os.getenv("EDA_MYSQL_HOST") or "127.0.0.1").strip(),
+        "port": int(os.getenv("EDA_MYSQL_PORT", "3306")),
+        "database": name,
+        "user": (os.getenv("EDA_MYSQL_USER") or "root").strip(),
+        "password": os.getenv("EDA_MYSQL_PASSWORD", "") or "",
+        "connection_timeout": connect_timeout,
+    }
+
+
+def _normalizar_blacklist_processo_incidente(processo: object, incidente: object) -> str:
+    proc = " ".join(str(processo or "").strip().upper().split())
+    if not proc or proc.lower() == "nan":
+        return ""
+    inc = " ".join(str(incidente or "").strip().upper().split())
+    if inc.lower() == "nan":
+        inc = ""
+    return f"{proc}|{inc}"
+
+
+def _normalizar_blacklist_nome(nome: object) -> str:
+    value = " ".join(str(nome or "").strip().upper().split())
+    if not value or value.lower() == "nan":
+        return ""
+    return value
+
+
+_BLACKLIST_MEMORIA_STATUS_BLOQUEANTES: frozenset[str] = frozenset(
+    {
+        "SOLICITOU REMOCAO",
+        "FEZ ACORDO",
+        "ACORDO",
+        "PF",
+        "BLACKLIST",
+    }
+)
+
+
+def _normalizar_blacklist_status(value: object) -> str:
+    text = " ".join(str(value or "").strip().upper().split())
+    if not text or text.lower() == "nan":
+        return ""
+    return (
+        text.replace("Á", "A")
+        .replace("À", "A")
+        .replace("Â", "A")
+        .replace("Ã", "A")
+        .replace("É", "E")
+        .replace("Ê", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ô", "O")
+        .replace("Õ", "O")
+        .replace("Ú", "U")
+        .replace("Ç", "C")
+    )
+
+
+def _blacklist_status_bloqueia_memoria(row: dict) -> bool:
+    status = _normalizar_blacklist_status(row.get("motivo"))
+    if not status:
+        return False
+    return status in _BLACKLIST_MEMORIA_STATUS_BLOQUEANTES
+
+
+class _BlacklistUnavailable(RuntimeError):
+    pass
+
+
+class _BlacklistAuditError(RuntimeError):
+    pass
+
+
+def _load_memoria_blacklist() -> dict[str, dict[str, dict]]:
+    cfg = _eda_mysql_config()
+    if not cfg:
+        raise _BlacklistUnavailable("Configuração da blacklist indisponível.")
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT id, tipo, valor, motivo
+            FROM blacklist
+            WHERE ativo = 1
+              AND tipo IN ('PROCESSO_INCIDENTE', 'NOME')
+            """,
+        )
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] erro ao consultar blacklist: {e}")
+        raise _BlacklistUnavailable(str(e)) from e
+
+    out: dict[str, dict[str, dict]] = {"PROCESSO_INCIDENTE": {}, "NOME": {}}
+    for row in rows:
+        if not _blacklist_status_bloqueia_memoria(row):
+            continue
+        tipo = str(row.get("tipo") or "").strip().upper()
+        valor = row.get("valor")
+        if tipo == "PROCESSO_INCIDENTE":
+            proc, _sep, inc = str(valor or "").partition("|")
+            normalized = _normalizar_blacklist_processo_incidente(proc, inc)
+        elif tipo == "NOME":
+            normalized = _normalizar_blacklist_nome(valor)
+        else:
+            continue
+        if normalized:
+            out[tipo][normalized] = row
+    return out
+
+
+def _blacklist_match_by_tipo_valor(
+    blacklist: dict[str, dict[str, dict]],
+    *,
+    tipo: str,
+    valor: str,
+) -> dict | None:
+    if not valor:
+        return None
+    return blacklist.get(tipo, {}).get(valor)
+
+
+def _blacklist_case_match(
+    blacklist: dict[str, dict[str, dict]],
+    *,
+    processo: object = "",
+    incidente: object = "",
+    requerente: object = "",
+) -> dict | None:
+    chave = _normalizar_blacklist_processo_incidente(processo, incidente)
+    proc_match = _blacklist_match_by_tipo_valor(
+        blacklist,
+        tipo="PROCESSO_INCIDENTE",
+        valor=chave,
+    )
+    if proc_match is not None:
+        return proc_match
+    nome = _normalizar_blacklist_nome(requerente)
+    return _blacklist_match_by_tipo_valor(blacklist, tipo="NOME", valor=nome)
+
+
+def _blacklist_processo_incidente_match(
+    blacklist: dict[str, dict[str, dict]],
+    *,
+    processo: str,
+    incidente: str,
+) -> dict | None:
+    chave = _normalizar_blacklist_processo_incidente(processo, incidente)
+    return _blacklist_match_by_tipo_valor(
+        blacklist,
+        tipo="PROCESSO_INCIDENTE",
+        valor=chave,
+    )
+
+
+def _blacklist_nome_match(
+    blacklist: dict[str, dict[str, dict]],
+    *,
+    nome: str,
+) -> dict | None:
+    normalized = _normalizar_blacklist_nome(nome)
+    return _blacklist_match_by_tipo_valor(blacklist, tipo="NOME", valor=normalized)
+
+
+def _blacklist_memoria_response(
+    *,
+    modo: str,
+    bl_row: dict,
+    processo: str | None = None,
+    incidente: str | None = None,
+    requerente: str | None = None,
+):
+    motivo = str(bl_row.get("motivo") or bl_row.get("tipo") or "blacklist").strip()
+    return jsonify(
+        {
+            "ok": True,
+            "modo": modo,
+            "source": "blacklist",
+            "blacklist": {
+                "id": bl_row.get("id"),
+                "tipo": bl_row.get("tipo"),
+                "valor": bl_row.get("valor"),
+                "motivo": motivo,
+            },
+            "message": (
+                "Este caso consta na blacklist e está inapto; "
+                "o cálculo não pode ser mostrado."
+            ),
+            "results": [
+                {
+                    "id": None,
+                    "id_precainfosnew": None,
+                    "requerente": requerente,
+                    "numero_de_processo": processo,
+                    "numero_do_incidente": incidente,
+                    "calculo_atualizado": "Sem Saldo",
+                    "status": "Sem Saldo",
+                    "principal_bruto": 0,
+                    "juros": 0,
+                    "desc_saude_prev": 0,
+                    "desc_ir": 0,
+                    "percentual_honorarios": 30,
+                    "total_bruto": 0,
+                    "reserva_honorarios": 0,
+                    "total_liquido": 0,
+                    "ultima_atualizacao": None,
+                    "source": "blacklist",
+                    "blacklist_motivo": motivo,
+                    "blacklist_can_override": True,
+                }
+            ],
+        }
+    )
+
+
+def _blacklist_unavailable_response():
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "Não foi possível validar a blacklist. Por segurança, "
+                    "os valores da memória de cálculo não serão exibidos."
+                ),
+            }
+        ),
+        503,
+    )
+
+
+def _blacklist_result_row(
+    row: dict,
+    *,
+    bl_row: dict,
+    source: str,
+) -> dict:
+    motivo = str(bl_row.get("motivo") or bl_row.get("tipo") or "blacklist").strip()
+    return {
+        "id": None,
+        "id_precainfosnew": row.get("id_precainfosnew") or row.get("id"),
+        "requerente": row.get("requerente"),
+        "numero_de_processo": row.get("numero_de_processo"),
+        "numero_do_incidente": row.get("numero_do_incidente"),
+        "calculo_atualizado": "Sem Saldo",
+        "status": "Sem Saldo",
+        "principal_bruto": 0,
+        "juros": 0,
+        "desc_saude_prev": 0,
+        "desc_ir": 0,
+        "percentual_honorarios": 30,
+        "total_bruto": 0,
+        "reserva_honorarios": 0,
+        "total_liquido": 0,
+        "ultima_atualizacao": None,
+        "source": "blacklist",
+        "blacklist_source": source,
+        "blacklist_tipo": bl_row.get("tipo"),
+        "blacklist_motivo": motivo,
+        "blacklist_can_override": True,
+    }
+
+
+def _record_blacklist_override_audit(
+    *,
+    bl_row: dict,
+    row: dict,
+    source: str,
+    modo: str,
+    query: dict,
+    motivo_confirmacao: str,
+) -> None:
+    motivo_confirmacao = (motivo_confirmacao or "").strip()
+    if len(motivo_confirmacao) < 5:
+        raise _BlacklistAuditError("Motivo de confirmação obrigatório.")
+    cfg = _eda_mysql_config()
+    if not cfg:
+        raise _BlacklistAuditError("Configuração da auditoria indisponível.")
+    user = current_user() or {}
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memoria_calculo_blacklist_override_audit (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                criado_em DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                user_id INT NULL,
+                username VARCHAR(255) NULL,
+                user_role VARCHAR(50) NULL,
+                modo VARCHAR(30) NOT NULL,
+                query_processo VARCHAR(200) NULL,
+                query_incidente VARCHAR(200) NULL,
+                query_nome VARCHAR(500) NULL,
+                source_table VARCHAR(80) NOT NULL,
+                blacklist_id BIGINT NULL,
+                blacklist_tipo VARCHAR(50) NULL,
+                blacklist_valor VARCHAR(800) NULL,
+                blacklist_motivo VARCHAR(800) NULL,
+                id_precainfosnew BIGINT NULL,
+                requerente VARCHAR(500) NULL,
+                numero_de_processo VARCHAR(200) NULL,
+                numero_do_incidente VARCHAR(200) NULL,
+                motivo_confirmacao TEXT NOT NULL,
+                ip VARCHAR(80) NULL,
+                user_agent VARCHAR(500) NULL,
+                INDEX idx_criado_em (criado_em),
+                INDEX idx_blacklist (blacklist_tipo, blacklist_valor(191)),
+                INDEX idx_precainfos (id_precainfosnew)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO memoria_calculo_blacklist_override_audit (
+                user_id, username, user_role, modo,
+                query_processo, query_incidente, query_nome,
+                source_table,
+                blacklist_id, blacklist_tipo, blacklist_valor, blacklist_motivo,
+                id_precainfosnew, requerente, numero_de_processo, numero_do_incidente,
+                motivo_confirmacao, ip, user_agent
+            ) VALUES (
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s
+            )
+            """,
+            (
+                user.get("id"),
+                user.get("username"),
+                user.get("role"),
+                modo,
+                query.get("processo"),
+                query.get("incidente"),
+                query.get("nome"),
+                source,
+                bl_row.get("id"),
+                bl_row.get("tipo"),
+                bl_row.get("valor"),
+                bl_row.get("motivo"),
+                row.get("id_precainfosnew") or row.get("id"),
+                row.get("requerente"),
+                row.get("numero_de_processo"),
+                row.get("numero_do_incidente"),
+                motivo_confirmacao,
+                request.headers.get("X-Forwarded-For", request.remote_addr),
+                (request.headers.get("User-Agent") or "")[:500],
+            ),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] erro ao auditar override blacklist: {e}")
+        raise _BlacklistAuditError(str(e)) from e
+
+
+def _sanitize_memoria_results_for_blacklist(
+    rows: list[dict],
+    *,
+    blacklist: dict[str, dict[str, dict]],
+    source: str,
+    allow_override: bool = False,
+    audit_context: dict | None = None,
+) -> list[dict]:
+    results: list[dict] = []
+    for row in rows:
+        bl_row = _blacklist_case_match(
+            blacklist,
+            processo=row.get("numero_de_processo"),
+            incidente=row.get("numero_do_incidente"),
+            requerente=row.get("requerente"),
+        )
+        if bl_row is not None:
+            if allow_override and audit_context is not None:
+                _record_blacklist_override_audit(
+                    bl_row=bl_row,
+                    row=row,
+                    source=source,
+                    modo=str(audit_context.get("modo") or ""),
+                    query=dict(audit_context.get("query") or {}),
+                    motivo_confirmacao=str(audit_context.get("motivo") or ""),
+                )
+                revealed = _memoria_row_to_api(row)
+                revealed["blacklist_override_audited"] = True
+                revealed["blacklist_tipo"] = bl_row.get("tipo")
+                revealed["blacklist_motivo"] = str(
+                    bl_row.get("motivo") or bl_row.get("tipo") or "blacklist"
+                ).strip()
+                results.append(revealed)
+                continue
+            results.append(_blacklist_result_row(row, bl_row=bl_row, source=source))
+            continue
+        results.append(_memoria_row_to_api(row))
+    return results
+
+
 def _memoria_row_to_api(row: dict) -> dict:
     from datetime import date, datetime
     from decimal import Decimal
@@ -281,13 +862,16 @@ def _pick_field(fields: set[str], *candidates: str) -> str | None:
 
 def _bloquear_calculo_mes_atual_enabled() -> bool:
     """
-    Flag simples para testes.
+    Bloqueio mensal por caso (não desliga o botão globalmente).
 
     - BLOQUEAR_CALCULO=1/true/on/sim  -> activa bloqueio do mês actual
-    - BLOQUEAR_CALCULO=0/false/off/nao -> desactiva
+    - BLOQUEAR_CALCULO=0/false/off/nao -> desactiva (útil em testes)
     Padrão: activo (1).
     """
-    raw = (os.getenv("BLOQUEAR_CALCULO") or "1").strip().lower()
+    raw = (os.getenv("BLOQUEAR_CALCULO") or "1").strip()
+    if "#" in raw:
+        raw = raw.split("#", 1)[0].strip()
+    raw = raw.lower()
     return raw not in ("0", "false", "off", "no", "nao", "não", "disabled")
 
 
@@ -397,6 +981,11 @@ def memoria_calculo():
     )
 
 
+@app.route("/pre-analise-processual")
+def pre_analise_processual_page():
+    return render_template("pre_analise_processual.html")
+
+
 @app.route("/api/memoria-calculo/buscar")
 def api_memoria_buscar():
     """
@@ -444,6 +1033,52 @@ def api_memoria_buscar():
             ),
             400,
         )
+
+    try:
+        blacklist = _load_memoria_blacklist()
+    except _BlacklistUnavailable:
+        return _blacklist_unavailable_response()
+    allow_blacklist_override = str(
+        request.args.get("blacklist_override") or ""
+    ).strip().lower() in {"1", "true", "yes", "sim"}
+    override_reason = str(request.args.get("blacklist_override_reason") or "").strip()
+    if allow_blacklist_override and len(override_reason) < 5:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Informe um motivo para auditar a liberação de valores de caso em blacklist.",
+                }
+            ),
+            400,
+        )
+    audit_context = {
+        "modo": "processo" if use_process else "nome",
+        "query": {"processo": proc, "incidente": inc, "nome": nome},
+        "motivo": override_reason,
+    }
+
+    if use_process:
+        bl_row = _blacklist_processo_incidente_match(
+            blacklist,
+            processo=proc,
+            incidente=inc,
+        )
+        if bl_row is not None and not allow_blacklist_override:
+            return _blacklist_memoria_response(
+                modo="processo",
+                bl_row=bl_row,
+                processo=proc,
+                incidente=inc,
+            )
+    else:
+        bl_row = _blacklist_nome_match(blacklist, nome=nome)
+        if bl_row is not None and not allow_blacklist_override:
+            return _blacklist_memoria_response(
+                modo="nome",
+                bl_row=bl_row,
+                requerente=str(bl_row.get("valor") or nome).strip() or nome,
+            )
 
     cfg = _memoria_mysql_config()
     if not cfg:
@@ -556,8 +1191,30 @@ def api_memoria_buscar():
     print(
         f"[memoria-calculo] ok em {dt_ms}ms; results={len(raw)}; modo={'processo' if use_process else 'nome'}"
     )
-    results = [_memoria_row_to_api(r) for r in raw]
+    try:
+        results = _sanitize_memoria_results_for_blacklist(
+            raw,
+            blacklist=blacklist,
+            source="memoria_calculo",
+            allow_override=allow_blacklist_override,
+            audit_context=audit_context,
+        )
+    except _BlacklistAuditError as e:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Não foi possível registrar a auditoria da liberação. "
+                        "Por segurança, os valores não serão exibidos."
+                    ),
+                    "detail": str(e),
+                }
+            ),
+            500,
+        )
     if results:
+        _enrich_results_precainfos_numero_de_meses(results)
         return jsonify(
             {
                 "ok": True,
@@ -631,8 +1288,14 @@ def api_memoria_buscar():
             "calculo_atualizado",
             "Calculo_atualizado",
         )
+        f_meses = _precainfos_numero_de_meses_column(fields)
         calc_sql = (
             f"`{f_calc}` AS calculo_atualizado" if f_calc else "NULL AS calculo_atualizado"
+        )
+        meses_sql = (
+            f"`{f_meses}` AS precainfos_numero_de_meses"
+            if f_meses
+            else "NULL AS precainfos_numero_de_meses"
         )
         if use_process and not f_proc:
             return jsonify(
@@ -652,7 +1315,8 @@ def api_memoria_buscar():
                            {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
                            `{f_proc}` AS numero_de_processo,
                            `{f_inc}` AS numero_do_incidente,
-                           {calc_sql}
+                           {calc_sql},
+                           {meses_sql}
                     FROM precainfosnew
                     WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
                       AND TRIM(COALESCE(`{f_inc}`, '')) = %s
@@ -674,7 +1338,8 @@ def api_memoria_buscar():
                            {f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"},
                            `{f_proc}` AS numero_de_processo,
                            {inc_sel},
-                           {calc_sql}
+                           {calc_sql},
+                           {meses_sql}
                     FROM precainfosnew
                     WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
                     ORDER BY id DESC
@@ -701,7 +1366,8 @@ def api_memoria_buscar():
                        `{f_req}` AS requerente,
                        {f"`{f_proc}` AS numero_de_processo" if f_proc else "NULL AS numero_de_processo"},
                        {f"`{f_inc}` AS numero_do_incidente" if f_inc else "NULL AS numero_do_incidente"},
-                       {calc_sql}
+                       {calc_sql},
+                       {meses_sql}
                 FROM precainfosnew
                 WHERE `{f_req}` IS NOT NULL
                   AND TRIM(`{f_req}`) <> ''
@@ -723,6 +1389,52 @@ def api_memoria_buscar():
                 pid = int(r.get("id")) if r.get("id") is not None else None
             except (TypeError, ValueError):
                 pid = None
+            fallback_row = {
+                "id": pid,
+                "requerente": r.get("requerente"),
+                "numero_de_processo": r.get("numero_de_processo"),
+                "numero_do_incidente": r.get("numero_do_incidente"),
+            }
+            bl_row = _blacklist_case_match(
+                blacklist,
+                processo=fallback_row.get("numero_de_processo"),
+                incidente=fallback_row.get("numero_do_incidente"),
+                requerente=fallback_row.get("requerente"),
+            )
+            if bl_row is not None:
+                if allow_blacklist_override:
+                    try:
+                        _record_blacklist_override_audit(
+                            bl_row=bl_row,
+                            row=fallback_row,
+                            source="precainfosnew",
+                            modo=str(audit_context.get("modo") or ""),
+                            query=dict(audit_context.get("query") or {}),
+                            motivo_confirmacao=str(audit_context.get("motivo") or ""),
+                        )
+                    except _BlacklistAuditError as e:
+                        return (
+                            jsonify(
+                                {
+                                    "ok": False,
+                                    "error": (
+                                        "Não foi possível registrar a auditoria da liberação. "
+                                        "Por segurança, os valores não serão exibidos."
+                                    ),
+                                    "detail": str(e),
+                                }
+                            ),
+                            500,
+                        )
+                else:
+                    out_rows.append(
+                        _blacklist_result_row(
+                            fallback_row,
+                            bl_row=bl_row,
+                            source="precainfosnew",
+                        )
+                    )
+                    continue
             calc_raw = r.get("calculo_atualizado")
             calc_str = str(calc_raw).strip() if calc_raw is not None else ""
             row_status = (
@@ -730,27 +1442,33 @@ def api_memoria_buscar():
                 if calc_str.casefold() == "sem saldo"
                 else None
             )
-            out_rows.append(
-                {
-                    "id": None,
-                    "id_precainfosnew": pid,
-                    "requerente": r.get("requerente"),
-                    "numero_de_processo": r.get("numero_de_processo"),
-                    "numero_do_incidente": r.get("numero_do_incidente"),
-                    "calculo_atualizado": calc_str or None,
-                    "status": row_status,
-                    "principal_bruto": 0,
-                    "juros": 0,
-                    "desc_saude_prev": 0,
-                    "desc_ir": 0,
-                    "percentual_honorarios": 30,
-                    "total_bruto": 0,
-                    "reserva_honorarios": 0,
-                    "total_liquido": 0,
-                    "ultima_atualizacao": None,
-                    "source": "precainfosnew",
-                }
-            )
+            out_item = {
+                "id": None,
+                "id_precainfosnew": pid,
+                "requerente": r.get("requerente"),
+                "numero_de_processo": r.get("numero_de_processo"),
+                "numero_do_incidente": r.get("numero_do_incidente"),
+                "calculo_atualizado": calc_str or None,
+                "status": row_status,
+                "principal_bruto": 0,
+                "juros": 0,
+                "desc_saude_prev": 0,
+                "desc_ir": 0,
+                "percentual_honorarios": 30,
+                "total_bruto": 0,
+                "reserva_honorarios": 0,
+                "total_liquido": 0,
+                "ultima_atualizacao": None,
+                "precainfos_numero_de_meses": r.get("precainfos_numero_de_meses"),
+                "source": "precainfosnew",
+            }
+            if bl_row is not None:
+                out_item["blacklist_override_audited"] = True
+                out_item["blacklist_tipo"] = bl_row.get("tipo")
+                out_item["blacklist_motivo"] = str(
+                    bl_row.get("motivo") or bl_row.get("tipo") or "blacklist"
+                ).strip()
+            out_rows.append(out_item)
         return jsonify(
             {
                 "ok": True,
@@ -1023,6 +1741,110 @@ def api_memoria_atualizar_calculo():
         feito_por=_memoria_feito_por_plataforma(),
         timeout_sec=_calculo_atualizacao_api_timeout(),
     )
+    return jsonify(out), code
+
+
+@app.route("/api/memoria-calculo/salvar-numero-meses", methods=["POST"])
+def api_memoria_salvar_numero_meses():
+    """
+    Grava ``Numero_de_Meses`` em precainfosnew (só se actual for NULL, 0 ou 1)
+    e executa o mesmo fluxo de «Atualizar Cálculo».
+    """
+    data = request.get_json(silent=True) or {}
+    pid = data.get("id_precainfosnew")
+    if pid is None and data.get("id") is not None:
+        pid = data.get("id")
+    if pid is None:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Parâmetro obrigatório: id_precainfosnew (ou id).",
+                }
+            ),
+            400,
+        )
+    try:
+        prec_id = int(pid)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+
+    raw_meses = data.get("numero_de_meses")
+    if raw_meses is None or str(raw_meses).strip() == "":
+        return (
+            jsonify({"ok": False, "error": "Informe o número de meses (inteiro)."}),
+            400,
+        )
+    try:
+        meses = int(raw_meses)
+    except (TypeError, ValueError):
+        return (
+            jsonify({"ok": False, "error": "Número de meses inválido (use um inteiro)."}),
+            400,
+        )
+    if meses < 2:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "O número de meses deve ser um inteiro maior ou igual a 2.",
+                }
+            ),
+            400,
+        )
+
+    ok_upd, err_upd = _update_precainfos_numero_de_meses(prec_id, meses)
+    if not ok_upd:
+        status = 409 if err_upd and "só pode ser alterado" in err_upd else 400
+        return jsonify({"ok": False, "error": err_upd or "Falha ao gravar."}), status
+
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    if blocked:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Número de meses gravado, mas o cálculo não foi executado: "
+                        "este caso já foi actualizado no mês actual. "
+                        + (f"Última actualização: {ultima_iso}." if ultima_iso else "")
+                    ),
+                    "numero_de_meses_salvo": meses,
+                }
+            ),
+            409,
+        )
+
+    base = _calculo_atualizacao_api_base()
+    if not base:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Número de meses gravado, mas a API de cálculo não está configurada "
+                        "(CALCULO_ATUALIZACAO_API_URL)."
+                    ),
+                    "numero_de_meses_salvo": meses,
+                }
+            ),
+            503,
+        )
+
+    out, code = _run_calculo_via_fila_async_poll(
+        prec_id,
+        feito_por=_memoria_feito_por_plataforma(),
+        timeout_sec=_calculo_atualizacao_api_timeout(),
+    )
+    if isinstance(out, dict):
+        out = dict(out)
+        out["numero_de_meses_salvo"] = meses
+        if out.get("ok"):
+            msg = str(out.get("message") or "Cálculo actualizado.")
+            out["message"] = (
+                f"Número de meses ({meses}) gravado em Numero_de_Meses e "
+                f"Numero_de_Meses_TERMO. {msg}"
+            )
     return jsonify(out), code
 
 
