@@ -70,6 +70,11 @@ FEATURE_PERMISSIONS: tuple[tuple[str, str, str], ...] = (
         "Salvar número de meses",
         "Campo e botão «Salvar Número de Meses» na Memória de cálculo (precainfosnew)",
     ),
+    (
+        "forcar_atualizar_calculo",
+        "Forçar atualizar cálculo",
+        "Ignora o bloqueio mensal de «Atualizar Cálculo» quando BLOQUEAR_CALCULO=1",
+    ),
 )
 
 # Painéis do menu + funcionalidades extra (checkboxes em Utilizadores).
@@ -457,6 +462,15 @@ def _endpoint_to_tab() -> str | None:
         "conversas": "conversas",
         "memoria_calculo": "memoria_calculo",
         "pre_analise_processual_page": "pre_analise_processual",
+        "api_pre_analise_iniciar": "pre_analise_processual",
+        "api_pre_analise_casos": "pre_analise_processual",
+        "api_pre_analise_status": "pre_analise_processual",
+        "api_pre_analise_sincronizar": "pre_analise_processual",
+        "api_pre_analise_health": "pre_analise_processual",
+        "api_pre_analise_reconciliar": "pre_analise_processual",
+        "api_pre_analise_por_externo": "pre_analise_processual",
+        "api_pre_analise_cancelar": "pre_analise_processual",
+        "api_pre_analise_excluir": "pre_analise_processual",
         "tabela_juros_page": "tabela_juros",
         "api_tabela_juros_calcular": "tabela_juros",
         "proposta_page": "proposta",
@@ -470,9 +484,9 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
         "api_memoria_atualizar_calculo_fila": "memoria_calculo",
+        "api_memoria_salvar_numero_meses": "salvar_numero_meses",
         "api_memoria_analise_processual_start": "analise_processual",
         "api_memoria_analise_processual_status": "analise_processual",
-        "api_memoria_salvar_numero_meses": "salvar_numero_meses",
         "api_memoria_precainfos_detalhes": "memoria_calculo",
         "api_memoria_controle_coleta_status": "memoria_calculo",
         "campanha_page": "campanha",

@@ -57,6 +57,19 @@ except ImportError:
     pass
 
 from messages_viewer.analise_processual_jobs import get_job_status, start_job
+from messages_viewer.pre_analise_processual import (
+    api_health as pre_analise_api_health,
+    cancelar_caso as pre_analise_cancelar_caso,
+    excluir_caso as pre_analise_excluir_caso,
+    get_caso_status,
+    get_status_por_externo as pre_analise_status_por_externo,
+    iniciar_caso,
+    is_configured as pre_analise_api_configured,
+    list_casos as pre_analise_list_casos,
+    poll_interval_ms as pre_analise_poll_interval_ms,
+    reconciliar_casos as pre_analise_reconciliar_casos,
+    sincronizar_casos as pre_analise_sincronizar_casos,
+)
 from messages_viewer.proposta_pdf import gerar_pdf_proposta, nome_arquivo_proposta
 from messages_viewer.proposta_service import buscar_por_processo_incidente
 from messages_viewer.tabela_juros_calc import (
@@ -70,6 +83,7 @@ from messages_viewer.plataforma_auth import (
     current_user,
     init_plataforma_auth,
     plataforma_before_request,
+    user_can_tab,
     wsgi_eda_session_guard,
 )
 
@@ -936,6 +950,16 @@ def _memoria_calculo_bloqueado_mes_atual(prec_id: int) -> tuple[bool, str | None
             pass
 
 
+def _pode_ignorar_bloqueio_calculo_mes_atual() -> bool:
+    """Admins e utilizadores autorizados podem forçar «Atualizar Cálculo»."""
+    u = current_user()
+    if not u:
+        return False
+    if u.get("role") == "admin":
+        return True
+    return user_can_tab("forcar_atualizar_calculo")
+
+
 @app.route("/")
 def index():
     return render_template("capa.html")
@@ -969,6 +993,7 @@ def _refactor_analise_processual_configured() -> bool:
 
 @app.route("/memoria-calculo")
 def memoria_calculo():
+    pode_forcar_atualizar_calculo = _pode_ignorar_bloqueio_calculo_mes_atual()
     return render_template(
         "memoria_calculo.html",
         memoria_mysql_configured=bool((os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()),
@@ -977,13 +1002,113 @@ def memoria_calculo():
             (os.getenv("CALCULO_ATUALIZACAO_API_URL") or "").strip()
         ),
         bloquear_calculo_mes_atual=_bloquear_calculo_mes_atual_enabled(),
+        pode_forcar_atualizar_calculo=pode_forcar_atualizar_calculo,
         analise_processual_configured=_refactor_analise_processual_configured(),
     )
 
 
 @app.route("/pre-analise-processual")
 def pre_analise_processual_page():
-    return render_template("pre_analise_processual.html")
+    health_payload = {"ok": False, "healthy": False}
+    if pre_analise_api_configured():
+        health_out, _ = pre_analise_api_health()
+        health_payload = health_out
+    return render_template(
+        "pre_analise_processual.html",
+        pre_analise_api_configured=pre_analise_api_configured(),
+        pre_analise_api_healthy=bool(health_payload.get("healthy")),
+        pre_analise_poll_interval_ms=pre_analise_poll_interval_ms(),
+    )
+
+
+@app.route("/api/pre-analise-processual/health")
+def api_pre_analise_health():
+    out, code = pre_analise_api_health()
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/reconciliar", methods=["POST"])
+def api_pre_analise_reconciliar():
+    data = request.get_json(silent=True) or {}
+    try:
+        page = int(data.get("page") or "1")
+    except ValueError:
+        page = 1
+    try:
+        limit = int(data.get("limit") or "100")
+    except ValueError:
+        limit = 100
+    out, code = pre_analise_reconciliar_casos(page=page, limit=limit)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/por-externo/<id_externo>")
+def api_pre_analise_por_externo(id_externo: str):
+    out, code = pre_analise_status_por_externo(id_externo)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/iniciar", methods=["POST"])
+def api_pre_analise_iniciar():
+    data = request.get_json(silent=True) or {}
+    user = current_user() or {}
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id_int = None
+    out, code = iniciar_caso(data, user_id=user_id_int)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/casos")
+def api_pre_analise_casos():
+    try:
+        page = int(request.args.get("page") or "1")
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size") or "15")
+    except ValueError:
+        page_size = 15
+    reconciliar = str(request.args.get("reconciliar") or "").strip().lower() in {
+        "1", "true", "yes", "sim",
+    }
+    out, code = pre_analise_list_casos(page=page, page_size=page_size, reconciliar=reconciliar)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/<caso_id>/status")
+def api_pre_analise_status(caso_id: str):
+    out, code = get_caso_status(caso_id)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/sincronizar", methods=["POST"])
+def api_pre_analise_sincronizar():
+    data = request.get_json(silent=True) or {}
+    try:
+        page = int(data.get("page") or request.args.get("page") or "1")
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(data.get("page_size") or request.args.get("page_size") or "15")
+    except ValueError:
+        page_size = 15
+    out, code = pre_analise_sincronizar_casos(page=page, page_size=page_size)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/<caso_id>/cancelar", methods=["POST"])
+def api_pre_analise_cancelar(caso_id: str):
+    out, code = pre_analise_cancelar_caso(caso_id)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/<caso_id>", methods=["DELETE"])
+def api_pre_analise_excluir(caso_id: str):
+    out, code = pre_analise_excluir_caso(caso_id)
+    return jsonify(out), code
 
 
 @app.route("/api/memoria-calculo/buscar")
@@ -1708,6 +1833,8 @@ def api_memoria_atualizar_calculo():
         return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
 
     blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
+        blocked = False
     if blocked:
         return (
             jsonify(
@@ -1799,6 +1926,8 @@ def api_memoria_salvar_numero_meses():
         return jsonify({"ok": False, "error": err_upd or "Falha ao gravar."}), status
 
     blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
+        blocked = False
     if blocked:
         return (
             jsonify(

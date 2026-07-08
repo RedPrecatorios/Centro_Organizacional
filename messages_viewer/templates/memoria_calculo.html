@@ -308,6 +308,7 @@
     data-analise-processual-permitted='{{ user_can("analise_processual") | tojson }}'
     data-salvar-numero-meses-permitted='{{ user_can("salvar_numero_meses") | tojson }}'
     data-bloquear-calculo-mes-atual='{{ bloquear_calculo_mes_atual | tojson }}'
+    data-pode-forcar-atualizar-calculo='{{ pode_forcar_atualizar_calculo | tojson }}'
     data-flask-mysql-configured='{{ flask_mysql_configured | tojson }}'
     hidden
   ></div>
@@ -758,6 +759,7 @@
     var analiseProcessualPermitted = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualPermitted || 'false') : false;
     var salvarNumeroMesesPermitted = cfgEl ? JSON.parse(cfgEl.dataset.salvarNumeroMesesPermitted || 'false') : false;
     var bloquearCalculoMesAtual = cfgEl ? JSON.parse(cfgEl.dataset.bloquearCalculoMesAtual || 'false') : false;
+    var podeForcarAtualizarCalculo = cfgEl ? JSON.parse(cfgEl.dataset.podeForcarAtualizarCalculo || 'false') : false;
     var flaskMysqlConfigured = cfgEl ? JSON.parse(cfgEl.dataset.flaskMysqlConfigured || 'false') : false;
     var lastResults = [];
     var idPrecainfosnewSelecionado = null;
@@ -1097,9 +1099,11 @@
         btnAtualizarCalculo.title = 'Caso inapto (Sem Saldo).';
         return;
       }
-      if (!bloquearCalculoMesAtual) {
+      if (!bloquearCalculoMesAtual || podeForcarAtualizarCalculo) {
         btnAtualizarCalculo.disabled = false;
-        btnAtualizarCalculo.title = '';
+        btnAtualizarCalculo.title = podeForcarAtualizarCalculo && bloquearCalculoMesAtual
+          ? 'Bloqueio mensal activo, mas o seu utilizador pode forçar a atualização.'
+          : '';
         return;
       }
       if (!row || !row.ultima_atualizacao) {

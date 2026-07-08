@@ -9,18 +9,30 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
 </head>
-<body class="dashboard-body">
+<body class="dashboard-body"
+  data-pre-analise-configured='{{ pre_analise_api_configured | tojson }}'
+  data-pre-analise-poll-ms='{{ pre_analise_poll_interval_ms | tojson }}'>
   {% include 'partials/sidebar_navegacao.html' %}
 
   <div class="dash-main">
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">PRÉ Análise Processual</h1>
-        <p class="dash-sub">Informe os dados iniciais do caso para envio posterior ao destino que será definido.</p>
+        <p class="dash-sub">Informe os dados iniciais do caso para iniciar a coleta processual na API.</p>
       </div>
     </header>
 
     <main class="dash-content">
+      {% if not pre_analise_api_configured %}
+      <div class="prop-card prop-msg prop-msg--err" role="alert">
+        API de pré-análise não configurada. Defina <code>PRE_ANALISE_API_URL</code> e <code>API_TOKEN</code> no .env.
+      </div>
+      {% elif not pre_analise_api_healthy %}
+      <div class="prop-card prop-msg prop-msg--err" role="alert">
+        API de pré-análise configurada, mas indisponível no momento. Verifique o serviço em <code>PRE_ANALISE_API_URL</code>.
+      </div>
+      {% endif %}
+
       <form class="prop-card prop-form" id="pre-analise-form">
         <p class="prop-hint">Dados do caso</p>
 
@@ -35,6 +47,7 @@
               placeholder="Digite o número do processo"
               autocomplete="off"
               required
+              {% if not pre_analise_api_configured %}disabled{% endif %}
             />
           </div>
 
@@ -48,6 +61,7 @@
               placeholder="Digite o número do incidente"
               autocomplete="off"
               required
+              {% if not pre_analise_api_configured %}disabled{% endif %}
             />
           </div>
 
@@ -60,6 +74,7 @@
               name="nome"
               placeholder="Digite o nome, se houver"
               autocomplete="off"
+              {% if not pre_analise_api_configured %}disabled{% endif %}
             />
           </div>
 
@@ -72,15 +87,29 @@
               name="depre"
               placeholder="Digite o DEPRE, se houver"
               autocomplete="off"
+              {% if not pre_analise_api_configured %}disabled{% endif %}
+            />
+          </div>
+
+          <div class="prop-field">
+            <label for="pre-id-externo">ID precainfos <span class="prop-edit-note">(opcional)</span></label>
+            <input
+              type="text"
+              id="pre-id-externo"
+              class="auth-input"
+              name="id_externo"
+              placeholder="Se vazio, o sistema tenta localizar automaticamente"
+              autocomplete="off"
+              {% if not pre_analise_api_configured %}disabled{% endif %}
             />
           </div>
         </div>
 
         <div class="prop-actions">
-          <button type="submit" class="camp-btn camp-btn-primary camp-btn-lg" id="pre-submit">
-            Enviar dados
+          <button type="submit" class="camp-btn camp-btn-primary camp-btn-lg" id="pre-submit" {% if not pre_analise_api_configured %}disabled{% endif %}>
+            Iniciar análise
           </button>
-          <p class="prop-pdf-hint">Destino ainda não configurado. Por enquanto, o formulário apenas captura e valida os dados.</p>
+          <p class="prop-pdf-hint">O processamento é acompanhado automaticamente enquanto houver casos em andamento.</p>
         </div>
 
         <p class="prop-msg" id="pre-msg" role="status" aria-live="polite"></p>
@@ -90,7 +119,7 @@
         <div class="pre-list-header">
           <div>
             <p class="prop-hint" id="pre-list-title">Processos cadastrados</p>
-            <p class="pre-list-sub">Lista temporária dos dados inputados neste painel.</p>
+            <p class="pre-list-sub">Lista sincronizada com a API de pré-análise.</p>
           </div>
           <span class="pre-list-count" id="pre-list-count">0 processos</span>
         </div>
@@ -104,12 +133,14 @@
                 <th scope="col">Número do Incidente</th>
                 <th scope="col">Nome</th>
                 <th scope="col">DEPRE</th>
+                <th scope="col">Status</th>
+                <th scope="col">Fase</th>
                 <th scope="col">Criado em</th>
               </tr>
             </thead>
             <tbody id="pre-table-body">
               <tr>
-                <td colspan="6" class="dash-empty">Nenhum processo cadastrado.</td>
+                <td colspan="8" class="dash-empty">Carregando…</td>
               </tr>
             </tbody>
           </table>
@@ -156,12 +187,38 @@
       border-radius: var(--r);
     }
     .pre-table {
-      min-width: 840px;
+      min-width: 980px;
       margin: 0;
     }
     .pre-col-toggle {
       width: 72px;
       text-align: center;
+    }
+    .pre-status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: var(--surface-muted);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      text-transform: lowercase;
+    }
+    .pre-status-badge--active {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+      background: var(--accent-ghost);
+    }
+    .pre-status-badge--done {
+      color: #0f766e;
+      border-color: #99f6e4;
+      background: #f0fdfa;
+    }
+    .pre-status-badge--err {
+      color: #b91c1c;
+      border-color: #fecaca;
+      background: #fef2f2;
     }
     .pre-toggle-btn {
       display: inline-grid;
@@ -192,6 +249,13 @@
       gap: 10px 16px;
       padding: 10px 12px;
       font-size: 0.88rem;
+    }
+    .pre-detail-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
     }
     .pre-detail-box strong {
       display: block;
@@ -224,10 +288,16 @@
 
   <script>
   (function () {
-    var STORAGE_KEY = 'preAnaliseProcessualItems';
     var PAGE_SIZE = 15;
+    var bodyEl = document.body;
+    var apiConfigured = bodyEl && bodyEl.getAttribute('data-pre-analise-configured') === 'true';
+    var pollMs = 5000;
+    try {
+      pollMs = parseInt(bodyEl.getAttribute('data-pre-analise-poll-ms') || '5000', 10) || 5000;
+    } catch (_) {}
 
     var form = document.getElementById('pre-analise-form');
+    var submitBtn = document.getElementById('pre-submit');
     var msg = document.getElementById('pre-msg');
     var tbody = document.getElementById('pre-table-body');
     var countEl = document.getElementById('pre-list-count');
@@ -235,9 +305,16 @@
     var pageInfo = document.getElementById('pre-page-info');
     var prevBtn = document.getElementById('pre-prev-page');
     var nextBtn = document.getElementById('pre-next-page');
+
     var currentPage = 1;
+    var totalPages = 1;
+    var totalItems = 0;
+    var activeCount = 0;
     var expandedId = null;
-    var items = loadItems();
+    var items = [];
+    var pollTimer = null;
+    var submitInFlight = false;
+    var syncInFlight = false;
 
     function setMsg(text, isError) {
       if (!msg) return;
@@ -259,24 +336,6 @@
       return text ? esc(text) : '<span class="dash-muted">-</span>';
     }
 
-    function loadItems() {
-      try {
-        var raw = window.localStorage.getItem(STORAGE_KEY);
-        var parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (e) {
-        return [];
-      }
-    }
-
-    function saveItems() {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-      } catch (e) {
-        console.warn('Não foi possível salvar a lista temporária.', e);
-      }
-    }
-
     function formatDate(value) {
       if (!value) return '-';
       try {
@@ -285,32 +344,58 @@
           month: '2-digit',
           year: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
+          timeZone: 'America/Sao_Paulo'
         }).format(new Date(value));
       } catch (e) {
         return value;
       }
     }
 
-    function totalPages() {
-      return Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    function statusBadge(status, bloqueado) {
+      var text = status ? String(status) : 'desconhecido';
+      var cls = 'pre-status-badge';
+      var norm = text.toLowerCase();
+      if (bloqueado) cls += ' pre-status-badge--err';
+      else if (norm === 'coleta_concluida') cls += ' pre-status-badge--done';
+      else cls += ' pre-status-badge--active';
+      return '<span class="' + cls + '">' + esc(text) + '</span>';
     }
 
-    function normalizePage() {
-      currentPage = Math.min(Math.max(1, currentPage), totalPages());
+    function applyListPayload(d) {
+      items = Array.isArray(d.items) ? d.items : [];
+      totalItems = Number(d.total) || items.length;
+      totalPages = Math.max(1, Number(d.pages) || 1);
+      activeCount = Number(d.active_count) || 0;
+      currentPage = Math.min(Math.max(1, Number(d.page) || currentPage), totalPages);
+      renderTable();
+      updatePollTimer();
     }
 
     function detailRow(item) {
+      var depre = item.numero_depre || item.numero_depre_input;
+      var canCancel = apiConfigured && item.polling_ativo && Number(item.polling_ativo) === 1;
+      var actions = '';
+      if (canCancel) {
+        actions += '<button type="button" class="camp-btn camp-btn-danger camp-btn-sm pre-cancel-btn" data-id="' + esc(item.caso_id) + '">Cancelar processamento</button> ';
+      }
+      actions += '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm pre-remove-btn" data-id="' + esc(item.caso_id) + '">Remover da lista</button>';
+      var actionBox = actions
+        ? '<div class="pre-detail-actions">' + actions + '</div>'
+        : '';
       return '' +
         '<tr class="pre-detail-row">' +
-          '<td colspan="6">' +
+          '<td colspan="8">' +
             '<div class="pre-detail-box">' +
-              '<div><strong>Número de Processo</strong>' + display(item.numero_de_processo) + '</div>' +
-              '<div><strong>Número do Incidente</strong>' + display(item.numero_do_incidente) + '</div>' +
-              '<div><strong>Nome</strong>' + display(item.nome) + '</div>' +
-              '<div><strong>DEPRE</strong>' + display(item.depre) + '</div>' +
-              '<div><strong>Criado em</strong>' + esc(formatDate(item.criado_em)) + '</div>' +
-              '<div><strong>Status</strong>Aguardando destino de envio</div>' +
+              '<div><strong>Caso ID</strong>' + display(item.caso_id) + '</div>' +
+              '<div><strong>ID precainfos</strong>' + display(item.id_externo) + '</div>' +
+              '<div><strong>Processo principal</strong>' + display(item.numero_processo_principal) + '</div>' +
+              '<div><strong>DEPRE</strong>' + display(depre) + '</div>' +
+              '<div><strong>Caminho pasta</strong>' + display(item.caminho_pasta) + '</div>' +
+              '<div><strong>Blacklist</strong>' + display(item.blacklist_codigo || item.motivo_blacklist) + '</div>' +
+              '<div><strong>Mensagem</strong>' + display(item.mensagem) + '</div>' +
+              '<div><strong>Atualizado em</strong>' + esc(formatDate(item.atualizado_em)) + '</div>' +
+              actionBox +
             '</div>' +
           '</td>' +
         '</tr>';
@@ -318,71 +403,235 @@
 
     function renderTable() {
       if (!tbody) return;
-      normalizePage();
       if (countEl) {
-        countEl.textContent = items.length + ' processo' + (items.length === 1 ? '' : 's');
+        countEl.textContent = totalItems + ' processo' + (totalItems === 1 ? '' : 's');
       }
 
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="dash-empty">Nenhum processo cadastrado.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="dash-empty">Nenhum processo cadastrado.</td></tr>';
       } else {
-        var start = (currentPage - 1) * PAGE_SIZE;
-        var pageItems = items.slice(start, start + PAGE_SIZE);
-        tbody.innerHTML = pageItems.map(function (item) {
-          var isExpanded = item.id === expandedId;
+        tbody.innerHTML = items.map(function (item) {
+          var casoId = item.caso_id;
+          var isExpanded = casoId === expandedId;
+          var depre = item.numero_depre || item.numero_depre_input;
           var row = '' +
             '<tr>' +
               '<td class="pre-col-toggle">' +
-                '<button type="button" class="pre-toggle-btn" data-id="' + esc(item.id) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" title="Ampliar informações">›</button>' +
+                '<button type="button" class="pre-toggle-btn" data-id="' + esc(casoId) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" title="Ampliar informações">›</button>' +
               '</td>' +
-              '<td>' + display(item.numero_de_processo) + '</td>' +
-              '<td>' + display(item.numero_do_incidente) + '</td>' +
-              '<td>' + display(item.nome) + '</td>' +
-              '<td>' + display(item.depre) + '</td>' +
+              '<td>' + display(item.numero_cumprimento) + '</td>' +
+              '<td>' + display(item.numero_incidente) + '</td>' +
+              '<td>' + display(item.nome_credor) + '</td>' +
+              '<td>' + display(depre) + '</td>' +
+              '<td>' + statusBadge(item.status, item.bloqueado) + '</td>' +
+              '<td>' + display(item.fase_atual) + '</td>' +
               '<td>' + esc(formatDate(item.criado_em)) + '</td>' +
             '</tr>';
           return row + (isExpanded ? detailRow(item) : '');
         }).join('');
       }
 
-      var pages = totalPages();
-      if (pagination) pagination.hidden = items.length <= PAGE_SIZE;
-      if (pageInfo) pageInfo.textContent = 'Página ' + currentPage + ' de ' + pages;
+      if (pagination) pagination.hidden = totalPages <= 1;
+      if (pageInfo) pageInfo.textContent = 'Página ' + currentPage + ' de ' + totalPages;
       if (prevBtn) prevBtn.disabled = currentPage <= 1;
-      if (nextBtn) nextBtn.disabled = currentPage >= pages;
+      if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
     }
 
-    if (!form) return;
-
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-
-      if (!form.checkValidity()) {
-        form.reportValidity();
-        return;
+    function stopPoll() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
       }
+    }
 
-      var data = Object.fromEntries(new FormData(form).entries());
-      var item = {
-        id: String(Date.now()) + '-' + Math.random().toString(16).slice(2),
-        numero_de_processo: String(data.numero_de_processo || '').trim(),
-        numero_do_incidente: String(data.numero_do_incidente || '').trim(),
-        nome: String(data.nome || '').trim(),
-        depre: String(data.depre || '').trim(),
-        criado_em: new Date().toISOString()
-      };
+    function shouldPoll() {
+      return apiConfigured && activeCount > 0 && !document.hidden && !syncInFlight;
+    }
 
-      items.unshift(item);
-      expandedId = item.id;
-      currentPage = 1;
-      saveItems();
-      renderTable();
-      form.reset();
-      setMsg('Dados adicionados à lista temporária. Defina o destino para ativar o envio definitivo.', false);
-    });
+    function updatePollTimer() {
+      stopPoll();
+      if (!shouldPoll()) return;
+      pollTimer = setInterval(function () {
+        if (shouldPoll()) syncCasos(false);
+      }, pollMs);
+    }
+
+    function loadCasos(reconciliar) {
+      if (!apiConfigured) {
+        items = [];
+        totalItems = 0;
+        totalPages = 1;
+        activeCount = 0;
+        renderTable();
+        return Promise.resolve();
+      }
+      var qs = 'page=' + currentPage + '&page_size=' + PAGE_SIZE;
+      if (reconciliar) qs += '&reconciliar=1';
+      return fetch('/api/pre-analise-processual/casos?' + qs, {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível carregar a lista.', true);
+            items = [];
+            renderTable();
+            return;
+          }
+          applyListPayload(o.d);
+        })
+        .catch(function (e) {
+          setMsg(e && e.message ? e.message : 'Falha de rede ao carregar a lista.', true);
+          items = [];
+          renderTable();
+        });
+    }
+
+    function syncCasos(showErrors) {
+      if (!apiConfigured || syncInFlight) return Promise.resolve();
+      syncInFlight = true;
+      return fetch('/api/pre-analise-processual/sincronizar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ page: currentPage, page_size: PAGE_SIZE })
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            if (showErrors) {
+              setMsg((o.d && o.d.error) ? o.d.error : 'Falha ao sincronizar status.', true);
+            }
+            return;
+          }
+          applyListPayload(o.d);
+        })
+        .catch(function (e) {
+          if (showErrors) {
+            setMsg(e && e.message ? e.message : 'Falha de rede na sincronização.', true);
+          }
+        })
+        .finally(function () {
+          syncInFlight = false;
+          updatePollTimer();
+        });
+    }
+
+    if (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (!apiConfigured) {
+          setMsg('API de pré-análise não configurada.', true);
+          return;
+        }
+        if (submitInFlight) return;
+        if (!form.checkValidity()) {
+          form.reportValidity();
+          return;
+        }
+
+        var data = Object.fromEntries(new FormData(form).entries());
+        var payload = {
+          numero_de_processo: String(data.numero_de_processo || '').trim(),
+          numero_do_incidente: String(data.numero_do_incidente || '').trim(),
+          nome: String(data.nome || '').trim(),
+          depre: String(data.depre || '').trim(),
+          id_externo: String(data.id_externo || '').trim()
+        };
+
+        submitInFlight = true;
+        if (submitBtn) submitBtn.disabled = true;
+        setMsg('Iniciando análise…', false);
+
+        fetch('/api/pre-analise-processual/iniciar', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (o) {
+            if (!o.ok || !o.d.ok) {
+              setMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível iniciar a análise.', true);
+              return;
+            }
+            currentPage = 1;
+            expandedId = o.d.caso_id || null;
+            var texto = o.d.mensagem || 'Processamento iniciado.';
+            if (o.d.reutilizado) texto = 'Caso já em andamento — reutilizado. ' + texto;
+            if (o.d.aviso) texto += ' ' + o.d.aviso;
+            setMsg(texto, false);
+            form.reset();
+            return syncCasos(false);
+          })
+          .catch(function (e) {
+            setMsg(e && e.message ? e.message : 'Falha de rede ao iniciar análise.', true);
+          })
+          .finally(function () {
+            submitInFlight = false;
+            if (submitBtn && apiConfigured) submitBtn.disabled = false;
+          });
+      });
+    }
 
     if (tbody) {
       tbody.addEventListener('click', function (event) {
+        var cancelBtn = event.target.closest && event.target.closest('.pre-cancel-btn');
+        if (cancelBtn) {
+          var cancelId = cancelBtn.getAttribute('data-id');
+          if (!cancelId || !window.confirm('Cancelar o processamento deste caso?')) return;
+          cancelBtn.disabled = true;
+          fetch('/api/pre-analise-processual/' + encodeURIComponent(cancelId) + '/cancelar', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+          })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (o) {
+              if (!o.ok || !o.d.ok) {
+                setMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível cancelar.', true);
+                cancelBtn.disabled = false;
+                return;
+              }
+              setMsg(o.d.mensagem || 'Processamento cancelado.', false);
+              return syncCasos(false);
+            })
+            .catch(function (e) {
+              setMsg(e && e.message ? e.message : 'Falha de rede ao cancelar.', true);
+              cancelBtn.disabled = false;
+            });
+          return;
+        }
+
+        var removeBtn = event.target.closest && event.target.closest('.pre-remove-btn');
+        if (removeBtn) {
+          var removeId = removeBtn.getAttribute('data-id');
+          if (!removeId || !window.confirm('Remover este caso da lista da plataforma?')) return;
+          removeBtn.disabled = true;
+          fetch('/api/pre-analise-processual/' + encodeURIComponent(removeId), {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+          })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (o) {
+              if (!o.ok || !o.d.ok) {
+                setMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível remover.', true);
+                removeBtn.disabled = false;
+                return;
+              }
+              if (expandedId === removeId) expandedId = null;
+              setMsg(o.d.mensagem || 'Caso removido da lista.', false);
+              return loadCasos(false);
+            })
+            .catch(function (e) {
+              setMsg(e && e.message ? e.message : 'Falha de rede ao remover.', true);
+              removeBtn.disabled = false;
+            });
+          return;
+        }
+
         var btn = event.target.closest && event.target.closest('.pre-toggle-btn');
         if (!btn) return;
         var id = btn.getAttribute('data-id');
@@ -393,21 +642,32 @@
 
     if (prevBtn) {
       prevBtn.addEventListener('click', function () {
+        if (currentPage <= 1) return;
         currentPage -= 1;
         expandedId = null;
-        renderTable();
+        loadCasos();
       });
     }
 
     if (nextBtn) {
       nextBtn.addEventListener('click', function () {
+        if (currentPage >= totalPages) return;
         currentPage += 1;
         expandedId = null;
-        renderTable();
+        loadCasos();
       });
     }
 
-    renderTable();
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && activeCount > 0) {
+        syncCasos(false);
+      }
+      updatePollTimer();
+    });
+
+    loadCasos(false).then(function () {
+      if (activeCount > 0) syncCasos(false);
+    });
   })();
   </script>
 </body>
