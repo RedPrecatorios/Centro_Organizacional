@@ -11,7 +11,8 @@
 </head>
 <body class="dashboard-body"
   data-pre-analise-configured='{{ pre_analise_api_configured | tojson }}'
-  data-pre-analise-poll-ms='{{ pre_analise_poll_interval_ms | tojson }}'>
+  data-pre-analise-poll-ms='{{ pre_analise_poll_interval_ms | tojson }}'
+  data-pre-analise-drive-configured='{{ (pre_analise_drive_configured|default(false)) | tojson }}'>
   {% include 'partials/sidebar_navegacao.html' %}
 
   <div class="dash-main">
@@ -66,14 +67,15 @@
           </div>
 
           <div class="prop-field">
-            <label for="pre-nome">Nome <span class="prop-edit-note">(opcional)</span></label>
+            <label for="pre-nome">Nome <span aria-hidden="true">*</span></label>
             <input
               type="text"
               id="pre-nome"
               class="auth-input"
               name="nome"
-              placeholder="Digite o nome, se houver"
+              placeholder="Digite o nome"
               autocomplete="off"
+              required
               {% if not pre_analise_api_configured %}disabled{% endif %}
             />
           </div>
@@ -128,7 +130,7 @@
           <table class="dash-table pre-table">
             <thead>
               <tr>
-                <th scope="col" class="pre-col-toggle">Detalhes</th>
+                <th scope="col" class="pre-col-toggle">Ações</th>
                 <th scope="col">Número de Processo</th>
                 <th scope="col">Número do Incidente</th>
                 <th scope="col">Nome</th>
@@ -153,6 +155,43 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <div class="pre-anexos-overlay" id="pre-anexos-overlay" hidden>
+    <div class="pre-anexos-modal" role="dialog" aria-modal="true" aria-labelledby="pre-anexos-title">
+      <div class="pre-anexos-header">
+        <div>
+          <h2 class="pre-anexos-title" id="pre-anexos-title">Anexos (Google Drive)</h2>
+          <p class="pre-anexos-sub" id="pre-anexos-sub"></p>
+        </div>
+        <button type="button" class="camp-btn camp-btn-ghost" id="pre-anexos-close" aria-label="Fechar">Fechar</button>
+      </div>
+      <p class="prop-msg" id="pre-anexos-msg" role="status" aria-live="polite"></p>
+      <div class="pre-anexos-body" id="pre-anexos-body">
+        <p class="dash-empty">Carregando…</p>
+      </div>
+      <div class="pre-anexos-viewer" id="pre-anexos-viewer" hidden>
+        <iframe id="pre-anexos-frame" title="Pré-visualização do PDF"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="pre-ficha-overlay" id="pre-ficha-overlay" hidden>
+    <div class="pre-ficha-modal" role="dialog" aria-modal="true" aria-labelledby="pre-ficha-title">
+      <div class="pre-ficha-header">
+        <div>
+          <h2 class="pre-ficha-title" id="pre-ficha-title">Mais informações</h2>
+          <p class="pre-ficha-sub" id="pre-ficha-sub"></p>
+        </div>
+        <div class="pre-row-actions">
+          <button type="button" class="camp-btn camp-btn-primary" id="pre-ficha-save">Salvar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-validate-herdeiros" title="Salvar e validar herdeiros">Validar herdeiros</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-close">Fechar</button>
+        </div>
+      </div>
+      <p class="prop-msg" id="pre-ficha-msg" role="status" aria-live="polite"></p>
+      <form id="pre-ficha-form" class="pre-ficha-form"></form>
+    </div>
   </div>
 
   <style>
@@ -191,8 +230,15 @@
       margin: 0;
     }
     .pre-col-toggle {
-      width: 72px;
-      text-align: center;
+      width: 380px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .pre-row-actions {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
     }
     .pre-status-badge {
       display: inline-block;
@@ -221,23 +267,27 @@
       background: #fef2f2;
     }
     .pre-toggle-btn {
-      display: inline-grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 4px 10px;
       border: 1px solid var(--border);
-      border-radius: 999px;
+      border-radius: var(--r);
       background: var(--surface);
       color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 600;
       cursor: pointer;
-      transition: transform .15s ease, background .15s ease;
+      transition: background .15s ease, border-color .15s ease;
     }
     .pre-toggle-btn:hover {
       background: var(--accent-ghost);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
     }
     .pre-toggle-btn[aria-expanded="true"] {
-      transform: rotate(90deg);
       background: var(--accent-ghost);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
     }
     .pre-detail-row td {
       background: var(--surface-muted);
@@ -284,6 +334,241 @@
         flex-direction: column;
       }
     }
+    .pre-anexos-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      background: color-mix(in srgb, #0f172a 45%, transparent);
+    }
+    .pre-anexos-overlay[hidden] {
+      display: none !important;
+    }
+    .pre-anexos-modal {
+      width: min(920px, 100%);
+      max-height: min(88vh, 900px);
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 16px 18px 18px;
+    }
+    .pre-anexos-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .pre-anexos-title {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+    .pre-anexos-sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .pre-anexos-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+    .pre-anexos-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .pre-anexos-list li:last-child {
+      border-bottom: 0;
+    }
+    .pre-anexos-list .pre-anexo-path {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 2px;
+    }
+    .pre-anexos-viewer {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      min-height: 420px;
+      background: var(--surface-muted);
+    }
+    .pre-anexos-viewer iframe {
+      width: 100%;
+      height: 60vh;
+      min-height: 420px;
+      border: 0;
+    }
+    .pre-ficha-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      display: grid;
+      place-items: center;
+      padding: 12px;
+      background: color-mix(in srgb, #0f172a 45%, transparent);
+    }
+    .pre-ficha-overlay[hidden] {
+      display: none !important;
+    }
+    .pre-ficha-modal {
+      width: min(1100px, 100%);
+      max-height: min(92vh, 980px);
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 16px 18px 20px;
+    }
+    .pre-ficha-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 2;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .pre-ficha-title {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+    .pre-ficha-sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .pre-ficha-section {
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface-muted);
+    }
+    .pre-ficha-section h3 {
+      margin: 0 0 12px;
+      font-size: 0.95rem;
+    }
+    .pre-ficha-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px 12px;
+    }
+    .pre-ficha-field label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .pre-ficha-field input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .pre-ficha-source {
+      margin-left: 4px;
+      font-size: 0.68rem;
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--accent);
+    }
+    .pre-herdeiros-block {
+      margin: 0 0 18px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .pre-herdeiros-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 0;
+      background: var(--surface-muted);
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      font-weight: 600;
+    }
+    .pre-herdeiros-toggle:hover {
+      background: color-mix(in srgb, var(--accent) 8%, var(--surface-muted));
+    }
+    .pre-herdeiros-arrow {
+      display: inline-block;
+      transition: transform .15s ease;
+      color: var(--accent);
+    }
+    .pre-herdeiros-block.is-open .pre-herdeiros-arrow {
+      transform: rotate(90deg);
+    }
+    .pre-herdeiros-body {
+      display: none;
+      padding: 12px 14px 16px;
+      border-top: 1px solid var(--border);
+    }
+    .pre-herdeiros-block.is-open .pre-herdeiros-body {
+      display: block;
+    }
+    .pre-herdeiro-card {
+      margin: 0 0 14px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface-muted);
+    }
+    .pre-herdeiro-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .pre-herdeiro-card-head h4 {
+      margin: 0;
+      font-size: 0.92rem;
+    }
+    .pre-herdeiros-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .pre-herdeiros-hint {
+      margin: 0 0 10px;
+      font-size: 0.84rem;
+      color: var(--muted);
+    }
+    .pre-herdeiro-sub {
+      margin-top: 10px;
+    }
+    .pre-herdeiro-sub summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
   </style>
 
   <script>
@@ -291,6 +576,7 @@
     var PAGE_SIZE = 15;
     var bodyEl = document.body;
     var apiConfigured = bodyEl && bodyEl.getAttribute('data-pre-analise-configured') === 'true';
+    var driveConfigured = bodyEl && bodyEl.getAttribute('data-pre-analise-drive-configured') === 'true';
     var pollMs = 5000;
     try {
       pollMs = parseInt(bodyEl.getAttribute('data-pre-analise-poll-ms') || '5000', 10) || 5000;
@@ -315,6 +601,465 @@
     var pollTimer = null;
     var submitInFlight = false;
     var syncInFlight = false;
+    var anexosInFlight = false;
+
+    var anexosOverlay = document.getElementById('pre-anexos-overlay');
+    var anexosBody = document.getElementById('pre-anexos-body');
+    var anexosMsg = document.getElementById('pre-anexos-msg');
+    var anexosSub = document.getElementById('pre-anexos-sub');
+    var anexosClose = document.getElementById('pre-anexos-close');
+    var anexosViewer = document.getElementById('pre-anexos-viewer');
+    var anexosFrame = document.getElementById('pre-anexos-frame');
+
+    var fichaOverlay = document.getElementById('pre-ficha-overlay');
+    var fichaForm = document.getElementById('pre-ficha-form');
+    var fichaMsg = document.getElementById('pre-ficha-msg');
+    var fichaSub = document.getElementById('pre-ficha-sub');
+    var fichaClose = document.getElementById('pre-ficha-close');
+    var fichaSave = document.getElementById('pre-ficha-save');
+    var fichaValidateHerdeiros = document.getElementById('pre-ficha-validate-herdeiros');
+    var fichaContext = null;
+    var fichaSaveInFlight = false;
+    var fichaState = {
+      herdeirosAbertos: false,
+      herdeiros: [],
+      temHerdeiros: false,
+      herdeirosFlagTexto: '',
+      herdeiroSchema: null
+    };
+
+    function setFichaMsg(text, isError) {
+      if (!fichaMsg) return;
+      fichaMsg.textContent = text || '';
+      fichaMsg.className = 'prop-msg' + (isError ? ' prop-msg--err' : '');
+    }
+
+    function closeFichaModal() {
+      if (!fichaOverlay) return;
+      fichaOverlay.hidden = true;
+      fichaContext = null;
+    }
+
+    function emptyHerdeiroDados(keys) {
+      var d = {};
+      (keys || []).forEach(function (k) { d[k] = ''; });
+      return d;
+    }
+
+    function renderSectionFields(sec, dados, fontes, namePrefix, idPrefix) {
+      fontes = fontes || {};
+      dados = dados || {};
+      namePrefix = namePrefix || '';
+      idPrefix = idPrefix || 'ficha-';
+      return (sec.fields || []).map(function (f) {
+        var key = f.key;
+        var name = namePrefix ? (namePrefix + key) : key;
+        var id = idPrefix + name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        var src = (!namePrefix && fontes[key]) ? '<span class="pre-ficha-source">(' + esc(fontes[key]) + ')</span>' : '';
+        return '' +
+          '<div class="pre-ficha-field">' +
+            '<label for="' + esc(id) + '">' + esc(f.label || key) + src + '</label>' +
+            '<input type="text" class="auth-input" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(dados[key] || '') + '" autocomplete="off" />' +
+          '</div>';
+      }).join('');
+    }
+
+    function renderHerdeiroCard(index, item, schema) {
+      var sections = (schema && schema.sections) || [];
+      var dados = (item && item.dados) || {};
+      var prefix = 'herdeiro_' + index + '__';
+      var idPrefix = 'fh-' + index + '-';
+      var body = sections.map(function (sec) {
+        var fieldsHtml = '<div class="pre-ficha-grid">' + renderSectionFields(sec, dados, {}, prefix, idPrefix) + '</div>';
+        if (sec.collapsible) {
+          return '<details class="pre-herdeiro-sub"><summary>' + esc(sec.title || '') + '</summary>' + fieldsHtml + '</details>';
+        }
+        return '<div class="pre-herdeiro-sub"><h4 style="margin:0 0 8px;font-size:0.85rem;color:var(--muted)">' + esc(sec.title || '') + '</h4>' + fieldsHtml + '</div>';
+      }).join('');
+      return '' +
+        '<div class="pre-herdeiro-card" data-herdeiro-index="' + index + '">' +
+          '<div class="pre-herdeiro-card-head">' +
+            '<h4>Herdeiro ' + (index + 1) + '</h4>' +
+            '<button type="button" class="camp-btn camp-btn-danger camp-btn-sm pre-herdeiro-remove" data-index="' + index + '">Remover</button>' +
+          '</div>' +
+          body +
+        '</div>';
+    }
+
+    function collectHerdeirosFromDom() {
+      if (!fichaForm || !fichaState.herdeirosAbertos) return [];
+      var keys = ((fichaState.herdeiroSchema && fichaState.herdeiroSchema.keys) || []);
+      var cards = fichaForm.querySelectorAll('.pre-herdeiro-card');
+      var out = [];
+      for (var i = 0; i < cards.length; i++) {
+        var idx = cards[i].getAttribute('data-herdeiro-index');
+        var dados = emptyHerdeiroDados(keys);
+        keys.forEach(function (key) {
+          var el = cards[i].querySelector('[name="herdeiro_' + idx + '__' + key + '"]');
+          dados[key] = el ? String(el.value || '').trim() : '';
+        });
+        out.push({ ordem: i + 1, dados: dados });
+      }
+      return out;
+    }
+
+    function syncHerdeiroStateFromDom() {
+      fichaState.herdeiros = collectHerdeirosFromDom();
+      var qtd = fichaForm && fichaForm.querySelector('[name="qtd_herdeiros"]');
+      if (qtd) qtd.value = fichaState.herdeirosAbertos ? String(fichaState.herdeiros.length) : '0';
+    }
+
+    function renderHerdeirosBlock() {
+      var schema = fichaState.herdeiroSchema || { sections: [], keys: [] };
+      var openClass = fichaState.herdeirosAbertos ? ' is-open' : '';
+      var hint = fichaState.herdeirosFlagTexto
+        ? ('Mongo: ' + fichaState.herdeirosFlagTexto)
+        : (fichaState.temHerdeiros
+          ? 'Herdeiros indicados — preencha e valide antes de confirmar.'
+          : 'Nenhum herdeiro indicado no Mongo. Expanda para adicionar manualmente.');
+      var cards = '';
+      if (fichaState.herdeirosAbertos) {
+        if (!fichaState.herdeiros.length) {
+          fichaState.herdeiros = [{ ordem: 1, dados: emptyHerdeiroDados(schema.keys) }];
+        }
+        cards = fichaState.herdeiros.map(function (h, i) {
+          return renderHerdeiroCard(i, h, schema);
+        }).join('');
+      }
+      return '' +
+        '<section class="pre-herdeiros-block' + openClass + '" id="pre-herdeiros-block">' +
+          '<button type="button" class="pre-herdeiros-toggle" id="pre-herdeiros-toggle" aria-expanded="' + (fichaState.herdeirosAbertos ? 'true' : 'false') + '">' +
+            '<span><span class="pre-herdeiros-arrow">›</span> Herdeiros</span>' +
+            '<span class="dash-muted">' + (fichaState.herdeirosAbertos ? (fichaState.herdeiros.length + ' formulário(s)') : 'recolhido') + '</span>' +
+          '</button>' +
+          '<div class="pre-herdeiros-body">' +
+            '<p class="pre-herdeiros-hint">' + esc(hint) + '</p>' +
+            '<div class="pre-herdeiros-toolbar">' +
+              '<button type="button" class="camp-btn camp-btn-primary camp-btn-sm" id="pre-herdeiro-add">Adicionar herdeiro</button>' +
+            '</div>' +
+            '<div id="pre-herdeiros-cards">' + cards + '</div>' +
+          '</div>' +
+        '</section>';
+    }
+
+    function renderFichaForm(payload) {
+      if (!fichaForm) return;
+      var schema = (payload && payload.schema) || {};
+      var sections = schema.sections || [];
+      var dados = (payload && payload.dados) || {};
+      var fontes = (payload && payload.fontes) || {};
+      fichaState.herdeiroSchema = schema.herdeiros || { sections: [], keys: [] };
+      fichaState.herdeirosAbertos = !!(payload && payload.herdeiros_abertos);
+      fichaState.temHerdeiros = !!(payload && payload.tem_herdeiros);
+      fichaState.herdeirosFlagTexto = (payload && payload.herdeiros_flag_texto) || '';
+      fichaState.herdeiros = Array.isArray(payload && payload.herdeiros) ? payload.herdeiros.slice() : [];
+
+      var mainHtml = sections.map(function (sec) {
+        return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+          renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
+      }).join('');
+
+      // Insert herdeiros block before metadados section if present
+      var metaIdx = sections.findIndex(function (s) { return s.id === 'metadados'; });
+      if (metaIdx >= 0) {
+        var before = sections.slice(0, metaIdx).map(function (sec) {
+          return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+            renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
+        }).join('');
+        var after = sections.slice(metaIdx).map(function (sec) {
+          return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+            renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
+        }).join('');
+        fichaForm.innerHTML = before + renderHerdeirosBlock() + after;
+      } else {
+        fichaForm.innerHTML = mainHtml + renderHerdeirosBlock();
+      }
+      bindHerdeirosUi();
+    }
+
+    function reRenderHerdeirosOnly() {
+      syncHerdeiroStateFromDom();
+      var block = document.getElementById('pre-herdeiros-block');
+      if (!block) return;
+      var wrapper = document.createElement('div');
+      wrapper.innerHTML = renderHerdeirosBlock();
+      block.replaceWith(wrapper.firstChild);
+      bindHerdeirosUi();
+    }
+
+    function bindHerdeirosUi() {
+      var toggle = document.getElementById('pre-herdeiros-toggle');
+      if (toggle) {
+        toggle.addEventListener('click', function () {
+          syncHerdeiroStateFromDom();
+          fichaState.herdeirosAbertos = !fichaState.herdeirosAbertos;
+          if (fichaState.herdeirosAbertos && !fichaState.herdeiros.length) {
+            fichaState.herdeiros = [{ ordem: 1, dados: emptyHerdeiroDados((fichaState.herdeiroSchema || {}).keys) }];
+          }
+          if (!fichaState.herdeirosAbertos) {
+            // keep data in state but collapse
+          }
+          reRenderHerdeirosOnly();
+        });
+      }
+      var addBtn = document.getElementById('pre-herdeiro-add');
+      if (addBtn) {
+        addBtn.addEventListener('click', function () {
+          syncHerdeiroStateFromDom();
+          fichaState.herdeirosAbertos = true;
+          fichaState.herdeiros.push({
+            ordem: fichaState.herdeiros.length + 1,
+            dados: emptyHerdeiroDados((fichaState.herdeiroSchema || {}).keys)
+          });
+          reRenderHerdeirosOnly();
+        });
+      }
+      var removes = fichaForm ? fichaForm.querySelectorAll('.pre-herdeiro-remove') : [];
+      for (var i = 0; i < removes.length; i++) {
+        removes[i].addEventListener('click', function (ev) {
+          var idx = parseInt(ev.currentTarget.getAttribute('data-index') || '-1', 10);
+          syncHerdeiroStateFromDom();
+          if (idx >= 0 && idx < fichaState.herdeiros.length) {
+            fichaState.herdeiros.splice(idx, 1);
+          }
+          if (!fichaState.herdeiros.length) {
+            fichaState.herdeirosAbertos = false;
+          }
+          reRenderHerdeirosOnly();
+        });
+      }
+    }
+
+    function openFichaModal(item) {
+      if (!fichaOverlay) return;
+      fichaOverlay.hidden = false;
+      setFichaMsg('Carregando ficha…', false);
+      if (fichaForm) fichaForm.innerHTML = '<p class="dash-empty">Carregando…</p>';
+      fichaContext = {
+        caso_id: item.caso_id || '',
+        id_externo: item.id_externo || '',
+        numero_cumprimento: item.numero_cumprimento || '',
+        numero_incidente: item.numero_incidente || '',
+        nome_credor: item.nome_credor || '',
+        depre: item.numero_depre || item.numero_depre_input || ''
+      };
+      if (fichaSub) {
+        fichaSub.textContent = [fichaContext.numero_cumprimento, fichaContext.numero_incidente].filter(Boolean).join(' / ');
+      }
+      var qs = new URLSearchParams();
+      qs.set('numero_cumprimento', fichaContext.numero_cumprimento);
+      qs.set('numero_incidente', fichaContext.numero_incidente);
+      if (fichaContext.caso_id) qs.set('caso_id', fichaContext.caso_id);
+      if (fichaContext.id_externo) qs.set('id_externo', fichaContext.id_externo);
+      if (fichaContext.nome_credor) qs.set('nome_credor', fichaContext.nome_credor);
+      if (fichaContext.depre) qs.set('depre', fichaContext.depre);
+
+      fetch('/api/pre-analise-processual/ficha?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setFichaMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível carregar a ficha.', true);
+            if (fichaForm) fichaForm.innerHTML = '';
+            return;
+          }
+          renderFichaForm(o.d);
+          var notes = [];
+          if (o.d.saved) notes.push('Dados locais salvos.');
+          if (o.d.herdeiros_validado) notes.push('Herdeiros validados.');
+          else if (o.d.herdeiros_abertos) notes.push('Herdeiros em rascunho.');
+          if (Array.isArray(o.d.avisos) && o.d.avisos.length) notes = notes.concat(o.d.avisos);
+          setFichaMsg(notes.join(' '), false);
+        })
+        .catch(function (e) {
+          setFichaMsg(e && e.message ? e.message : 'Falha de rede ao carregar ficha.', true);
+          if (fichaForm) fichaForm.innerHTML = '';
+        });
+    }
+
+    function saveFicha(opts) {
+      opts = opts || {};
+      var validarHerdeiros = !!opts.validarHerdeiros;
+      if (!fichaForm || !fichaContext || fichaSaveInFlight) return;
+      syncHerdeiroStateFromDom();
+
+      var dados = {};
+      var inputs = fichaForm.querySelectorAll('input[name]');
+      for (var i = 0; i < inputs.length; i++) {
+        var n = inputs[i].name;
+        if (n.indexOf('herdeiro_') === 0) continue;
+        dados[n] = String(inputs[i].value || '').trim();
+      }
+      dados.cumprimento_de_sentenca = dados.cumprimento_de_sentenca || fichaContext.numero_cumprimento;
+      dados.incidente = dados.incidente || fichaContext.numero_incidente;
+
+      if (validarHerdeiros && !fichaState.herdeirosAbertos) {
+        setFichaMsg('Expanda o bloco Herdeiros antes de validar.', true);
+        return;
+      }
+      if (validarHerdeiros && !window.confirm('Validar e salvar os herdeiros preenchidos?')) {
+        return;
+      }
+
+      fichaSaveInFlight = true;
+      if (fichaSave) fichaSave.disabled = true;
+      if (fichaValidateHerdeiros) fichaValidateHerdeiros.disabled = true;
+      setFichaMsg(validarHerdeiros ? 'Validando herdeiros…' : 'Salvando…', false);
+
+      fetch('/api/pre-analise-processual/ficha', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          caso_id: fichaContext.caso_id,
+          id_externo: fichaContext.id_externo,
+          cumprimento_de_sentenca: dados.cumprimento_de_sentenca,
+          incidente: dados.incidente,
+          dados: dados,
+          herdeiros: fichaState.herdeirosAbertos ? fichaState.herdeiros : [],
+          herdeiros_abertos: fichaState.herdeirosAbertos,
+          tem_herdeiros: fichaState.temHerdeiros || fichaState.herdeirosAbertos,
+          herdeiros_flag_texto: fichaState.herdeirosFlagTexto,
+          validar_herdeiros: validarHerdeiros
+        })
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setFichaMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível salvar.', true);
+            return;
+          }
+          setFichaMsg(o.d.mensagem || 'Ficha salva.', false);
+          if (Array.isArray(o.d.herdeiros)) {
+            fichaState.herdeiros = o.d.herdeiros;
+            fichaState.herdeirosAbertos = !!o.d.herdeiros_abertos;
+            reRenderHerdeirosOnly();
+          }
+          if (o.d.dados) {
+            var keys = Object.keys(o.d.dados);
+            for (var j = 0; j < keys.length; j++) {
+              var el = fichaForm.querySelector('[name="' + keys[j] + '"]');
+              if (el && keys[j].indexOf('herdeiro_') !== 0) {
+                el.value = o.d.dados[keys[j]] == null ? '' : String(o.d.dados[keys[j]]);
+              }
+            }
+          }
+        })
+        .catch(function (e) {
+          setFichaMsg(e && e.message ? e.message : 'Falha de rede ao salvar.', true);
+        })
+        .finally(function () {
+          fichaSaveInFlight = false;
+          if (fichaSave) fichaSave.disabled = false;
+          if (fichaValidateHerdeiros) fichaValidateHerdeiros.disabled = false;
+        });
+    }
+
+    function setAnexosMsg(text, isError) {
+      if (!anexosMsg) return;
+      anexosMsg.textContent = text || '';
+      anexosMsg.className = 'prop-msg' + (isError ? ' prop-msg--err' : '');
+    }
+
+    function closeAnexosModal() {
+      if (!anexosOverlay) return;
+      anexosOverlay.hidden = true;
+      if (anexosFrame) anexosFrame.src = 'about:blank';
+      if (anexosViewer) anexosViewer.hidden = true;
+    }
+
+    function openAnexosModal(item) {
+      if (!anexosOverlay) return;
+      anexosOverlay.hidden = false;
+      setAnexosMsg('', false);
+      if (anexosBody) anexosBody.innerHTML = '<p class="dash-empty">Carregando anexos…</p>';
+      if (anexosViewer) anexosViewer.hidden = true;
+      if (anexosFrame) anexosFrame.src = 'about:blank';
+      if (anexosSub) {
+        var label = [item.numero_cumprimento, item.numero_incidente].filter(Boolean).join(' / ');
+        anexosSub.textContent = label ? ('Caso: ' + label) : '';
+      }
+      loadAnexos(item);
+    }
+
+    function formatSize(value) {
+      var n = Number(value);
+      if (!n || n < 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function renderAnexosList(d) {
+      if (!anexosBody) return;
+      var items = Array.isArray(d.items) ? d.items : [];
+      var folderLabel = d.matched_folder || d.expected_folder || '';
+      var meta = '';
+      if (d.aviso) {
+        meta += '<p class="prop-msg prop-msg--err" style="margin:0 0 10px">' + esc(d.aviso) + '</p>';
+      }
+      if (folderLabel) {
+        meta += '<p class="pre-list-sub" style="margin:0 0 10px">Pasta: ' + esc(folderLabel) + ' · apenas ficheiros com «redator»</p>';
+      }
+
+      if (!items.length) {
+        anexosBody.innerHTML = meta + '<p class="dash-empty">Nenhum anexo disponível para download.</p>';
+        return;
+      }
+
+      anexosBody.innerHTML = meta + '<ul class="pre-anexos-list">' + items.map(function (f) {
+        var size = formatSize(f.size);
+        return '' +
+          '<li>' +
+            '<div>' +
+              '<div><strong>' + esc(f.name || 'Redator') + '</strong> ' +
+                '<span class="pre-status-badge pre-status-badge--done">disponível</span></div>' +
+              (size ? '<div class="pre-anexo-path">' + esc(size) + '</div>' : '') +
+            '</div>' +
+            '<div class="pre-row-actions">' +
+              '<a class="camp-btn camp-btn-primary camp-btn-sm" href="' + esc(f.download_url || ('/api/pre-analise-processual/anexos/' + encodeURIComponent(f.id) + '?download=1')) + '" download>Download</a>' +
+              '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm pre-anexo-open" data-id="' + esc(f.id) + '">Visualizar</button>' +
+            '</div>' +
+          '</li>';
+      }).join('') + '</ul>';
+    }
+
+    function loadAnexos(item) {
+      if (anexosInFlight) return;
+      if (!driveConfigured) {
+        setAnexosMsg('Google Drive não configurado. Defina PRE_ANALISE_DRIVE_FOLDER_ID e as credenciais GOOGLE_DRIVE_* no .env.', true);
+        if (anexosBody) anexosBody.innerHTML = '';
+        return;
+      }
+      anexosInFlight = true;
+      var qs = new URLSearchParams();
+      if (item.numero_cumprimento) qs.set('numero_cumprimento', item.numero_cumprimento);
+      if (item.numero_incidente) qs.set('numero_incidente', item.numero_incidente);
+      if (item.caminho_pasta) qs.set('caminho_pasta', item.caminho_pasta);
+      fetch('/api/pre-analise-processual/anexos?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (o) {
+          if (!o.ok || !o.d.ok) {
+            setAnexosMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível listar os anexos.', true);
+            if (anexosBody) anexosBody.innerHTML = '';
+            return;
+          }
+          setAnexosMsg('', false);
+          renderAnexosList(o.d);
+        })
+        .catch(function (e) {
+          setAnexosMsg(e && e.message ? e.message : 'Falha de rede ao listar anexos.', true);
+          if (anexosBody) anexosBody.innerHTML = '';
+        })
+        .finally(function () {
+          anexosInFlight = false;
+        });
+    }
 
     function setMsg(text, isError) {
       if (!msg) return;
@@ -417,7 +1162,13 @@
           var row = '' +
             '<tr>' +
               '<td class="pre-col-toggle">' +
-                '<button type="button" class="pre-toggle-btn" data-id="' + esc(casoId) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" title="Ampliar informações">›</button>' +
+                '<div class="pre-row-actions">' +
+                  '<button type="button" class="pre-toggle-btn" data-id="' + esc(casoId) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" title="Visualizar Detalhes">' +
+                    (isExpanded ? 'Ocultar detalhes' : 'Visualizar Detalhes') +
+                  '</button>' +
+                  '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm pre-anexos-btn" data-id="' + esc(casoId) + '" title="Visualizar Anexos no Google Drive">Visualizar Anexos</button>' +
+                  '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm pre-ficha-btn" data-id="' + esc(casoId) + '" title="Mais informações">Mais informações</button>' +
+                '</div>' +
               '</td>' +
               '<td>' + display(item.numero_cumprimento) + '</td>' +
               '<td>' + display(item.numero_incidente) + '</td>' +
@@ -577,6 +1328,24 @@
 
     if (tbody) {
       tbody.addEventListener('click', function (event) {
+        var anexosBtn = event.target.closest && event.target.closest('.pre-anexos-btn');
+        if (anexosBtn) {
+          var anexosId = anexosBtn.getAttribute('data-id');
+          var anexosItem = items.find(function (it) { return String(it.caso_id) === String(anexosId); });
+          if (anexosItem) openAnexosModal(anexosItem);
+          else setMsg('Caso não encontrado na lista atual.', true);
+          return;
+        }
+
+        var fichaBtn = event.target.closest && event.target.closest('.pre-ficha-btn');
+        if (fichaBtn) {
+          var fichaId = fichaBtn.getAttribute('data-id');
+          var fichaItem = items.find(function (it) { return String(it.caso_id) === String(fichaId); });
+          if (fichaItem) openFichaModal(fichaItem);
+          else setMsg('Caso não encontrado na lista atual.', true);
+          return;
+        }
+
         var cancelBtn = event.target.closest && event.target.closest('.pre-cancel-btn');
         if (cancelBtn) {
           var cancelId = cancelBtn.getAttribute('data-id');
@@ -639,6 +1408,55 @@
         renderTable();
       });
     }
+
+    if (anexosBody) {
+      anexosBody.addEventListener('click', function (event) {
+        var openBtn = event.target.closest && event.target.closest('.pre-anexo-open');
+        if (!openBtn) return;
+        var fid = openBtn.getAttribute('data-id');
+        if (!fid || !anexosFrame || !anexosViewer) return;
+        anexosViewer.hidden = false;
+        anexosFrame.src = '/api/pre-analise-processual/anexos/' + encodeURIComponent(fid);
+      });
+    }
+
+    if (anexosClose) {
+      anexosClose.addEventListener('click', closeAnexosModal);
+    }
+    if (anexosOverlay) {
+      anexosOverlay.addEventListener('click', function (event) {
+        if (event.target === anexosOverlay) closeAnexosModal();
+      });
+    }
+    if (fichaClose) fichaClose.addEventListener('click', closeFichaModal);
+    if (fichaSave) fichaSave.addEventListener('click', function (e) { e.preventDefault(); saveFicha({ validarHerdeiros: false }); });
+    if (fichaValidateHerdeiros) {
+      fichaValidateHerdeiros.addEventListener('click', function (e) {
+        e.preventDefault();
+        saveFicha({ validarHerdeiros: true });
+      });
+    }
+    if (fichaOverlay) {
+      fichaOverlay.addEventListener('click', function (event) {
+        if (event.target === fichaOverlay) closeFichaModal();
+      });
+    }
+    if (fichaForm) {
+      fichaForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        saveFicha({ validarHerdeiros: false });
+      });
+    }
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      if (fichaOverlay && !fichaOverlay.hidden) {
+        closeFichaModal();
+        return;
+      }
+      if (anexosOverlay && !anexosOverlay.hidden) {
+        closeAnexosModal();
+      }
+    });
 
     if (prevBtn) {
       prevBtn.addEventListener('click', function () {

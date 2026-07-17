@@ -14,7 +14,7 @@ import pymysql
 from colorama import Fore, Style
 
 from calculation_automation.calculation_automation import CalculationAutomation
-from general_functions.general_functions import format_dict_values
+from general_functions.general_functions import format_dict_values, normalize_db_date_str
 
 
 def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = None) -> dict[str, Any]:
@@ -98,8 +98,8 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
         processo_principal = str(infos[0][32]).strip()
         numero_de_processo = str(infos[0][12]).strip()
         numero_de_incidente = str(infos[0][13]).strip()
-        data_base = str(infos[0][18]).strip()
-        data_decisao = str(infos[0][19]).strip()
+        data_base = normalize_db_date_str(infos[0][18])
+        data_decisao = normalize_db_date_str(infos[0][19])
         principal_liquido = str(infos[0][20]).strip()
         juros_moratorio = str(infos[0][21]).strip()
         ep = str(infos[0][35]).strip()

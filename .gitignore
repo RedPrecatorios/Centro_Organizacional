@@ -49,5 +49,11 @@ campanha/logs/
 campanha/state/
 campanha/recipients.csv
 
+# Levantamento de Processos — runtime / artefatos locais (código entra no git)
+Levantamento de Processos/logs/
+Levantamento de Processos/output/
+Levantamento de Processos/venv/
+Levantamento de Processos/.pytest_cache/
+
 #folders
 *.sql/

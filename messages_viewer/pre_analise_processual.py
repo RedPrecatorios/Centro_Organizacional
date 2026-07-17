@@ -796,6 +796,8 @@ def iniciar_caso(
         return {"ok": False, "error": "numero_de_processo é obrigatório."}, 400
     if not incidente:
         return {"ok": False, "error": "numero_do_incidente é obrigatório."}, 400
+    if not nome:
+        return {"ok": False, "error": "nome é obrigatório."}, 400
 
     id_externo, aviso_lookup = resolve_id_externo(
         processo,
@@ -806,7 +808,7 @@ def iniciar_caso(
     payload = {
         "numero_cumprimento": processo,
         "numero_incidente": incidente,
-        "nome_credor": nome or None,
+        "nome_credor": nome,
         "numero_depre": depre_input or None,
         "id_externo": id_externo,
     }
@@ -847,7 +849,7 @@ def iniciar_caso(
             id_externo=id_externo,
             numero_cumprimento=processo,
             numero_incidente=incidente,
-            nome_credor=nome or None,
+            nome_credor=nome,
             numero_depre_input=depre_input or None,
             status=status,
             mensagem=mensagem,

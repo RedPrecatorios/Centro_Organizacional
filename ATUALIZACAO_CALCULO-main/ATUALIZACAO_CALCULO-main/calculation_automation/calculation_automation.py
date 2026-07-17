@@ -43,6 +43,7 @@ from db_handler.memoria_range_sync import (
     total_liquido_arredondado,
 )
 from calculation_automation.previdencia_total import previdencia_total_from_main_dict
+from general_functions.general_functions import parse_planilha_date
 from txt_handler.txt_handler import TxtHandler
 
 try:
@@ -601,18 +602,22 @@ class CalculationAutomation:
         ws["B17"] = self.main_dict["Cumprimento"]
         ws["B18"] = self.main_dict["Incidente"]
 
-        try:
-            ws["F27"] = datetime.strptime(
-                self.main_dict["Data_Base"], "%d/%m/%Y"
+        # F27 = Data_Base; J27 = Data_Decisão (chave Data_Inscrição).
+        # Sem data válida no banco → célula em branco (não manter default do template).
+        data_base_dt = parse_planilha_date(self.main_dict.get("Data_Base"))
+        data_insc_dt = parse_planilha_date(self.main_dict.get("Data_Inscrição"))
+        ws["F27"] = data_base_dt
+        ws["J27"] = data_insc_dt
+        if data_base_dt is None:
+            print(
+                f"\n{Fore.YELLOW}[!] Data_Base ausente/inválida "
+                f"({self.main_dict.get('Data_Base')!r}); F27 em branco.{Style.RESET_ALL}"
             )
-        except Exception:
-            pass
-        try:
-            ws["J27"] = datetime.strptime(
-                self.main_dict["Data_Inscrição"], "%d/%m/%Y"
+        if data_insc_dt is None:
+            print(
+                f"\n{Fore.YELLOW}[!] Data_Decisão/Inscrição ausente/inválida "
+                f"({self.main_dict.get('Data_Inscrição')!r}); J27 em branco.{Style.RESET_ALL}"
             )
-        except Exception:
-            pass
 
         previdencia_total = previdencia_total_from_main_dict(self.main_dict)
         ws["B32"] = self.main_dict["Principal_Liquido"]

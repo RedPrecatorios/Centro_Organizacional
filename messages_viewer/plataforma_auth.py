@@ -47,6 +47,11 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
         "Formulário inicial para triagem de processo/incidente",
     ),
     (
+        "levantamento_processual",
+        "Levantamento Processual",
+        "Pesquisa por nome, CPF ou processo e listagem de aptos/inaptos (API TJSP)",
+    ),
+    (
         "tabela_juros",
         "Tabela de Juros (OC x Rendimento)",
         "Comparativo de rendimento: manter OC vs venda antecipada",
@@ -277,6 +282,38 @@ def _migrate_proposta_once() -> None:
         conn.commit()
 
 
+def _migrate_levantamento_processual_once() -> None:
+    """Quem já tem PRÉ Análise ou Memória recebe Levantamento Processual (uma vez)."""
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_levantamento_processual_v1'"
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            "SELECT 1 FROM plataforma_user_permissions WHERE tab_id = 'levantamento_processual' LIMIT 1"
+        )
+        had_any = cur.fetchone()
+        if not had_any:
+            cur.execute(
+                """
+                INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
+                SELECT DISTINCT user_id, 'levantamento_processual'
+                FROM plataforma_user_permissions
+                WHERE tab_id IN ('pre_analise_processual', 'memoria_calculo')
+                """
+            )
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_levantamento_processual_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
+        )
+        conn.commit()
+
+
 def init_db() -> None:
     with auth_connection() as conn:
         init_auth_schema(conn)
@@ -285,6 +322,7 @@ def init_db() -> None:
     _migrate_analise_processual_once()
     _migrate_tabela_juros_once()
     _migrate_proposta_once()
+    _migrate_levantamento_processual_once()
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -371,6 +409,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("conversas", "conversas"),
         ("memoria_calculo", "memoria_calculo"),
         ("pre_analise_processual", "pre_analise_processual_page"),
+        ("levantamento_processual", "levantamento_processual_page"),
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
         ("campanha", "campanha_page"),
@@ -400,6 +439,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "memoria_calculo"
     if path.startswith("/pre-analise-processual"):
         return "pre_analise_processual"
+    if path.startswith("/levantamento-processual"):
+        return "levantamento_processual"
     if path.startswith("/tabela-juros"):
         return "tabela_juros"
     if path.startswith("/proposta"):
@@ -471,6 +512,14 @@ def _endpoint_to_tab() -> str | None:
         "api_pre_analise_por_externo": "pre_analise_processual",
         "api_pre_analise_cancelar": "pre_analise_processual",
         "api_pre_analise_excluir": "pre_analise_processual",
+        "api_pre_analise_anexos": "pre_analise_processual",
+        "api_pre_analise_anexo_download": "pre_analise_processual",
+        "api_pre_analise_ficha_get": "pre_analise_processual",
+        "api_pre_analise_ficha_save": "pre_analise_processual",
+        "levantamento_processual_page": "levantamento_processual",
+        "api_levantamento_health": "levantamento_processual",
+        "api_levantamento_iniciar": "levantamento_processual",
+        "api_levantamento_status": "levantamento_processual",
         "tabela_juros_page": "tabela_juros",
         "api_tabela_juros_calcular": "tabela_juros",
         "proposta_page": "proposta",

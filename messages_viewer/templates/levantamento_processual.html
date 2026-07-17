@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Levantamento Processual — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+  <style>
+    .lp-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--bg-chat);
+      color: var(--muted);
+    }
+    .lp-status--queued, .lp-status--running, .lp-status--processing {
+      background: #eef2ff;
+      color: #3730a3;
+    }
+    .lp-status--done { background: var(--accent-soft); color: #065f46; }
+    .lp-status--failed { background: #fee2e2; color: #991b1b; }
+    .lp-meta {
+      margin: 0.75rem 0 0.35rem;
+      font-size: 0.86rem;
+      color: var(--muted);
+    }
+    .lp-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+      background: #fff;
+      margin-bottom: 0.65rem;
+    }
+    .lp-card-title {
+      margin: 0 0 0.35rem;
+      font-size: 0.98rem;
+      font-weight: 650;
+    }
+    .lp-card-meta {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .lp-kv {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+      gap: 0.55rem 1.1rem;
+      margin-top: 0.75rem;
+      font-size: 0.84rem;
+    }
+    .lp-kv dt { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.02em; }
+    .lp-kv dd { margin: 0.15rem 0 0; font-weight: 600; color: var(--text); word-break: break-word; }
+    .lp-kv-full { grid-column: 1 / -1; }
+    .lp-status-line {
+      margin: 0.65rem 0 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.45rem 0.75rem;
+      font-size: 0.86rem;
+    }
+    .lp-status-line .lp-tag { margin-left: 0; }
+    .lp-motivo {
+      margin: 0.35rem 0 0;
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #7f1d1d;
+      font-size: 0.84rem;
+      line-height: 1.4;
+      grid-column: 1 / -1;
+    }
+    .lp-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem;
+      margin: 0.85rem 0 0.35rem;
+    }
+    .lp-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.55rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      vertical-align: middle;
+      margin-left: 0.45rem;
+    }
+    .lp-tag--apto { background: #d1fae5; color: #065f46; }
+    .lp-tag--inapto { background: #fee2e2; color: #991b1b; }
+    .lp-card--inapto {
+      border-color: #fca5a5;
+      background: #fffafa;
+    }
+    .lp-motivo strong { font-weight: 700; }
+    .lp-section-title {
+      margin: 1.1rem 0 0.45rem;
+      font-size: 0.95rem;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body class="dashboard-body"
+  data-lp-configured='{{ levantamento_api_configured | tojson }}'
+  data-lp-poll-ms='{{ levantamento_poll_interval_ms | tojson }}'>
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Levantamento Processual</h1>
+        <p class="dash-sub">Pesquise por <strong>nome</strong>, <strong>CPF</strong> ou <strong>processo + nome</strong>. Na busca por processo, o nome (Monday) filtra incidentes pela capa — todos os matches são mostrados. Todos os casos passam por <strong>reprocessamento + API de cálculo</strong>.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      {% if not levantamento_api_configured %}
+      <div class="camp-msg camp-msg-err" role="alert" style="display:block;margin-bottom:1rem">
+        API de levantamento não configurada. Defina <code>TJSP_API_BASE_URL</code> e <code>TJSP_API_TOKEN</code> no .env.
+      </div>
+      {% elif not levantamento_api_healthy %}
+      <div class="camp-msg camp-msg-err" role="alert" style="display:block;margin-bottom:1rem">
+        API configurada, mas indisponível no momento. Verifique o serviço em <code>TJSP_API_BASE_URL</code>.
+      </div>
+      {% endif %}
+
+      <div class="camp-form-card">
+        <div class="loc-mode-row" role="radiogroup" aria-label="Tipo de pesquisa" style="margin-bottom:0.75rem">
+          <label class="loc-mode-opt"><input type="radio" name="lp-tipo" value="nome" checked /> Nome</label>
+          <label class="loc-mode-opt"><input type="radio" name="lp-tipo" value="cpf" /> CPF</label>
+          <label class="loc-mode-opt"><input type="radio" name="lp-tipo" value="processo" /> Processo</label>
+        </div>
+        <div class="camp-field" style="max-width:36rem">
+          <label for="lp-q" id="lp-q-label">Nome da parte</label>
+          <input
+            type="search"
+            id="lp-q"
+            class="auth-input"
+            placeholder="Ex.: Heloisa Maria Fernandes Queiroz"
+            autocomplete="off"
+            {% if not levantamento_api_configured %}disabled{% endif %}
+          />
+        </div>
+        <div class="camp-field" id="lp-nome-wrap" style="max-width:36rem;margin-top:0.65rem;display:none">
+          <label for="lp-nome-filtro">Nome (Monday) — filtro de incidente</label>
+          <input
+            type="search"
+            id="lp-nome-filtro"
+            class="auth-input"
+            placeholder="Ex.: Jose Gamero (como está na Monday)"
+            autocomplete="off"
+            {% if not levantamento_api_configured %}disabled{% endif %}
+          />
+          <p class="camp-hint" style="margin:0.4rem 0 0">
+            Um processo pode ter vários incidentes. Abrimos a capa de cada um (sem autos) e
+            mantemos todos em que o nome bate — inclusive se houver mais de um com o mesmo nome.
+          </p>
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.65rem">
+          <button type="button" class="camp-btn camp-btn-primary" id="lp-enviar"
+            {% if not levantamento_api_configured %}disabled{% endif %}>Enviar levantamento</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="lp-limpar"
+            {% if not levantamento_api_configured %}disabled{% endif %}>Limpar</button>
+        </div>
+      </div>
+      <div class="lp-toolbar" id="lp-toolbar" style="display:none">
+        <span class="lp-status" id="lp-status">—</span>
+        <span class="lp-meta" id="lp-job-meta" style="margin:0"></span>
+      </div>
+
+      <div id="lp-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A aguardar resultado do levantamento…</div>
+      <p id="lp-summary" class="camp-hint" style="margin:0.75rem 0">Informe nome, CPF ou processo + nome e clique em Enviar levantamento.</p>
+      <div id="lp-results"></div>
+      <p id="lp-empty" class="camp-empty" style="display:none">Nenhum processo apto encontrado.</p>
+      <div id="lp-err" class="camp-msg camp-msg-err" style="display:none"></div>
+    </main>
+  </div>
+
+<script>
+(function () {
+  var configured = document.body.getAttribute('data-lp-configured') === 'true';
+  var pollMs = parseInt(document.body.getAttribute('data-lp-poll-ms') || '5000', 10);
+  if (!Number.isFinite(pollMs) || pollMs < 2000) pollMs = 5000;
+
+  var pollTimer = null;
+  var activeJobId = null;
+
+  var elQ = document.getElementById('lp-q');
+  var elQLabel = document.getElementById('lp-q-label');
+  var elNomeWrap = document.getElementById('lp-nome-wrap');
+  var elNomeFiltro = document.getElementById('lp-nome-filtro');
+  var elEnviar = document.getElementById('lp-enviar');
+  var elLimpar = document.getElementById('lp-limpar');
+  var elLoading = document.getElementById('lp-loading');
+  var elSummary = document.getElementById('lp-summary');
+  var elResults = document.getElementById('lp-results');
+  var elEmpty = document.getElementById('lp-empty');
+  var elErr = document.getElementById('lp-err');
+  var elToolbar = document.getElementById('lp-toolbar');
+  var elStatus = document.getElementById('lp-status');
+  var elJobMeta = document.getElementById('lp-job-meta');
+
+  function tipo() {
+    var r = document.querySelector('input[name="lp-tipo"]:checked');
+    return r ? r.value : 'nome';
+  }
+
+  function syncLabel(clearValue) {
+    var t = tipo();
+    if (t === 'cpf') {
+      elQLabel.textContent = 'CPF';
+      elQ.placeholder = 'Ex.: 12345678901 (11 dígitos)';
+      elQ.inputMode = 'numeric';
+      elNomeWrap.style.display = 'none';
+    } else if (t === 'processo') {
+      elQLabel.textContent = 'Número do processo';
+      elQ.placeholder = 'Ex.: 0017669-72.2021.8.26.0053';
+      elQ.inputMode = 'text';
+      elNomeWrap.style.display = 'block';
+    } else {
+      elQLabel.textContent = 'Nome da parte';
+      elQ.placeholder = 'Ex.: Heloisa Maria Fernandes Queiroz';
+      elQ.inputMode = 'text';
+      elNomeWrap.style.display = 'none';
+    }
+    if (clearValue) {
+      elQ.value = '';
+      elNomeFiltro.value = '';
+    }
+  }
+
+  document.querySelectorAll('input[name="lp-tipo"]').forEach(function (r) {
+    r.addEventListener('change', function () { syncLabel(true); hideErr(); });
+  });
+  syncLabel(false);
+
+  function esc(s) {
+    if (s == null || s === '') return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function showErr(msg) {
+    elErr.textContent = msg || 'Erro';
+    elErr.style.display = 'block';
+  }
+  function hideErr() {
+    elErr.style.display = 'none';
+    elErr.textContent = '';
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function setBusy(busy) {
+    elEnviar.disabled = !configured || busy;
+    elQ.disabled = !configured || busy;
+    elNomeFiltro.disabled = !configured || busy;
+    document.querySelectorAll('input[name="lp-tipo"]').forEach(function (r) {
+      r.disabled = !configured || busy;
+    });
+    elLoading.style.display = busy ? 'flex' : 'none';
+  }
+
+  function buildPayload() {
+    var t = tipo();
+    var v = (elQ.value || '').trim();
+    if (t === 'cpf') {
+      var digits = v.replace(/\D+/g, '');
+      if (digits.length !== 11) return { error: 'CPF deve ter 11 dígitos.' };
+      return { body: { cpf: digits } };
+    }
+    if (t === 'processo') {
+      var nomeFiltro = (elNomeFiltro.value || '').trim();
+      if (v.length < 8) return { error: 'Informe um número de processo válido.' };
+      if (nomeFiltro.length < 3) {
+        return { error: 'Informe o nome (Monday) com pelo menos 3 caracteres para filtrar os incidentes.' };
+      }
+      return { body: { processo: v, nome: nomeFiltro } };
+    }
+    if (v.length < 3) return { error: 'Informe um nome com pelo menos 3 caracteres.' };
+    return { body: { nome: v } };
+  }
+
+  function statusClass(status) {
+    var s = String(status || '').toLowerCase();
+    return 'lp-status lp-status--' + (s || 'unknown');
+  }
+
+  function pick(obj, keys) {
+    if (!obj || typeof obj !== 'object') return null;
+    for (var i = 0; i < keys.length; i++) {
+      var v = obj[keys[i]];
+      if (v != null && String(v).trim() !== '') return v;
+    }
+    return null;
+  }
+
+  function pickField(p, rec, keys) {
+    return pick(p, keys) || pick(rec, keys);
+  }
+
+  function dash(v) {
+    if (v == null || String(v).trim() === '') return '—';
+    return String(v).trim();
+  }
+
+  function kv(label, value) {
+    return '<div><dt>' + esc(label) + '</dt><dd>' + esc(dash(value)) + '</dd></div>';
+  }
+
+  function renderProcesso(p, idx, kind) {
+    if (p == null) return '';
+    var isInapto = kind === 'inapto' || String((p && p.status) || '').toLowerCase() === 'inapto';
+    if (typeof p !== 'object') {
+      return '<article class="lp-card"><h3 class="lp-card-title">' + esc(p) + '</h3></article>';
+    }
+    var rec = (p.record && typeof p.record === 'object') ? p.record : {};
+
+    var processo = pickField(p, rec, [
+      'numero_de_processo', 'Numero_de_Processo', 'numero_processo', 'processo'
+    ]) || ('Processo #' + (idx + 1));
+    var incidente = pickField(p, rec, [
+      'numero_do_incidente', 'Numero_do_Incidente', 'numero_incidente', 'incidente'
+    ]);
+    var ordem = pickField(p, rec, ['Ordem', 'ordem', 'ORDEM']);
+    var calculo = pickField(p, rec, [
+      'Calculo_Atualizado', 'calculo_atualizado', 'Calculo Atualizado', 'calculoAtualizado'
+    ]);
+    var entidade = pickField(p, rec, [
+      'Entidade_Devedora', 'entidade_devedora', 'Entidade Devedora'
+    ]);
+    var advogado = pickField(p, rec, ['Advogado', 'advogado', 'ADVOGADO']);
+    var requerente = pickField(p, rec, ['Requerente', 'requerente', 'REQUERENTE']);
+    var cpf = pickField(p, rec, ['CPF', 'cpf', 'Cpf']);
+    var statusCadastro = pickField(p, rec, ['Status', 'status', 'STATUS']);
+    var motivo = pick(p, ['motivo', 'reason', 'motivo_inapto']) || '';
+
+    var tag = isInapto
+      ? '<span class="lp-tag lp-tag--inapto">INAPTO</span>'
+      : '<span class="lp-tag lp-tag--apto">APTO</span>';
+
+    var statusHtml;
+    if (isInapto) {
+      statusHtml =
+        '<div class="lp-kv-full">' +
+          '<div class="lp-status-line"><dt style="display:inline">Status</dt> ' + tag + '</div>' +
+          '<p class="lp-motivo"><strong>Motivo:</strong> ' + esc(motivo || 'INAPTO (sem detalhe)') + '</p>' +
+        '</div>';
+    } else {
+      statusHtml = kv('Status', statusCadastro || 'APTO');
+    }
+
+    return (
+      '<article class="lp-card' + (isInapto ? ' lp-card--inapto' : '') + '">' +
+        '<h3 class="lp-card-title">' + esc(processo) + (isInapto ? '' : ' ' + tag) + '</h3>' +
+        '<dl class="lp-kv">' +
+          kv('Número de processo', processo) +
+          kv('Incidente', incidente) +
+          kv('Ordem', ordem) +
+          kv('Cálculo atualizado', calculo) +
+          kv('Entidade devedora', entidade) +
+          kv('Advogado', advogado) +
+          kv('Requerente', requerente) +
+          kv('CPF', cpf) +
+          statusHtml +
+        '</dl>' +
+      '</article>'
+    );
+  }
+
+  function renderResultados(aptos, inaptos, nome) {
+    elResults.innerHTML = '';
+    elEmpty.style.display = 'none';
+    var a = Array.isArray(aptos) ? aptos : [];
+    var i = Array.isArray(inaptos) ? inaptos : [];
+    elSummary.textContent =
+      a.length + ' apto(s) · ' + i.length + ' inapto(s)' +
+      (nome ? ' para «' + nome + '»' : '') +
+      ' (reprocessamento + cálculo).';
+    if (!a.length && !i.length) {
+      elEmpty.style.display = 'block';
+      elEmpty.textContent = 'Nenhum processo encontrado.';
+      return;
+    }
+    var html = '';
+    if (a.length) {
+      html += '<h2 class="lp-section-title">Processos aptos (' + a.length + ')</h2>';
+      html += a.map(function (p, idx) { return renderProcesso(p, idx, 'apto'); }).join('');
+    }
+    if (i.length) {
+      html += '<h2 class="lp-section-title">Processos inaptos (' + i.length + ')</h2>';
+      html += i.map(function (p, idx) { return renderProcesso(p, idx, 'inapto'); }).join('');
+    }
+    elResults.innerHTML = html;
+  }
+
+  function clearAll() {
+    stopPoll();
+    activeJobId = null;
+    setBusy(false);
+    elQ.value = '';
+    elNomeFiltro.value = '';
+    elResults.innerHTML = '';
+    elEmpty.style.display = 'none';
+    elEmpty.textContent = 'Nenhum processo encontrado.';
+    elToolbar.style.display = 'none';
+    elSummary.textContent = 'Informe nome, CPF ou processo + nome e clique em Enviar levantamento.';
+    hideErr();
+  }
+
+  function applyStatus(payload) {
+    var status = payload.status || '—';
+    elToolbar.style.display = 'flex';
+    elStatus.className = statusClass(status);
+    elStatus.textContent = String(status);
+    var bits = [];
+    if (payload.job_id) bits.push('Job: ' + payload.job_id);
+    var kind = payload.search_kind || tipo();
+    var criterion = payload.query || payload.nome || elQ.value.trim();
+    if (kind) bits.push('Tipo: ' + kind);
+    if (criterion) bits.push('Critério: ' + criterion);
+    if (payload.progress != null) bits.push('Progresso: ' + payload.progress);
+    if (payload.message) bits.push(String(payload.message));
+    elJobMeta.textContent = bits.join(' · ');
+  }
+
+  function handleTerminal(payload) {
+    setBusy(false);
+    applyStatus(payload);
+    var status = String(payload.status || '').toLowerCase();
+    if (status === 'failed') {
+      var err =
+        payload.error ||
+        payload.message ||
+        (payload.result && payload.result.error) ||
+        'Levantamento falhou.';
+      showErr(typeof err === 'string' ? err : JSON.stringify(err));
+      elSummary.textContent = 'Levantamento concluído com falha.';
+      elResults.innerHTML = '';
+      elEmpty.style.display = 'none';
+      return;
+    }
+    hideErr();
+    renderResultados(
+      payload.processos_aptos || [],
+      payload.processos_inaptos || [],
+      payload.query || payload.nome || elQ.value.trim()
+    );
+  }
+
+  function schedulePoll(jobId) {
+    stopPoll();
+    pollTimer = setTimeout(function () {
+      pollStatus(jobId);
+    }, pollMs);
+  }
+
+  function pollStatus(jobId) {
+    fetch('/api/levantamento-processual/' + encodeURIComponent(jobId), {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin'
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { okHttp: r.ok, status: r.status, body: j };
+        });
+      })
+      .then(function (res) {
+        if (!res.body || res.body.ok === false) {
+          setBusy(false);
+          showErr((res.body && res.body.error) || ('Erro HTTP ' + res.status));
+          return;
+        }
+        applyStatus(res.body);
+        if (res.body.terminal || ['done', 'failed'].indexOf(String(res.body.status || '').toLowerCase()) >= 0) {
+          handleTerminal(res.body);
+          return;
+        }
+        schedulePoll(jobId);
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showErr(e && e.message ? e.message : 'Falha ao consultar status.');
+      });
+  }
+
+  function iniciar() {
+    if (!configured) return;
+    hideErr();
+    var packed = buildPayload();
+    if (packed.error) {
+      showErr(packed.error);
+      return;
+    }
+    var body = packed.body;
+    var label = body.processo
+      ? (body.processo + (body.nome ? ' · ' + body.nome : ''))
+      : (body.nome || body.cpf || '');
+    var kind = body.processo ? 'processo' : (body.cpf ? 'cpf' : 'nome');
+    stopPoll();
+    setBusy(true);
+    elResults.innerHTML = '';
+    elEmpty.style.display = 'none';
+    elSummary.textContent = 'A enviar pedido de levantamento…';
+    elToolbar.style.display = 'flex';
+    elStatus.className = 'lp-status lp-status--queued';
+    elStatus.textContent = 'enviando';
+    elJobMeta.textContent = 'Tipo: ' + kind + ' · Critério: ' + label;
+
+    fetch('/api/levantamento-processual/iniciar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { okHttp: r.ok, status: r.status, body: j };
+        });
+      })
+      .then(function (res) {
+        if (!res.okHttp || !res.body || res.body.ok === false) {
+          setBusy(false);
+          showErr((res.body && res.body.error) || ('Erro HTTP ' + res.status));
+          elSummary.textContent = 'Não foi possível iniciar o levantamento.';
+          return;
+        }
+        activeJobId = res.body.job_id;
+        applyStatus(res.body);
+        if (res.body.terminal || ['done', 'failed'].indexOf(String(res.body.status || '').toLowerCase()) >= 0) {
+          handleTerminal(res.body);
+          return;
+        }
+        elSummary.textContent = 'Levantamento em curso — a sincronizar resultados…';
+        schedulePoll(activeJobId);
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showErr(e && e.message ? e.message : 'Falha ao enviar levantamento.');
+      });
+  }
+
+  elEnviar.addEventListener('click', iniciar);
+  elLimpar.addEventListener('click', clearAll);
+  function onEnter(ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      iniciar();
+    }
+  }
+  elQ.addEventListener('keydown', onEnter);
+  elNomeFiltro.addEventListener('keydown', onEnter);
+})();
+</script>
+</body>
+</html>

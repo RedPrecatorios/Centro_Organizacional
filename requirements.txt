@@ -26,6 +26,7 @@ pandas==2.3.3
 proto-plus==1.27.2
 protobuf==7.34.1
 psycopg2-binary==2.9.10
+pymongo==4.15.3
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycparser==3.0

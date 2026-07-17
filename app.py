@@ -70,6 +70,22 @@ from messages_viewer.pre_analise_processual import (
     reconciliar_casos as pre_analise_reconciliar_casos,
     sincronizar_casos as pre_analise_sincronizar_casos,
 )
+from messages_viewer.pre_analise_drive_anexos import (
+    baixar_anexo_pdf as pre_analise_baixar_anexo_pdf,
+    is_configured as pre_analise_drive_configured,
+    listar_anexos_pdf as pre_analise_listar_anexos_pdf,
+)
+from messages_viewer.pre_analise_ficha import (
+    carregar_ficha as pre_analise_carregar_ficha,
+    salvar_ficha as pre_analise_salvar_ficha,
+)
+from messages_viewer.levantamento_processual import (
+    api_health as levantamento_api_health,
+    create_search as levantamento_create_search,
+    get_search as levantamento_get_search,
+    is_configured as levantamento_api_configured,
+    poll_interval_ms as levantamento_poll_interval_ms,
+)
 from messages_viewer.proposta_pdf import gerar_pdf_proposta, nome_arquivo_proposta
 from messages_viewer.proposta_service import buscar_por_processo_incidente
 from messages_viewer.tabela_juros_calc import (
@@ -1018,6 +1034,7 @@ def pre_analise_processual_page():
         pre_analise_api_configured=pre_analise_api_configured(),
         pre_analise_api_healthy=bool(health_payload.get("healthy")),
         pre_analise_poll_interval_ms=pre_analise_poll_interval_ms(),
+        pre_analise_drive_configured=pre_analise_drive_configured(),
     )
 
 
@@ -1108,6 +1125,109 @@ def api_pre_analise_cancelar(caso_id: str):
 @app.route("/api/pre-analise-processual/<caso_id>", methods=["DELETE"])
 def api_pre_analise_excluir(caso_id: str):
     out, code = pre_analise_excluir_caso(caso_id)
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/anexos", methods=["GET"])
+def api_pre_analise_anexos():
+    """Lista PDFs na pasta configurada do Google Drive (filtra por processo/incidente se dados)."""
+    out, code = pre_analise_listar_anexos_pdf(
+        numero_cumprimento=(request.args.get("numero_cumprimento") or "").strip() or None,
+        numero_incidente=(request.args.get("numero_incidente") or "").strip() or None,
+        caminho_pasta=(request.args.get("caminho_pasta") or "").strip() or None,
+        folder_id_override=(request.args.get("folder_id") or "").strip() or None,
+    )
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/anexos/<file_id>", methods=["GET"])
+def api_pre_analise_anexo_download(file_id: str):
+    """Proxy de PDF do Google Drive (inline ou download)."""
+    as_attachment = str(request.args.get("download") or "").strip().lower() in {
+        "1", "true", "yes", "sim", "download",
+    }
+    body, code, headers = pre_analise_baixar_anexo_pdf(
+        file_id, as_attachment=as_attachment
+    )
+    if isinstance(body, dict):
+        return jsonify(body), code
+    return Response(body, status=code, headers=headers)
+
+
+@app.route("/api/pre-analise-processual/ficha", methods=["GET"])
+def api_pre_analise_ficha_get():
+    """Carrega ficha (local > mongo > precainfosnew > vazio)."""
+    out, code = pre_analise_carregar_ficha(
+        cumprimento_de_sentenca=(request.args.get("numero_cumprimento") or request.args.get("cumprimento_de_sentenca") or "").strip(),
+        incidente=(request.args.get("numero_incidente") or request.args.get("incidente") or "").strip(),
+        caso_id=(request.args.get("caso_id") or "").strip() or None,
+        id_externo=(request.args.get("id_externo") or "").strip() or None,
+        nome_credor_hint=(request.args.get("nome_credor") or "").strip() or None,
+        depre_hint=(request.args.get("depre") or request.args.get("numero_depre") or "").strip() or None,
+    )
+    return jsonify(out), code
+
+
+@app.route("/api/pre-analise-processual/ficha", methods=["POST"])
+def api_pre_analise_ficha_save():
+    """Salva/atualiza ficha na tabela local pre_analise_ficha."""
+    data = request.get_json(silent=True) or {}
+    user = current_user() or {}
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id_int = None
+    user_name = (
+        user.get("nome")
+        or user.get("name")
+        or user.get("usuario")
+        or user.get("username")
+        or user.get("login")
+        or ""
+    )
+    out, code = pre_analise_salvar_ficha(
+        data, user_id=user_id_int, user_name=str(user_name or "").strip() or None
+    )
+    return jsonify(out), code
+
+
+@app.route("/levantamento-processual")
+def levantamento_processual_page():
+    health_payload = {"ok": False, "healthy": False}
+    if levantamento_api_configured():
+        health_out, _ = levantamento_api_health()
+        health_payload = health_out
+    return render_template(
+        "levantamento_processual.html",
+        levantamento_api_configured=levantamento_api_configured(),
+        levantamento_api_healthy=bool(health_payload.get("healthy")),
+        levantamento_poll_interval_ms=levantamento_poll_interval_ms(),
+    )
+
+
+@app.route("/api/levantamento-processual/health")
+def api_levantamento_health():
+    out, code = levantamento_api_health()
+    return jsonify(out), code
+
+
+@app.route("/api/levantamento-processual/iniciar", methods=["POST"])
+def api_levantamento_iniciar():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    out, code = levantamento_create_search(
+        data.get("nome"),
+        cpf=data.get("cpf"),
+        processo=data.get("processo"),
+    )
+    return jsonify(out), code
+
+
+@app.route("/api/levantamento-processual/<job_id>")
+def api_levantamento_status(job_id: str):
+    out, code = levantamento_get_search(job_id)
     return jsonify(out), code
 
 
@@ -2203,7 +2323,7 @@ def api_memoria_precainfos_detalhes():
                     "ok": True,
                     "found": False,
                     "error": (
-                        "Nenhum registo em precainfosnew com este processo, incidente e requerente."
+                        "Nenhum registo de precatório com este processo, incidente e requerente."
                     ),
                 }
             )

@@ -73,6 +73,12 @@ from modulo_banco import (
     exportar_por_periodo,
     importar_blacklist_csv,
 )
+from modulo_exportacao_unificada import (
+    ENTRY_SCHEMA,
+    exportar_pesquisa_unificada,
+    exportar_tudo_unificado,
+    listar_motivos_blacklist,
+)
 
 app = Flask(
     __name__,
@@ -692,6 +698,72 @@ def relatorio_corrigido_exportar():
 def exportar():
     criar_banco_e_tabelas()
     return render_template("exportar.html")
+
+
+@app.route("/exportar-unificada")
+def exportar_unificada():
+    criar_banco_e_tabelas()
+    try:
+        motivos = listar_motivos_blacklist()
+    except Exception:
+        motivos = []
+    return render_template(
+        "exportar_unificada.html",
+        entry_schema=ENTRY_SCHEMA,
+        motivos_blacklist=motivos,
+    )
+
+
+def _resposta_excel_unificada(buffer, nome_arquivo: str, meta: dict):
+    resp = send_file(
+        buffer,
+        as_attachment=True,
+        download_name=nome_arquivo,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp.headers["X-Export-Processos"] = str(meta.get("processos", 0))
+    resp.headers["X-Export-Linhas"] = str(meta.get("linhas", 0))
+    resp.headers["X-Export-Fallback"] = str(meta.get("via_fallback", 0))
+    return resp
+
+
+@app.route("/exportar-unificada/gerar", methods=["POST"])
+def exportar_unificada_gerar():
+    tabela = (request.form.get("tabela") or "").strip()
+    coluna = (request.form.get("coluna") or "").strip()
+    valor = (request.form.get("valor") or "").strip()
+
+    if not tabela or not coluna or not valor:
+        flash("Preencha tabela, coluna e valor.", "error")
+        return redirect(url_for("exportar_unificada"))
+
+    try:
+        buffer, nome_arquivo, meta = exportar_pesquisa_unificada(tabela, coluna, valor)
+    except LookupError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("exportar_unificada"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("exportar_unificada"))
+    except Exception as exc:
+        flash(f"Erro ao gerar exportação unificada: {exc}", "error")
+        return redirect(url_for("exportar_unificada"))
+
+    return _resposta_excel_unificada(buffer, nome_arquivo, meta)
+
+
+@app.route("/exportar-unificada/tudo", methods=["POST"])
+def exportar_unificada_tudo():
+    try:
+        buffer, nome_arquivo, meta = exportar_tudo_unificado()
+    except LookupError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("exportar_unificada"))
+    except Exception as exc:
+        flash(f"Erro ao exportar a base completa: {exc}", "error")
+        return redirect(url_for("exportar_unificada"))
+
+    return _resposta_excel_unificada(buffer, nome_arquivo, meta)
 
 
 @app.route("/exportar/gerar", methods=["POST"])

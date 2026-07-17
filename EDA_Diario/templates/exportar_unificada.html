@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% block title %} · Exportação unificada{% endblock %}
+
+{% block content %}
+<div class="eda-wrap eda-wrap-narrow">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Exportação unificada</h1>
+    <p class="eda-lead">
+      Escolha a tabela de partida, a coluna e o valor. O sistema percorre as ligações
+      internas (pessoa, processo, SMS, e-mails, HSM) e gera uma planilha única.
+      O fallback via <code>request_audit</code> fica sempre ativo; o match é por igualdade normalizada.
+    </p>
+  </div>
+
+  <div class="eda-section-card">
+    <form id="form-export-unificada" action="{{ url_for('exportar_unificada_gerar') }}" method="POST">
+
+      <div class="eda-stack">
+        <div>
+          <label class="eda-label" for="tabela">Pesquise na tabela</label>
+          <select name="tabela" id="tabela" class="eda-input" style="width:100%;" required>
+            {% for key, meta in entry_schema.items() %}
+            <option value="{{ key }}">{{ meta.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="eda-label" for="coluna">Onde na coluna</label>
+          <select name="coluna" id="coluna" class="eda-input" style="width:100%;" required></select>
+        </div>
+
+        <div>
+          <label class="eda-label" for="valor">É</label>
+
+          <select id="valor-motivo" class="eda-input eu-valor" style="width:100%; display:none;">
+            <option value="">Selecione o motivo…</option>
+            {% for m in motivos_blacklist %}
+            <option value="{{ m|e }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+
+          <select id="valor-tipo" class="eda-input eu-valor" style="width:100%; display:none;">
+            <option value="">Selecione o tipo…</option>
+            <option value="CPF">CPF</option>
+            <option value="NOME">NOME</option>
+            <option value="TELEFONE">TELEFONE</option>
+            <option value="EMAIL">EMAIL</option>
+            <option value="PROCESSO_INCIDENTE">PROCESSO_INCIDENTE</option>
+          </select>
+
+          <select id="valor-ativo" class="eda-input eu-valor" style="width:100%; display:none;">
+            <option value="">Selecione…</option>
+            <option value="1">1 (ativo)</option>
+            <option value="0">0 (inativo)</option>
+          </select>
+
+          <input id="valor-texto" type="text" class="eda-input eu-valor" style="width:100%;"
+                 placeholder="Valor exato (normalizado)" autocomplete="off" />
+
+          <input type="hidden" name="valor" id="valor-hidden" value="" />
+        </div>
+      </div>
+
+      <p class="eda-hint" id="eu-dica" style="margin-top:0.75rem;"></p>
+
+      <button type="submit" id="eu-submit" class="eda-btn eda-btn-primary eda-btn-block" style="margin-top:1.25rem;">
+        <svg id="eu-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        <span id="eu-btn-label">Baixar planilha unificada</span>
+      </button>
+
+      <p class="eda-hint" id="eu-status" style="margin-top:0.75rem;"></p>
+    </form>
+
+    <div class="eda-sep" style="margin:1.5rem 0;"><span>ou</span></div>
+
+    <form id="form-export-tudo" action="{{ url_for('exportar_unificada_tudo') }}" method="POST">
+      <p class="eda-hint" style="margin-bottom:0.75rem;">
+        Exporta <strong>todos</strong> os processos da base no mesmo formato unificado
+        (pessoa, processo, telefones, e-mails e status blacklist). Pode levar alguns minutos (~30 mil linhas).
+      </p>
+      <button type="submit" id="eu-tudo-submit" class="eda-btn eda-btn-secondary eda-btn-block" style="width:100%;">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        <span id="eu-tudo-label">Exportar tudo</span>
+      </button>
+      <p class="eda-hint" id="eu-tudo-status" style="margin-top:0.75rem;"></p>
+    </form>
+  </div>
+
+</div>
+
+<script id="eu-schema" type="application/json">{{ entry_schema|tojson }}</script>
+<script>
+(function () {
+  var schema = {};
+  try {
+    schema = JSON.parse(document.getElementById('eu-schema').textContent || '{}');
+  } catch (e) {
+    console.error(e);
+  }
+
+  var elTabela = document.getElementById('tabela');
+  var elColuna = document.getElementById('coluna');
+  var elHidden = document.getElementById('valor-hidden');
+  var elDica = document.getElementById('eu-dica');
+  var elStatus = document.getElementById('eu-status');
+  var elSubmit = document.getElementById('eu-submit');
+  var elBtnLabel = document.getElementById('eu-btn-label');
+  var form = document.getElementById('form-export-unificada');
+
+  var valorWidgets = {
+    motivo: document.getElementById('valor-motivo'),
+    tipo: document.getElementById('valor-tipo'),
+    ativo: document.getElementById('valor-ativo'),
+    texto: document.getElementById('valor-texto')
+  };
+
+  function placeholders(tabela, coluna) {
+    if (tabela === 'emails' && coluna === 'email') return 'fulano@gmail.com';
+    if (tabela === 'sms' && coluna === 'telefone') return '11999990000';
+    if (coluna === 'cpf') return '00000000000';
+    if (coluna === 'requerente' || coluna === 'nome') return 'DALMIRO FRANCISCO';
+    if (coluna === 'numero_processo') return '0000000-00.0000.0.00.0000';
+    return 'Valor exato (normalizado)';
+  }
+
+  function modoValor(tabela, coluna) {
+    if (tabela === 'blacklist' && coluna === 'motivo') return 'motivo';
+    if (tabela === 'blacklist' && coluna === 'tipo') return 'tipo';
+    if (tabela === 'blacklist' && coluna === 'ativo') return 'ativo';
+    return 'texto';
+  }
+
+  function dica(modo) {
+    if (modo === 'motivo') return 'Motivos distintos já cadastrados na blacklist.';
+    if (modo === 'tipo') return 'Filtra todas as entradas desse tipo e interliga os processos.';
+    return 'Match por igualdade normalizada (CPF só dígitos, telefone só dígitos, nome em maiúsculas).';
+  }
+
+  function fillColunas() {
+    var tabela = elTabela.value;
+    var cols = (schema[tabela] && schema[tabela].columns) || [];
+    elColuna.innerHTML = '';
+    cols.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c.key;
+      opt.textContent = c.label;
+      elColuna.appendChild(opt);
+    });
+    syncValorUI(true);
+  }
+
+  function hideAllValor() {
+    Object.keys(valorWidgets).forEach(function (k) {
+      valorWidgets[k].style.display = 'none';
+      valorWidgets[k].value = '';
+    });
+  }
+
+  function syncValorUI(reset) {
+    var tabela = elTabela.value;
+    var coluna = elColuna.value;
+    var modo = modoValor(tabela, coluna);
+    if (reset) hideAllValor();
+    else {
+      Object.keys(valorWidgets).forEach(function (k) {
+        valorWidgets[k].style.display = 'none';
+      });
+    }
+    var widget = valorWidgets[modo];
+    widget.style.display = '';
+    if (modo === 'texto') {
+      widget.placeholder = placeholders(tabela, coluna);
+    }
+    elDica.textContent = dica(modo);
+    elHidden.value = widget.value || '';
+  }
+
+  function currentValor() {
+    var modo = modoValor(elTabela.value, elColuna.value);
+    return String(valorWidgets[modo].value || '').trim();
+  }
+
+  Object.keys(valorWidgets).forEach(function (k) {
+    valorWidgets[k].addEventListener('input', function () {
+      elHidden.value = currentValor();
+    });
+    valorWidgets[k].addEventListener('change', function () {
+      elHidden.value = currentValor();
+    });
+  });
+
+  elTabela.addEventListener('change', fillColunas);
+  elColuna.addEventListener('change', function () {
+    hideAllValor();
+    syncValorUI(true);
+  });
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var valor = currentValor();
+    if (!valor) {
+      elStatus.textContent = 'Informe um valor para pesquisar.';
+      return;
+    }
+    elHidden.value = valor;
+    elSubmit.disabled = true;
+    elBtnLabel.textContent = 'Gerando planilha unificada…';
+    elStatus.textContent = '';
+
+    try {
+      var fd = new FormData();
+      fd.set('tabela', elTabela.value);
+      fd.set('coluna', elColuna.value);
+      fd.set('valor', valor);
+
+      var resp = await fetch(form.action, {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      });
+      var ctype = resp.headers.get('Content-Type') || '';
+      if (resp.ok && ctype.indexOf('spreadsheetml') !== -1) {
+        var blob = await resp.blob();
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        var disp = resp.headers.get('Content-Disposition') || '';
+        var m = disp.match(/filename\*?=(?:UTF-8'')?([^;\n]+)/i);
+        var nome = (m && m[1] ? m[1].replace(/["']/g, '') : '') || 'exportacao_unificada.xlsx';
+        a.href = url;
+        a.download = decodeURIComponent(nome);
+        a.click();
+        URL.revokeObjectURL(url);
+        var procs = resp.headers.get('X-Export-Processos') || '?';
+        var linhas = resp.headers.get('X-Export-Linhas') || '?';
+        var fb = resp.headers.get('X-Export-Fallback') || '0';
+        elStatus.textContent = 'Planilha gerada: ' + linhas + ' linha(s), ' + procs + ' processo(s), ' + fb + ' via fallback audit.';
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      console.error(err);
+      elStatus.textContent = 'Falha ao gerar a planilha. Tente novamente.';
+    } finally {
+      elSubmit.disabled = false;
+      elBtnLabel.textContent = 'Baixar planilha unificada';
+    }
+  });
+
+  fillColunas();
+
+  var formTudo = document.getElementById('form-export-tudo');
+  var elTudoSubmit = document.getElementById('eu-tudo-submit');
+  var elTudoLabel = document.getElementById('eu-tudo-label');
+  var elTudoStatus = document.getElementById('eu-tudo-status');
+
+  if (formTudo) {
+    formTudo.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var ok = window.confirm(
+        'Exportar a base inteira (~30 mil processos)?\nIsso pode levar alguns minutos.'
+      );
+      if (!ok) return;
+
+      elTudoSubmit.disabled = true;
+      elSubmit.disabled = true;
+      elTudoLabel.textContent = 'Exportando tudo… aguarde';
+      elTudoStatus.textContent = 'Montando planilha unificada completa. Não feche esta página.';
+
+      try {
+        var resp = await fetch(formTudo.action, {
+          method: 'POST',
+          body: new FormData(formTudo),
+          credentials: 'same-origin'
+        });
+        var ctype = resp.headers.get('Content-Type') || '';
+        if (resp.ok && ctype.indexOf('spreadsheetml') !== -1) {
+          var blob = await resp.blob();
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          var disp = resp.headers.get('Content-Disposition') || '';
+          var m = disp.match(/filename\*?=(?:UTF-8'')?([^;\n]+)/i);
+          var nome = (m && m[1] ? m[1].replace(/["']/g, '') : '') || 'exportacao_unificada_tudo.xlsx';
+          a.href = url;
+          a.download = decodeURIComponent(nome);
+          a.click();
+          URL.revokeObjectURL(url);
+          var procs = resp.headers.get('X-Export-Processos') || '?';
+          var linhas = resp.headers.get('X-Export-Linhas') || '?';
+          elTudoStatus.textContent = 'Base completa exportada: ' + linhas + ' linha(s), ' + procs + ' processo(s).';
+        } else {
+          window.location.reload();
+        }
+      } catch (err) {
+        console.error(err);
+        elTudoStatus.textContent = 'Falha ao exportar tudo. Tente novamente.';
+      } finally {
+        elTudoSubmit.disabled = false;
+        elSubmit.disabled = false;
+        elTudoLabel.textContent = 'Exportar tudo';
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}
