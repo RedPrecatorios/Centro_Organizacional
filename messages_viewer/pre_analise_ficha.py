@@ -234,7 +234,7 @@ _PRECAINFOS_MAP: dict[str, tuple[str, ...]] = {
     "vara": ("Vara", "vara"),
     "foro": ("Foro", "foro"),
     "ordem_cronologica": ("Ordem", "ordem"),
-    "controle": ("Controle", "controle"),
+    "controle": ("CONTROLE", "Controle", "controle"),
     "depre": ("DEPRE", "Depre", "depre"),
     "ep": ("EP", "ep"),
     "nome_credor": ("Requerente", "Cabeca_da_Acao", "requerente"),
@@ -242,13 +242,47 @@ _PRECAINFOS_MAP: dict[str, tuple[str, ...]] = {
     "data_de_nascimento_credor": ("Data_de_Nascimento", "data_de_nascimento"),
     "principal_liquido": ("Principal_Liquido", "principal_liquido"),
     "juros_moratorio": ("Juros_Moratorio", "juros_moratorio"),
-    "juros_compensatorio": ("Juros_Compensatorios", "juros_compensatorios"),
+    "juros_compensatorio": (
+        "Juros_Compensatorio",
+        "Juros_Compensatorios",
+        "juros_compensatorio",
+        "juros_compensatorios",
+    ),
     "data_base": ("Data_Base", "data_base"),
     "nome_advogado": ("Advogado", "ADVOGADO_CREDOR", "advogado"),
     "cpf_advogado": ("CPF_CNPJ", "cpf_cnpj"),
-    "total_da_requisicao": ("Valor_Requisitado", "Valor_Global", "valor_requisitado"),
     "valor_liquido_do_oficio": ("Valor_Negociavel", "Calculo_Atualizado", "valor_negociavel"),
 }
+
+# Campos que devem vir do precainfosnew (sobrescrevem Mongo se houver valor)
+_PRECAINFOS_PREFERRED_KEYS: tuple[str, ...] = (
+    "foro",
+    "ep",
+    "controle",
+    "principal_liquido",
+    "juros_moratorio",
+    "juros_compensatorio",
+    "descontos_previdenciarios",
+    "descontos_de_assistencia_medica",
+    "total_da_requisicao",
+)
+
+# Rubricas somadas em descontos (aliases por coluna real no MySQL)
+_PRECA_DESC_PREVIDENCIA: tuple[str, ...] = (
+    "SPPRE",
+    "SPPREV",
+    "INST_PREV_CAIXA_BENEF",
+    "IPES",
+    "IPESP",
+    "INST_PREV",
+)
+_PRECA_DESC_ASSIST_MEDICA: tuple[str, ...] = (
+    "IAMSP",
+    "IAMSPE",
+    "ASSIT_MED_HOSPITAL",
+    "ASSIST_MED_HOSPITAL",
+    "ASSIST_MED_CAIXA_BENEF",
+)
 
 
 def all_field_keys() -> list[str]:
@@ -461,14 +495,110 @@ def _parecer_block_values(block: Any) -> dict[str, str]:
     if not isinstance(block, dict):
         return out
     for k, v in block.items():
+        # Listas estruturadas (ex.: herdeiros.itens) não viram campo plano
+        if isinstance(v, dict) and isinstance(v.get("itens"), list):
+            val = _clean_parecer_valor(v.get("valor"))
+            if val:
+                out[str(k)] = val
+            continue
         val = _clean_parecer_valor(v)
         if val:
             out[str(k)] = val
     return out
 
 
+def _apply_endereco_credor(out: dict[str, Any], endereco: str, cidade_hint: str = "") -> None:
+    """Preenche campos de endereço do credor a partir de texto livre."""
+    import re as _re
+
+    from messages_viewer.pre_analise_herdeiros import _parse_endereco_br
+
+    def _split_cidade_uf(raw: str) -> tuple[str, str]:
+        text = (raw or "").strip()
+        cm = _re.match(r"^(.+?)\s*[/–-]\s*([A-Z]{2})\s*$", text)
+        if cm:
+            return cm.group(1).strip(), cm.group(2).strip()
+        return text, ""
+
+    parsed = _parse_endereco_br(endereco or "")
+    mapping = {
+        "cep_credor": "cep",
+        "logradouro_credor": "logradouro",
+        "numero_logradouro_credor": "numero",
+        "bairro_credor": "bairro",
+        "cidade_credor": "cidade",
+        "estado_credor": "estado",
+    }
+    for form_key, parsed_key in mapping.items():
+        if form_key in out and not _is_blank(out.get(form_key)):
+            continue
+        if parsed.get(parsed_key):
+            out[form_key] = parsed[parsed_key]
+
+    # Normaliza cidade já preenchida no formato "Cidade/UF"
+    if out.get("cidade_credor"):
+        c, uf = _split_cidade_uf(str(out.get("cidade_credor") or ""))
+        if c:
+            out["cidade_credor"] = c
+        if uf and _is_blank(out.get("estado_credor")):
+            out["estado_credor"] = uf
+
+    if cidade_hint and _is_blank(out.get("cidade_credor")):
+        c, uf = _split_cidade_uf(cidade_hint)
+        if c:
+            out["cidade_credor"] = c
+        if uf and _is_blank(out.get("estado_credor")):
+            out["estado_credor"] = uf
+
+
+def _pick_cessionaria_principal(cessionaria_block: Any) -> dict[str, str]:
+    """Prefere o item mais completo em cessionarios.itens; senão campos planos."""
+    flat = _parecer_block_values(cessionaria_block)
+    if not isinstance(cessionaria_block, dict):
+        return flat
+    nested = cessionaria_block.get("cessionarios")
+    itens: list[Any] = []
+    if isinstance(nested, dict) and isinstance(nested.get("itens"), list):
+        itens = nested["itens"]
+    elif isinstance(nested, list):
+        itens = nested
+
+    best: dict[str, str] = {}
+    best_score = -1
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        scored: dict[str, str] = {}
+        for k, v in item.items():
+            if k == "fontes":
+                continue
+            val = _clean_parecer_valor(v)
+            if val:
+                scored[str(k)] = val
+        score = sum(1 for v in scored.values() if v)
+        if score > best_score:
+            best_score = score
+            best = scored
+
+    # Merge: flat como base, best sobrescreve se mais completo
+    out = dict(flat)
+    for k, v in best.items():
+        if v and (k not in out or _is_blank(out.get(k)) or len(v) > len(str(out.get(k) or ""))):
+            out[k] = v
+    # Normaliza aliases de nome/percentual
+    if "nome" in out and "cessionaria" not in out:
+        out["cessionaria"] = out["nome"]
+    if "percentual" in out and "percentual_cedido" not in out:
+        out["percentual_cedido"] = out["percentual"]
+    if "valor_pago" in out and "valor_pago_proposto" not in out:
+        out["valor_pago_proposto"] = out["valor_pago"]
+    return out
+
+
 def _map_parecer_doc(doc: dict[str, Any]) -> dict[str, Any]:
     """Mapeia documento de pareceres_redator -> campos do formulário."""
+    from messages_viewer.pre_analise_herdeiros import extract_herdeiros_from_parecer
+
     out: dict[str, Any] = {}
     # Top-level
     top_map = {
@@ -486,20 +616,31 @@ def _map_parecer_doc(doc: dict[str, Any]) -> dict[str, Any]:
             out[form_key] = cleaned
 
     qp = doc.get("quadro_parecer") if isinstance(doc.get("quadro_parecer"), dict) else {}
-    credor = _parecer_block_values(qp.get("dados_credor"))
+    dados_credor_raw = qp.get("dados_credor") if isinstance(qp.get("dados_credor"), dict) else {}
+    credor = _parecer_block_values(dados_credor_raw)
     processo = _parecer_block_values(qp.get("dados_processo"))
     valores = _parecer_block_values(qp.get("valores"))
-    cessionaria = _parecer_block_values(qp.get("cessionaria"))
+    cessionaria = _pick_cessionaria_principal(qp.get("cessionaria"))
+    conclusao = _parecer_block_values(qp.get("conclusao")) if isinstance(qp.get("conclusao"), dict) else {}
 
     nested_map: list[tuple[str, dict[str, str], tuple[str, ...]]] = [
         ("nome_credor", credor, ("credor_originario",)),
         ("cpf_credor", credor, ("cpf",)),
         ("estado_civil_credor", credor, ("estado_civil",)),
         ("regime_conjuge_credor", credor, ("regime_bens",)),
-        ("data_de_nascimento_credor", credor, ("idade", "data_nascimento", "data_de_nascimento")),
+        (
+            "data_de_nascimento_credor",
+            credor,
+            ("nascimento", "data_nascimento", "data_de_nascimento"),
+        ),
         ("rg_credor", credor, ("documento_pessoal", "rg")),
+        ("nacionalidade_credor", credor, ("nacionalidade",)),
+        ("ocupacao_credor", credor, ("profissao", "ocupacao")),
+        ("email_credor", credor, ("email", "e_mail")),
+        ("telefone_credor", credor, ("telefone", "fone")),
         ("cidade_credor", credor, ("cidade_residencia", "cidade")),
-        ("complemento_credor", credor, ("observacoes_complementares", "homonimo")),
+        ("data_do_obito", credor, ("obito", "data_obito", "data_do_obito")),
+        ("complemento_credor", credor, ("inventario", "observacoes_complementares", "homonimo")),
         ("numero_processo_principal", processo, ("processo_principal",)),
         ("cumprimento_de_sentenca", processo, ("cumprimento_sentenca",)),
         ("incidente", processo, ("incidente",)),
@@ -508,11 +649,20 @@ def _map_parecer_doc(doc: dict[str, Any]) -> dict[str, Any]:
         ("vara", processo, ("vara",)),
         ("nome_advogado", processo, ("advogado_originario", "advogado")),
         ("expedicao_oficio_requisitorio", processo, ("oficio_requisitorio",)),
-        ("principal_liquido", valores, ("valor_expedido_oficio", "valor_atualizado_planilha")),
+        ("ordem_cronologica", processo, ("observacao_processo_depre", "ordem_cronologica")),
+        (
+            "principal_liquido",
+            valores,
+            ("valor_expedido_oficio", "calculo_conferido", "valor_atualizado_planilha"),
+        ),
         ("preco_de_compra", valores, ("valor_proposta", "valor_atualizado_comprador")),
         ("percentual_de_compra", valores, ("percentual_proposta",)),
         ("percentual_honorarios", valores, ("percentual_honorarios",)),
-        ("valor_liquido_do_oficio", valores, ("valor_blip", "saldo_tjsp", "valor_atualizado_planilha")),
+        (
+            "valor_liquido_do_oficio",
+            valores,
+            ("saldo_tjsp", "valor_blip", "valor_atualizado_planilha"),
+        ),
         ("cessionaria", cessionaria, ("cessionaria", "nome", "nome_cessionaria")),
         ("template", cessionaria, ("template",)),
     ]
@@ -524,13 +674,55 @@ def _map_parecer_doc(doc: dict[str, Any]) -> dict[str, Any]:
                 out[form_key] = block[alias]
                 break
 
-    # Flag de herdeiros (não vai para o form principal)
-    herdeiros_flag = credor.get("herdeiros_habilitados") or ""
-    from messages_viewer.pre_analise_herdeiros import detect_tem_herdeiros
+    # Credor falecido
+    obito_val = credor.get("obito") or out.get("data_do_obito") or ""
+    if obito_val and not re_search_nao(obito_val):
+        out["credor_falecido"] = "Sim"
+        if _is_blank(out.get("data_do_obito")):
+            out["data_do_obito"] = obito_val
+    elif "credor_falecido" not in out:
+        # Se há herdeiros no parecer, assume falecido
+        pass
+
+    # Endereço do credor
+    _apply_endereco_credor(
+        out,
+        credor.get("endereco") or "",
+        credor.get("cidade_residencia") or credor.get("cidade") or "",
+    )
+
+    # Percentual cedido da cessionária → percentual_de_compra se ainda vazio
+    if _is_blank(out.get("percentual_de_compra")):
+        pct_ced = cessionaria.get("percentual_cedido") or cessionaria.get("percentual") or ""
+        if pct_ced:
+            out["percentual_de_compra"] = pct_ced
+    if _is_blank(out.get("preco_de_compra")):
+        vp = cessionaria.get("valor_pago") or cessionaria.get("valor_pago_proposto") or ""
+        if vp:
+            out["preco_de_compra"] = vp
+
+    # Conclusão / observações extras no complemento
+    if conclusao.get("observacoes") and _is_blank(out.get("complemento_credor")):
+        out["complemento_credor"] = conclusao["observacoes"]
+    elif conclusao.get("observacoes") and conclusao["observacoes"] not in str(
+        out.get("complemento_credor") or ""
+    ):
+        base = str(out.get("complemento_credor") or "").strip()
+        out["complemento_credor"] = (
+            f"{base} | {conclusao['observacoes']}" if base else conclusao["observacoes"]
+        )
+
+    # Herdeiros estruturados (itens)
+    herdeiros_list, herdeiros_flag, tem_herdeiros = extract_herdeiros_from_parecer(
+        dados_credor_raw
+    )
+    if tem_herdeiros and obito_val and not re_search_nao(obito_val):
+        out["credor_falecido"] = "Sim"
 
     meta = {
-        "tem_herdeiros": detect_tem_herdeiros(herdeiros_flag),
+        "tem_herdeiros": tem_herdeiros,
         "herdeiros_flag_texto": herdeiros_flag,
+        "herdeiros": herdeiros_list,
     }
 
     # Também tenta aliases genéricos no doc plano
@@ -547,6 +739,15 @@ def _map_parecer_doc(doc: dict[str, Any]) -> dict[str, Any]:
         if cleaned:
             out[key] = cleaned
     return {"dados": out, "meta": meta}
+
+
+def re_search_nao(text: str) -> bool:
+    import re
+
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    return bool(re.search(r"^(n[aã]o|sem|nenhum|null|n/?a)\b", t))
 
 
 def _mongo_fetch(
@@ -599,10 +800,10 @@ def _mongo_fetch(
         if not doc:
             return None
         mapped = _map_parecer_doc(doc)
-        if not mapped or not mapped.get("dados"):
+        if not mapped:
             return {
                 "dados": {},
-                "meta": (mapped or {}).get("meta") or {"tem_herdeiros": False, "herdeiros_flag_texto": ""},
+                "meta": {"tem_herdeiros": False, "herdeiros_flag_texto": "", "herdeiros": []},
             }
         return mapped
     except Exception:
@@ -618,6 +819,89 @@ def _mongo_fetch(
 # ---------------------------------------------------------------------------
 # precainfosnew
 # ---------------------------------------------------------------------------
+
+
+def _parse_money(value: Any) -> Decimal | None:
+    """Converte valores monetários BR/US (string ou número) em Decimal."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    text = str(value).strip()
+    if not text or text.lower() in ("none", "null", "nan", "-", "n/a"):
+        return None
+    text = (
+        text.replace("R$", "")
+        .replace("r$", "")
+        .replace(" ", "")
+        .replace("\u00a0", "")
+        .strip()
+    )
+    if not text:
+        return None
+    if "," in text and "." in text:
+        # 1.234.567,89
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
+    elif text.count(".") > 1:
+        # 63.985.93 → último ponto é decimal
+        parts = text.split(".")
+        text = "".join(parts[:-1]) + "." + parts[-1]
+    try:
+        return Decimal(text)
+    except Exception:
+        return None
+
+
+def _format_money_br(value: Decimal) -> str:
+    """Formata Decimal como 1.234.567,89."""
+    quantized = value.quantize(Decimal("0.01"))
+    negative = quantized < 0
+    abs_val = abs(quantized)
+    int_part, frac = f"{abs_val:.2f}".split(".")
+    groups: list[str] = []
+    while int_part:
+        groups.insert(0, int_part[-3:])
+        int_part = int_part[:-3]
+    body = ".".join(groups) + "," + frac
+    return f"-{body}" if negative else body
+
+
+def _sum_row_money(row: dict[str, Any], col_fn, aliases: tuple[str, ...]) -> Decimal:
+    """Soma colunas distintas do row (evita duplicar se alias aponta à mesma coluna)."""
+    total = Decimal("0")
+    seen: set[str] = set()
+    for alias in aliases:
+        real = col_fn(alias)
+        if not real or real in seen:
+            continue
+        seen.add(real)
+        parsed = _parse_money(row.get(real))
+        if parsed is not None:
+            total += parsed
+    return total
+
+
+def _incidente_match_variants(incidente: str) -> list[str]:
+    raw = (incidente or "").strip()
+    out: list[str] = []
+    if raw:
+        out.append(raw)
+    try:
+        as_int = str(int(raw))
+        if as_int not in out:
+            out.append(as_int)
+        padded = as_int.zfill(2)
+        if padded not in out:
+            out.append(padded)
+    except (TypeError, ValueError):
+        pass
+    return out
 
 
 def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None:
@@ -649,28 +933,58 @@ def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None
         if not f_proc:
             return None
 
+        row = None
+        candidates: list[dict[str, Any]] = []
         if f_inc:
-            cur.execute(
-                f"""
-                SELECT * FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
-                ORDER BY id DESC LIMIT 1
-                """,
-                (cumprimento, incidente),
-            )
+            for inc_var in _incidente_match_variants(incidente):
+                cur.execute(
+                    f"""
+                    SELECT * FROM precainfosnew
+                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                      AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                    ORDER BY id DESC LIMIT 5
+                    """,
+                    (cumprimento, inc_var),
+                )
+                candidates = list(cur.fetchall() or [])
+                if candidates:
+                    break
         else:
             cur.execute(
                 f"""
                 SELECT * FROM precainfosnew
                 WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                ORDER BY id DESC LIMIT 1
+                ORDER BY id DESC LIMIT 5
                 """,
                 (cumprimento,),
             )
-        row = cur.fetchone()
-        if not row:
+            candidates = list(cur.fetchall() or [])
+        if not candidates:
             return None
+
+        # Prefere a linha mais completa entre as recentes (Foro/EP/Controle/valores)
+        prefer_cols = [
+            c
+            for c in (
+                col("Foro"),
+                col("EP"),
+                col("CONTROLE", "Controle"),
+                col("Principal_Liquido"),
+                col("Juros_Moratorio"),
+                col("Juros_Compensatorios", "Juros_Compensatorio"),
+            )
+            if c
+        ]
+
+        def _row_score(r: dict[str, Any]) -> tuple[int, int]:
+            filled = sum(1 for c in prefer_cols if not _is_blank(r.get(c)))
+            try:
+                rid = int(r.get("id") or 0)
+            except (TypeError, ValueError):
+                rid = 0
+            return (filled, rid)
+
+        row = max(candidates, key=_row_score)
 
         out: dict[str, Any] = {}
         for form_key, candidates in _PRECAINFOS_MAP.items():
@@ -679,6 +993,26 @@ def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None
                 if real and real in row and not _is_blank(row.get(real)):
                     out[form_key] = row.get(real)
                     break
+
+        # Parte 10 — descontos (somas de rubricas)
+        desc_prev = _sum_row_money(row, col, _PRECA_DESC_PREVIDENCIA)
+        desc_med = _sum_row_money(row, col, _PRECA_DESC_ASSIST_MEDICA)
+        out["descontos_previdenciarios"] = _format_money_br(desc_prev)
+        out["descontos_de_assistencia_medica"] = _format_money_br(desc_med)
+
+        # Total da requisição = soma dos campos da Parte 10 listados
+        total = Decimal("0")
+        for key in (
+            "principal_liquido",
+            "juros_moratorio",
+            "juros_compensatorio",
+        ):
+            parsed = _parse_money(out.get(key))
+            if parsed is not None:
+                total += parsed
+        total += desc_prev + desc_med
+        out["total_da_requisicao"] = _format_money_br(total)
+
         return out or None
     except Exception:
         return None
@@ -775,6 +1109,7 @@ def carregar_ficha(
     avisos: list[str] = []
     tem_herdeiros_mongo = False
     herdeiros_flag_texto = ""
+    herdeiros_mongo: list[dict[str, Any]] = []
 
     dados["cumprimento_de_sentenca"] = cumprimento
     dados["incidente"] = incidente
@@ -791,6 +1126,8 @@ def carregar_ficha(
         meta = mongo_pack.get("meta") or {}
         tem_herdeiros_mongo = bool(meta.get("tem_herdeiros"))
         herdeiros_flag_texto = str(meta.get("herdeiros_flag_texto") or "")
+        if isinstance(meta.get("herdeiros"), list):
+            herdeiros_mongo = list(meta.get("herdeiros") or [])
         for k in _merge_fill(dados, mongo_dados):
             fontes[k] = "mongodb"
     elif mongo_configured():
@@ -802,6 +1139,14 @@ def carregar_ficha(
     if preca:
         for k in _merge_fill(dados, preca):
             fontes[k] = "precainfosnew"
+        # Parte 1 (foro/ep/controle) e Parte 10: preferir precainfosnew ao Mongo
+        for k in _PRECAINFOS_PREFERRED_KEYS:
+            if k not in preca:
+                continue
+            val = _serialize_cell(preca.get(k))
+            if val:
+                dados[k] = val
+                fontes[k] = "precainfosnew"
 
     local = _local_fetch(cumprimento, incidente)
     saved = False
@@ -835,7 +1180,27 @@ def carregar_ficha(
         if pack.get("herdeiros_habilitados"):
             tem_herdeiros_mongo = True
 
-    # Abrir bloco: local com herdeiros OU flag mongo
+    # Preferência: herdeiros locais com dados; senão, itens do Mongo
+    def _herdeiros_tem_conteudo(lista: list) -> bool:
+        for h in lista or []:
+            if not isinstance(h, dict):
+                continue
+            d = h.get("dados") if isinstance(h.get("dados"), dict) else h
+            nome = str((d or {}).get("nome_herdeiro") or "").strip()
+            cpf = str((d or {}).get("cpf_herdeiro") or "").strip()
+            if nome or cpf:
+                return True
+        return False
+
+    if herdeiros_mongo and (not herdeiros or not _herdeiros_tem_conteudo(herdeiros)):
+        herdeiros = herdeiros_mongo
+        for h in herdeiros:
+            if isinstance(h, dict) and isinstance(h.get("dados"), dict):
+                for dk in h["dados"]:
+                    if h["dados"].get(dk):
+                        fontes[f"herdeiro.{dk}"] = "mongodb"
+
+    # Abrir bloco: local/mongo com herdeiros OU flag mongo
     herdeiros_abertos = bool(herdeiros) or tem_herdeiros_mongo
     if herdeiros_abertos and not herdeiros:
         herdeiros = [

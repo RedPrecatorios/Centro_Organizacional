@@ -128,7 +128,7 @@
     <main class="dash-content">
       {% if not levantamento_api_configured %}
       <div class="camp-msg camp-msg-err" role="alert" style="display:block;margin-bottom:1rem">
-        API de levantamento não configurada. Defina <code>TJSP_API_BASE_URL</code> e <code>TJSP_API_TOKEN</code> no .env.
+        API de levantamento não configurada. Defina <code>TJSP_API_BASE_URL</code> e <code>TJSP_API_KEY</code> (ou <code>TJSP_API_TOKEN</code>) no .env.
       </div>
       {% elif not levantamento_api_healthy %}
       <div class="camp-msg camp-msg-err" role="alert" style="display:block;margin-bottom:1rem">

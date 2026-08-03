@@ -82,20 +82,24 @@ class Settings:
         else:
             refactor_path = default_refactor
 
+        # Prefer round-robin na lista de IPs fixos; fallback WEBSHARE_PROXY_* legado.
+        from tjsp_pipeline.proxy_pool import next_proxy_config
+
+        proxy = next_proxy_config(refactor_path=refactor_path)
+        if proxy is None:
+            proxy = ProxyConfig(
+                host=os.getenv("WEBSHARE_PROXY_HOST", ""),
+                port=int(os.getenv("WEBSHARE_PROXY_PORT", "0") or "0"),
+                username=os.getenv("WEBSHARE_PROXY_USERNAME", ""),
+                password=os.getenv("WEBSHARE_PROXY_PASSWORD", ""),
+            )
+
         return cls(
             project_root=PROJECT_ROOT,
             log_dir=log_dir,
             debug_html_dir=debug_html_dir,
             final_output_dir=final_output_dir,
-            proxy=ProxyConfig(
-                host=os.getenv("WEBSHARE_PROXY_HOST", "p.webshare.io"),
-                port=int(os.getenv("WEBSHARE_PROXY_PORT", "80")),
-                username=os.getenv("WEBSHARE_PROXY_USERNAME", "eleazile-rotate"),
-                password=os.getenv(
-                    "WEBSHARE_PROXY_PASSWORD",
-                    "t3y62qg3mn02",
-                ),
-            ),
+            proxy=proxy,
             headless=os.getenv("HEADLESS", "true").strip().lower()
             in {"1", "true", "yes", "on"},
             browser_timeout_seconds=int(os.getenv("BROWSER_TIMEOUT_SECONDS", "180")),

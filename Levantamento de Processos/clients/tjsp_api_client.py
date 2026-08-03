@@ -5,8 +5,9 @@ Cliente HTTP standalone para a API do dashboard-backend (uso na cloud / platafor
 Nao importa o pacote `api` nem o pipeline — depende so de `requests` + env.
 
 Env (ou argumentos):
-  TJSP_API_BASE_URL   ex.: http://127.0.0.1:8003
-  TJSP_API_TOKEN      mesmo valor de API_TOKEN no servidor
+  TJSP_API_BASE_URL   ex.: https://levantamento.example.com
+  TJSP_API_KEY        mesmo valor de API_KEY no servidor (preferido)
+  TJSP_API_TOKEN      alias legado (API_TOKEN)
 
   Exemplos:
   python clients/tjsp_api_client.py health
@@ -44,11 +45,12 @@ class TjspApiClient:
         self.token = token.strip()
         self.timeout = timeout
         if not self.token:
-            raise ValueError("Token ausente. Defina TJSP_API_TOKEN ou --token.")
+            raise ValueError("Token ausente. Defina TJSP_API_KEY / TJSP_API_TOKEN ou --token.")
 
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.token}",
+            "X-API-Key": self.token,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -147,8 +149,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--token",
-        default=os.getenv("TJSP_API_TOKEN") or os.getenv("API_TOKEN", ""),
-        help="Bearer token (default: TJSP_API_TOKEN ou API_TOKEN)",
+        default=(
+            os.getenv("TJSP_API_KEY")
+            or os.getenv("TJSP_API_TOKEN")
+            or os.getenv("API_KEY")
+            or os.getenv("API_TOKEN")
+            or ""
+        ),
+        help="API key (default: TJSP_API_KEY / TJSP_API_TOKEN / API_KEY / API_TOKEN)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

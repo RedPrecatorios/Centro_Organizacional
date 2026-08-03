@@ -2,10 +2,14 @@
 """
 Levantamento Processual: proxy para a API dashboard-backend (TJSP searches).
 
+A UI da plataforma não muda — só o destino HTTP (outra cloud).
+
 Env:
-  TJSP_API_BASE_URL  — ex. http://127.0.0.1:8003
-  TJSP_API_TOKEN     — Bearer (fallback: API_TOKEN)
-  TJSP_API_TIMEOUT   — timeout HTTP em segundos (default 60)
+  TJSP_API_BASE_URL     — ex. https://levantamento.example.com
+  TJSP_API_KEY          — chave compartilhada (preferido)
+  TJSP_API_TOKEN        — alias legado (mesmo valor de API_KEY/API_TOKEN no remoto)
+  TJSP_API_TIMEOUT      — timeout HTTP em segundos (default 90 para cloud remota)
+  TJSP_API_VERIFY_SSL   — true/false (default true; use false só com cert autoassinado)
   TJSP_POLL_INTERVAL_MS — intervalo sugerido ao frontend (default 5000)
 """
 
@@ -27,7 +31,9 @@ def api_base() -> str | None:
 
 def api_token() -> str | None:
     token = (
-        (os.getenv("TJSP_API_TOKEN") or "").strip()
+        (os.getenv("TJSP_API_KEY") or "").strip()
+        or (os.getenv("TJSP_API_TOKEN") or "").strip()
+        or (os.getenv("API_KEY") or "").strip()
         or (os.getenv("API_TOKEN") or "").strip()
     )
     return token or None
@@ -47,15 +53,22 @@ def poll_interval_ms() -> int:
 
 def _timeout() -> float:
     try:
-        value = float((os.getenv("TJSP_API_TIMEOUT") or "60").strip())
+        value = float((os.getenv("TJSP_API_TIMEOUT") or "90").strip())
     except ValueError:
-        value = 60.0
-    return max(5.0, min(value, 120.0))
+        value = 90.0
+    return max(5.0, min(value, 180.0))
+
+
+def _verify_ssl() -> bool:
+    raw = (os.getenv("TJSP_API_VERIFY_SSL") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _headers() -> dict[str, str]:
+    key = api_token() or ""
     return {
-        "Authorization": f"Bearer {api_token()}",
+        "Authorization": f"Bearer {key}",
+        "X-API-Key": key,
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -65,7 +78,10 @@ def _not_configured() -> tuple[dict[str, Any], int]:
     return (
         {
             "ok": False,
-            "error": "API de levantamento não configurada. Defina TJSP_API_BASE_URL e TJSP_API_TOKEN no .env.",
+            "error": (
+                "API de levantamento não configurada. "
+                "Defina TJSP_API_BASE_URL e TJSP_API_KEY (ou TJSP_API_TOKEN) no .env."
+            ),
         },
         503,
     )
@@ -74,7 +90,12 @@ def _not_configured() -> tuple[dict[str, Any], int]:
 def _map_http_error(response: requests.Response) -> tuple[dict[str, Any], int]:
     code = int(response.status_code)
     if code == 401:
-        return {"ok": False, "error": "Token rejeitado pela API (401)."}, 401
+        return {"ok": False, "error": "API key rejeitada pela API remota (401)."}, 401
+    if code == 403:
+        return {
+            "ok": False,
+            "error": "Acesso negado pela API remota (403) — verifique API_ALLOWED_IPS.",
+        }, 403
     if code == 404:
         return {"ok": False, "error": "Job não encontrado (404)."}, 404
     detail: Any
@@ -230,7 +251,8 @@ def api_health() -> tuple[dict[str, Any], int]:
     try:
         response = requests.get(
             f"{base}/api/v1/health",
-            timeout=min(10.0, _timeout()),
+            timeout=min(15.0, _timeout()),
+            verify=_verify_ssl(),
         )
     except Exception as exc:  # noqa: BLE001
         out, code = _request_error(exc)
@@ -272,6 +294,7 @@ def create_search(
             headers=_headers(),
             json=body,
             timeout=_timeout(),
+            verify=_verify_ssl(),
         )
     except Exception as exc:  # noqa: BLE001
         return _request_error(exc)
@@ -297,6 +320,7 @@ def get_search(job_id: str) -> tuple[dict[str, Any], int]:
             f"{api_base()}/api/v1/searches/{jid}",
             headers=_headers(),
             timeout=_timeout(),
+            verify=_verify_ssl(),
         )
     except Exception as exc:  # noqa: BLE001
         return _request_error(exc)

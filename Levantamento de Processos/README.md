@@ -70,26 +70,30 @@ Jobs ficam em `logs/api_jobs.sqlite3`.
 
 ### Autenticação
 
-Defina `API_TOKEN` no `.env` do servidor. As rotas `/api/v1/searches*` exigem:
+Defina `API_KEY` (ou `API_TOKEN` legado) no `.env` do servidor. As rotas `/api/v1/searches*` exigem:
 
 ```
-Authorization: Bearer <API_TOKEN>
+Authorization: Bearer <API_KEY>
 ```
 
-(ou header `X-API-Token`). `GET /api/v1/health` permanece público.
+(ou `X-API-Key` / `X-API-Token`). `GET /api/v1/health` permanece público.
+
+Opcional em deploy remoto: `API_ALLOWED_IPS` (IP da cloud da plataforma).
+Guia cloud-to-cloud: [`DEPLOY_REMOTE.md`](DEPLOY_REMOTE.md).
 
 ### Cliente cloud (plataforma)
 
 Script isolado em [`clients/tjsp_api_client.py`](clients/tjsp_api_client.py) — só usa `requests`:
 
 ```powershell
-$env:TJSP_API_BASE_URL="http://127.0.0.1:8000"
-$env:TJSP_API_TOKEN="<mesmo API_TOKEN do servidor>"
+$env:TJSP_API_BASE_URL="https://levantamento.example.com"
+$env:TJSP_API_KEY="<mesmo API_KEY do servidor>"
 .\venv\Scripts\python.exe clients\tjsp_api_client.py health
 .\venv\Scripts\python.exe clients\tjsp_api_client.py search "Heloisa Maria Fernandes Queiroz"
 .\venv\Scripts\python.exe clients\tjsp_api_client.py search "Heloisa Maria Fernandes Queiroz" --wait
 .\venv\Scripts\python.exe clients\tjsp_api_client.py status <job_id>
 ```
+
 
 ### Testes da API (token + envio/recebimento)
 

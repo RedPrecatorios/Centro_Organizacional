@@ -1,4 +1,5 @@
 *.zip
+ignore/
 
 # Sessão / auth local (SQLite)
 instance/

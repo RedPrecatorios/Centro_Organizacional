@@ -142,8 +142,19 @@ def run_refactor(
 
     logger.info("Running REFACTOR: %s", " ".join(cmd))
     env = os.environ.copy()
-    env["HTTP_PROXY"] = settings.proxy.requests_url
-    env["HTTPS_PROXY"] = settings.proxy.requests_url
+    # Pool de IPs fixos (RequestsClient round-robin). Não injeta mais o gateway rotativo.
+    from tjsp_pipeline.proxy_pool import resolve_proxies_list_path
+
+    proxies_list = resolve_proxies_list_path(refactor_path=settings.refactor_path)
+    env["HTTP_USE_PROXY"] = "true"
+    env["WEBSHARE_PROXIES_LIST"] = str(proxies_list)
+    max_attempts = (os.getenv("HTTP_PROXY_MAX_ATTEMPTS") or "").strip()
+    if max_attempts:
+        env["HTTP_PROXY_MAX_ATTEMPTS"] = max_attempts
+    # Evita que HTTP_PROXY legado (rotate) sobrescreva o pool no subprocesso.
+    env.pop("HTTP_PROXY", None)
+    env.pop("HTTPS_PROXY", None)
+    env.pop("HTTP_PROXY_URL", None)
     return subprocess.run(
         cmd,
         cwd=str(settings.refactor_path),

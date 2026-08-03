@@ -71,6 +71,25 @@ def _refactor_logs_dir() -> Path:
 def _refactor_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     env["REFACTOR_LOGS_PATH"] = str(_refactor_logs_dir())
+    # Pool de IPs fixos (Webshare) — RequestsClient faz round-robin por request.
+    for key in (
+        "WEBSHARE_PROXIES_LIST",
+        "HTTP_PROXY_MAX_ATTEMPTS",
+        "HTTP_PROXY_URL",
+        "HTTP_USE_PROXY",
+    ):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            env[key] = value
+    # Default: lista no root do REFACTOR se nada estiver setado.
+    if not (env.get("WEBSHARE_PROXIES_LIST") or "").strip():
+        default_list = _refactor_root() / "webshare-proxies-list.txt"
+        if default_list.is_file():
+            env["WEBSHARE_PROXIES_LIST"] = str(default_list)
+    env.setdefault("HTTP_USE_PROXY", "true")
+    # Evita gateway rotativo legado no subprocesso.
+    env.pop("HTTP_PROXY", None)
+    env.pop("HTTPS_PROXY", None)
     return env
 
 

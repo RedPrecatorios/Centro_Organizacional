@@ -27,6 +27,7 @@ from tjsp_pipeline.browser.js_monitor import (
 )
 from tjsp_pipeline.browser.proxy_auth import build_proxy_extension, remove_extension_dir
 from tjsp_pipeline.config import ProxyConfig, Settings
+from tjsp_pipeline.proxy_pool import next_proxy_config
 
 logger = logging.getLogger(__name__)
 
@@ -198,13 +199,17 @@ class UndetectedEsajBrowser:
         options.add_argument("--lang=pt-BR")
         options.add_argument("--window-size=1920,1080")
 
+        # Round-robin: um IP fixo por sessão Chrome (MV3 extension).
+        proxy = next_proxy_config(refactor_path=self.settings.refactor_path)
+        if proxy is not None:
+            self.settings.proxy = proxy
+        proxy = self.settings.proxy
+
         # Authenticated proxy: MV3 extension supplies host + credentials.
         # Do NOT also pass --proxy-server — it bypasses extension auth and yields blank pages.
-        use_proxy_ext = bool(
-            self.settings.proxy.username and self.settings.proxy.password
-        )
+        use_proxy_ext = bool(proxy.username and proxy.password and proxy.host)
         if use_proxy_ext:
-            self._proxy_ext_path = build_proxy_extension(self.settings.proxy)
+            self._proxy_ext_path = build_proxy_extension(proxy)
             # headless=new may still ignore extensions on some Chrome builds; prefer headed.
             if self.settings.headless:
                 logger.warning(
@@ -213,8 +218,8 @@ class UndetectedEsajBrowser:
                 )
                 self.settings.headless = False
             options.add_argument(f"--load-extension={self._proxy_ext_path}")
-        else:
-            options.add_argument(self.settings.proxy.server_arg)
+        elif proxy.host and proxy.port:
+            options.add_argument(proxy.server_arg)
 
         if self.settings.headless:
             options.add_argument("--headless=new")
@@ -229,9 +234,9 @@ class UndetectedEsajBrowser:
 
         logger.info(
             "Starting undetected-chromedriver | proxy=%s@%s:%s headless=%s ext=%s",
-            self.settings.proxy.username,
-            self.settings.proxy.host,
-            self.settings.proxy.port,
+            proxy.username,
+            proxy.host,
+            proxy.port,
             self.settings.headless,
             bool(self._proxy_ext_path),
         )

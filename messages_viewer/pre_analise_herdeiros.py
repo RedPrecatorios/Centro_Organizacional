@@ -182,6 +182,234 @@ def detect_tem_herdeiros(flag_text: Any) -> bool:
     return bool(re.search(r"sim|habilit|sucessor|herdeir", text))
 
 
+def _clean_mongo_text(raw: Any) -> str:
+    """Extrai texto útil de {valor, ...} ou string, sem sufixo de evidência."""
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        if "valor" in raw:
+            return _clean_mongo_text(raw.get("valor"))
+        return ""
+    text = _serialize_cell(raw)
+    if not text:
+        return ""
+    for sep in (" (doc:", " (DOC:", "\n"):
+        if sep in text:
+            text = text.split(sep, 1)[0].strip()
+    return text.strip()
+
+
+def _parse_endereco_br(endereco: str) -> dict[str, str]:
+    """Extrai CEP / cidade / UF / logradouro de endereço brasileiro livre."""
+    text = (endereco or "").strip()
+    out: dict[str, str] = {}
+    if not text:
+        return out
+
+    cep_m = re.search(r"CEP[:\s]*([0-9]{5}-?[0-9]{3})", text, flags=re.IGNORECASE)
+    if cep_m:
+        out["cep"] = cep_m.group(1)
+        text = (text[: cep_m.start()] + text[cep_m.end() :]).strip(" ,;-–")
+
+    cidade_m = re.search(
+        r"([A-Za-zÀ-ÿ .'-]+)\s*[-–/]\s*([A-Z]{2})\s*$",
+        text,
+    )
+    if cidade_m:
+        out["cidade"] = cidade_m.group(1).strip(" ,;-")
+        out["estado"] = cidade_m.group(2).strip()
+        text = text[: cidade_m.start()].strip(" ,;-–")
+
+    # "nº 118" / "n. 118" / ", 118,"
+    num_m = re.search(
+        r"(?:,|\s)(?:n[º°o.\s]*)\s*([0-9A-Za-z\-]+)(?=,|\s|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if num_m:
+        out["numero"] = num_m.group(1).strip()
+        # Remove o trecho do número, mantém o restante como logradouro+bairro
+        before = text[: num_m.start()].strip(" ,;-")
+        after = text[num_m.end() :].strip(" ,;-")
+        parts = [p.strip() for p in after.split(",") if p.strip()]
+        if parts:
+            out["bairro"] = parts[-1]
+            meio = ", ".join(parts[:-1]).strip()
+            out["logradouro"] = (before + (", " + meio if meio else "")).strip(" ,")
+        else:
+            out["logradouro"] = before
+    else:
+        out["logradouro"] = text
+    return {k: v for k, v in out.items() if v}
+
+
+def _percentual_from_obs(obs: str) -> str:
+    """Tenta extrair percentual do crédito nas observações do herdeiro."""
+    text = obs or ""
+    m = re.search(
+        r"(?:direito\s+a|quinh[aã]o\s+de|percentual)\s*[:=]?\s*([0-9]+(?:[.,][0-9]+)?\s*%)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).replace(" ", "")
+    m2 = re.search(r"([0-9]+(?:[.,][0-9]+)?\s*%)\s*(?:do\s+cr[eé]dito)?", text, flags=re.IGNORECASE)
+    if m2:
+        return m2.group(1).replace(" ", "")
+    return ""
+
+
+def map_mongo_herdeiro_item(item: dict[str, Any], ordem: int = 1) -> dict[str, Any]:
+    """Converte um item de quadro_parecer.dados_credor.herdeiros.itens -> formulário."""
+    dados = empty_herdeiro_dados()
+    if not isinstance(item, dict):
+        return {"id": None, "ordem": ordem, "validado": False, "dados": dados}
+
+    def g(*keys: str) -> str:
+        for k in keys:
+            if k in item and item.get(k) is not None:
+                val = _clean_mongo_text(item.get(k))
+                if val:
+                    return val
+        return ""
+
+    nome = g("nome", "nome_herdeiro")
+    cpf = g("cpf_cnpj", "cpf", "cpf_herdeiro")
+    parentesco = g("parentesco", "parentesco_herdeiro")
+    habilitado = g("habilitado", "herdeiro_habilitado")
+    doc_pessoal = g("doc_pessoal", "documento_pessoal", "rg", "rg_herdeiro")
+    nascimento = g("nascimento", "data_nascimento", "data_de_nascimento")
+    estado_civil = g("estado_civil")
+    email = g("email", "e_mail")
+    telefone = g("telefone", "fone")
+    cidade = g("cidade", "cidade_residencia")
+    endereco = g("endereco", "endereco_completo")
+    observacoes = g("observacoes", "obs")
+    ocupacao = g("ocupacao", "profissao")
+    nacionalidade = g("nacionalidade")
+
+    if nome:
+        dados["nome_herdeiro"] = nome
+    if cpf:
+        dados["cpf_herdeiro"] = cpf
+    if parentesco:
+        dados["parentesco_herdeiro"] = parentesco
+    if habilitado:
+        dados["herdeiro_habilitado"] = habilitado
+    elif nome:
+        dados["herdeiro_habilitado"] = "Sim"
+    if doc_pessoal:
+        dados["rg_herdeiro"] = doc_pessoal
+    if nascimento:
+        dados["data_de_nascimento_herdeiro"] = nascimento
+    if estado_civil:
+        dados["estado_civil_herdeiro"] = estado_civil
+    if email:
+        dados["email_herdeiro"] = email
+    if telefone:
+        dados["telefone_herdeiro"] = telefone
+    if ocupacao:
+        dados["ocupacao_herdeiro"] = ocupacao
+    if nacionalidade:
+        dados["nacionalidade_herdeiro"] = nacionalidade
+
+    pct = g("percentual", "percentual_detido", "quinhao") or _percentual_from_obs(observacoes)
+    if pct:
+        dados["percentual_detido"] = pct
+
+    parsed = _parse_endereco_br(endereco)
+    if parsed.get("cep"):
+        dados["cep_herdeiro"] = parsed["cep"]
+    if parsed.get("logradouro"):
+        dados["logradouro_herdeiro"] = parsed["logradouro"]
+    if parsed.get("numero"):
+        dados["numero_logradouro_herdeiro"] = parsed["numero"]
+    if parsed.get("bairro"):
+        dados["bairro_herdeiro"] = parsed["bairro"]
+    if parsed.get("cidade"):
+        dados["cidade_herdeiro"] = parsed["cidade"]
+    elif cidade:
+        # "Águas de Lindóia/SP" → cidade + UF
+        cm = re.match(r"^(.+?)\s*[/–-]\s*([A-Z]{2})\s*$", cidade)
+        if cm:
+            dados["cidade_herdeiro"] = cm.group(1).strip()
+            dados["estado_herdeiro"] = cm.group(2).strip()
+        else:
+            dados["cidade_herdeiro"] = cidade
+    if parsed.get("estado"):
+        dados["estado_herdeiro"] = parsed["estado"]
+
+    # Guarda data de habilitação / obs no campo mencionar (livre)
+    extras = []
+    data_hab = g("data_habilitacao")
+    if data_hab:
+        extras.append(f"Habilitação: {data_hab}")
+    if observacoes:
+        extras.append(observacoes)
+    if extras:
+        dados["mencionar"] = " | ".join(extras)
+
+    return {
+        "id": None,
+        "ordem": ordem,
+        "validado": False,
+        "dados": dados,
+    }
+
+
+def extract_herdeiros_from_parecer(dados_credor: Any) -> tuple[list[dict[str, Any]], str, bool]:
+    """
+    Lê quadro_parecer.dados_credor e devolve:
+    (lista_herdeiros_form, flag_texto, tem_herdeiros).
+    """
+    if not isinstance(dados_credor, dict):
+        return [], "", False
+
+    flag_block = dados_credor.get("herdeiros_habilitados")
+    flag_texto = _clean_mongo_text(flag_block)
+    if not flag_texto and isinstance(flag_block, dict):
+        flag_texto = _clean_mongo_text(flag_block.get("valor"))
+
+    herdeiros_block = dados_credor.get("herdeiros")
+    itens: list[Any] = []
+    if isinstance(herdeiros_block, dict):
+        raw_itens = herdeiros_block.get("itens")
+        if isinstance(raw_itens, list):
+            itens = raw_itens
+        if not flag_texto:
+            flag_texto = _clean_mongo_text(herdeiros_block.get("valor"))
+    elif isinstance(herdeiros_block, list):
+        itens = herdeiros_block
+
+    # Fallback: itens em herdeiros_habilitados
+    if not itens and isinstance(flag_block, dict):
+        raw_itens = flag_block.get("itens")
+        if isinstance(raw_itens, list):
+            itens = raw_itens
+
+    mapped: list[dict[str, Any]] = []
+    for i, item in enumerate(itens, start=1):
+        if isinstance(item, dict):
+            mapped.append(map_mongo_herdeiro_item(item, ordem=i))
+
+    qtd = 0
+    if isinstance(herdeiros_block, dict):
+        try:
+            qtd = int(herdeiros_block.get("quantidade") or 0)
+        except (TypeError, ValueError):
+            qtd = 0
+
+    tem = bool(mapped) or qtd > 0 or detect_tem_herdeiros(flag_texto)
+    # Óbito do credor também indica possível sucessão
+    obito = _clean_mongo_text(dados_credor.get("obito"))
+    if obito and not re.search(r"\b(n[aã]o|sem|nenhum)\b", obito.lower()):
+        tem = True
+        if not flag_texto:
+            flag_texto = f"Óbito do credor: {obito}"
+
+    return mapped, flag_texto, tem
+
+
 def ensure_herdeiro_tables(cur) -> None:
     cur.execute(
         """

@@ -15,6 +15,8 @@ TEST_TOKEN = "test-token-dashboard-backend-ci"
 @pytest.fixture()
 def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("API_TOKEN", TEST_TOKEN)
+    monkeypatch.setenv("API_KEY", TEST_TOKEN)
+    monkeypatch.delenv("API_ALLOWED_IPS", raising=False)
     # Evita worker real: job fica queued e o teste injeta resultado no store.
     monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("DEBUG_HTML_DIR", str(tmp_path / "logs" / "debug_html"))
@@ -55,6 +57,76 @@ def test_search_rejects_wrong_token(client: TestClient):
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert response.status_code == 401
+
+
+def test_search_accepts_x_api_key(client: TestClient):
+    response = client.post(
+        "/api/v1/searches",
+        json={"nome": "Fulano de Tal"},
+        headers={"X-API-Key": TEST_TOKEN},
+    )
+    assert response.status_code == 202, response.text
+
+
+def test_api_key_env_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    monkeypatch.setenv("API_KEY", TEST_TOKEN)
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DEBUG_HTML_DIR", str(tmp_path / "logs" / "debug_html"))
+    monkeypatch.setenv("FINAL_OUTPUT_DIR", str(tmp_path / "output"))
+
+    from api.jobs.worker import SearchJobWorker
+
+    monkeypatch.setattr(SearchJobWorker, "start", lambda self: None)
+    monkeypatch.setattr(SearchJobWorker, "stop", lambda self, timeout=5.0: None)
+
+    from api.app import app
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            "/api/v1/searches",
+            json={"nome": "Fulano de Tal"},
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        )
+        assert response.status_code == 202, response.text
+
+
+def test_ip_allowlist_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("API_TOKEN", TEST_TOKEN)
+    monkeypatch.setenv("API_KEY", TEST_TOKEN)
+    monkeypatch.setenv("API_ALLOWED_IPS", "203.0.113.99")
+    monkeypatch.setenv("API_TRUST_PROXY", "true")
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DEBUG_HTML_DIR", str(tmp_path / "logs" / "debug_html"))
+    monkeypatch.setenv("FINAL_OUTPUT_DIR", str(tmp_path / "output"))
+
+    from api.jobs.worker import SearchJobWorker
+
+    monkeypatch.setattr(SearchJobWorker, "start", lambda self: None)
+    monkeypatch.setattr(SearchJobWorker, "stop", lambda self, timeout=5.0: None)
+
+    from api.app import app
+
+    with TestClient(app) as test_client:
+        blocked = test_client.post(
+            "/api/v1/searches",
+            json={"nome": "Fulano de Tal"},
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "X-Forwarded-For": "198.51.100.1",
+            },
+        )
+        assert blocked.status_code == 403
+
+        allowed = test_client.post(
+            "/api/v1/searches",
+            json={"nome": "Fulano de Tal"},
+            headers={
+                "Authorization": f"Bearer {TEST_TOKEN}",
+                "X-Forwarded-For": "203.0.113.99",
+            },
+        )
+        assert allowed.status_code == 202, allowed.text
 
 
 def test_search_send_and_receive_with_token(client: TestClient):
@@ -161,7 +233,7 @@ def test_cloud_client_send_receive(client: TestClient, monkeypatch: pytest.Monke
     health = api.health()
     assert health["status"] == "ok"
 
-    created = api.create_search("Nadir Costa de Oliveira")
+    created = api.create_search(nome="Nadir Costa de Oliveira")
     assert created["status"] == "queued"
     job_id = created["job_id"]
 
@@ -187,4 +259,4 @@ def test_cloud_client_send_receive(client: TestClient, monkeypatch: pytest.Monke
     # Token errado
     bad = cloud_client.TjspApiClient("http://test", "token-errado")
     with pytest.raises(PermissionError):
-        bad.create_search("Alguem")
+        bad.create_search(nome="Alguem")
