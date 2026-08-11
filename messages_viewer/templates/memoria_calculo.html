@@ -237,6 +237,68 @@
     </div>
   </div>
 
+  <div class="memoria-modal-overlay memoria-blacklist-overlay" id="memoria-blacklist-modal" hidden>
+    <div class="memoria-modal memoria-blacklist-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-blacklist-title">
+      <div class="memoria-blacklist-hero">
+        <div class="memoria-blacklist-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3 4.5 6v5.2c0 4.7 3.1 8.9 7.5 10.3 4.4-1.4 7.5-5.6 7.5-10.3V6L12 3Z"/>
+            <path d="m9.5 9.5 5 5m0-5-5 5"/>
+          </svg>
+        </div>
+        <div class="memoria-blacklist-heading">
+          <span class="memoria-blacklist-badge">Acesso restrito</span>
+          <h2 id="memoria-blacklist-title">Caso identificado na blacklist</h2>
+          <p>O cálculo está protegido e só pode ser exibido mediante autorização registrada.</p>
+        </div>
+        <button type="button" class="memoria-modal-x memoria-blacklist-x" id="memoria-blacklist-x" aria-label="Fechar">×</button>
+      </div>
+      <div class="memoria-blacklist-body">
+        <div class="memoria-blacklist-reason">
+          <span>Motivo registrado</span>
+          <strong id="memoria-blacklist-motivo">—</strong>
+        </div>
+        <dl class="memoria-blacklist-details">
+          <div>
+            <dt>Requerente</dt>
+            <dd id="memoria-blacklist-req">—</dd>
+          </div>
+          <div>
+            <dt>Processo</dt>
+            <dd id="memoria-blacklist-proc">—</dd>
+          </div>
+          <div>
+            <dt>Incidente</dt>
+            <dd id="memoria-blacklist-inc">—</dd>
+          </div>
+        </dl>
+        <label class="memoria-blacklist-label" for="memoria-blacklist-justificativa">
+          Motivo da autorização
+          <span>Obrigatório para auditoria</span>
+        </label>
+        <textarea
+          id="memoria-blacklist-justificativa"
+          class="memoria-blacklist-textarea"
+          rows="3"
+          maxlength="500"
+          placeholder="Descreva por que os valores devem ser liberados…"
+        ></textarea>
+        <div class="memoria-blacklist-field-footer">
+          <span id="memoria-blacklist-validation">Informe pelo menos 5 caracteres.</span>
+          <span id="memoria-blacklist-counter">0/500</span>
+        </div>
+      </div>
+      <div class="memoria-blacklist-actions">
+        <button type="button" class="memoria-blacklist-btn memoria-blacklist-btn--ghost" id="memoria-blacklist-cancel">
+          Manter bloqueado
+        </button>
+        <button type="button" class="memoria-blacklist-btn memoria-blacklist-btn--danger" id="memoria-blacklist-confirm" disabled>
+          Autorizar visualização
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="memoria-modal-overlay" id="memoria-fila-modal" hidden>
     <div class="memoria-modal memoria-fila-modal-panel" role="dialog" aria-modal="true" aria-labelledby="memoria-fila-title">
       <div class="memoria-modal-top">
@@ -412,6 +474,220 @@
       gap: 10px;
       flex-shrink: 0;
       box-sizing: border-box;
+    }
+    #memoria-blacklist-modal.memoria-modal-overlay{
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.56);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      z-index: 290;
+    }
+    .memoria-blacklist-panel{
+      width: min(560px, 100%);
+      max-height: min(92vh, 720px);
+      border: 0;
+      border-radius: 18px;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+    }
+    .memoria-blacklist-hero{
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 22px 54px 20px 22px;
+      background: linear-gradient(135deg, #fff7ed 0%, #fef2f2 100%);
+      border-bottom: 1px solid #fecaca;
+    }
+    .memoria-blacklist-icon{
+      display: grid;
+      place-items: center;
+      flex: 0 0 46px;
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      color: #b91c1c;
+      background: #fee2e2;
+      box-shadow: inset 0 0 0 1px #fecaca;
+    }
+    .memoria-blacklist-icon svg{ width: 25px; height: 25px; }
+    .memoria-blacklist-heading{ min-width: 0; }
+    .memoria-blacklist-badge{
+      display: inline-flex;
+      margin-bottom: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .memoria-blacklist-heading h2{
+      margin: 0;
+      color: #7f1d1d;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: -.02em;
+    }
+    .memoria-blacklist-heading p{
+      margin: 6px 0 0;
+      color: #9f3a38;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .memoria-blacklist-x{
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      border-color: #fecaca;
+      background: rgba(255,255,255,.7);
+      color: #991b1b;
+    }
+    .memoria-blacklist-body{
+      padding: 20px 22px 16px;
+      overflow-y: auto;
+    }
+    .memoria-blacklist-reason{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 16px;
+      padding: 11px 13px;
+      border: 1px solid #fed7aa;
+      border-radius: 10px;
+      background: #fff7ed;
+      font-size: 13px;
+    }
+    .memoria-blacklist-reason span{ color: #9a3412; }
+    .memoria-blacklist-reason strong{
+      color: #7c2d12;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .memoria-blacklist-details{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 0 0 18px;
+    }
+    .memoria-blacklist-details > div{
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface) 94%, #f8fafc);
+    }
+    .memoria-blacklist-details > div:first-child{ grid-column: 1 / -1; }
+    .memoria-blacklist-details dt{
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .memoria-blacklist-details dd{
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .memoria-blacklist-label{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .memoria-blacklist-label span{
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .memoria-blacklist-textarea{
+      display: block;
+      width: 100%;
+      min-height: 82px;
+      resize: vertical;
+      box-sizing: border-box;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      line-height: 1.45;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .memoria-blacklist-textarea:focus{
+      border-color: #dc2626;
+      box-shadow: 0 0 0 3px rgba(220, 38, 38, .12);
+    }
+    .memoria-blacklist-field-footer{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    #memoria-blacklist-validation.is-valid{ color: #15803d; }
+    .memoria-blacklist-actions{
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 16px 22px 20px;
+      border-top: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface) 96%, #f8fafc);
+    }
+    .memoria-blacklist-btn{
+      min-height: 40px;
+      padding: 9px 15px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      transition: transform .12s ease, background .15s ease, opacity .15s ease;
+    }
+    .memoria-blacklist-btn:active:not(:disabled){ transform: translateY(1px); }
+    .memoria-blacklist-btn--ghost{
+      border-color: var(--border);
+      background: var(--surface);
+      color: var(--text);
+    }
+    .memoria-blacklist-btn--danger{
+      background: #b91c1c;
+      color: #fff;
+      box-shadow: 0 5px 14px rgba(185, 28, 28, .2);
+    }
+    .memoria-blacklist-btn--danger:hover:not(:disabled){ background: #991b1b; }
+    .memoria-blacklist-btn:disabled{
+      cursor: not-allowed;
+      opacity: .45;
+      box-shadow: none;
+    }
+    @media (max-width: 560px){
+      .memoria-blacklist-hero{ padding: 18px 48px 17px 16px; }
+      .memoria-blacklist-icon{ flex-basis: 40px; width: 40px; height: 40px; }
+      .memoria-blacklist-heading h2{ font-size: 18px; }
+      .memoria-blacklist-body{ padding: 16px; }
+      .memoria-blacklist-details{ grid-template-columns: 1fr; }
+      .memoria-blacklist-details > div:first-child{ grid-column: auto; }
+      .memoria-blacklist-reason{ align-items: flex-start; flex-direction: column; }
+      .memoria-blacklist-reason strong{ text-align: left; }
+      .memoria-blacklist-actions{
+        padding: 14px 16px 16px;
+        flex-direction: column-reverse;
+      }
+      .memoria-blacklist-btn{ width: 100%; }
     }
     .memoria-analise-modal-panel{
       width: min(560px, 100%);
@@ -825,6 +1101,18 @@
     var filaCancel = document.getElementById('memoria-fila-cancel');
     var filaX = document.getElementById('memoria-fila-x');
     var filaOnConfirm = null;
+    var blacklistModal = document.getElementById('memoria-blacklist-modal');
+    var blacklistX = document.getElementById('memoria-blacklist-x');
+    var blacklistCancel = document.getElementById('memoria-blacklist-cancel');
+    var blacklistConfirm = document.getElementById('memoria-blacklist-confirm');
+    var blacklistMotivo = document.getElementById('memoria-blacklist-motivo');
+    var blacklistReq = document.getElementById('memoria-blacklist-req');
+    var blacklistProc = document.getElementById('memoria-blacklist-proc');
+    var blacklistInc = document.getElementById('memoria-blacklist-inc');
+    var blacklistJustificativa = document.getElementById('memoria-blacklist-justificativa');
+    var blacklistValidation = document.getElementById('memoria-blacklist-validation');
+    var blacklistCounter = document.getElementById('memoria-blacklist-counter');
+    var blacklistPendingRow = null;
     var analisePollTimer = null;
     var analiseActiveJobId = null;
     var analiseOnComplete = null;
@@ -901,6 +1189,12 @@
       var st = String(row.status || '').trim().toLowerCase();
       var calc = String(row.calculo_atualizado || '').trim().toLowerCase();
       return st === sem || calc === sem;
+    }
+
+    function isPipelineColetaBlocked(row) {
+      if (!row) return false;
+      if (row.pipeline_blocked) return true;
+      return String(row.source || '').toLowerCase() === 'controle_coleta';
     }
 
     function isVerificarMeses(row) {
@@ -1274,56 +1568,97 @@
       var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
       var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
         ? String(row.numero_do_incidente) : '—';
-      var isBlacklist = row && row.source === 'blacklist';
-      var origem = isBlacklist
-        ? 'blacklist'
-        : row && row.source === 'precainfosnew'
-        ? '(Calculo_Atualizado = Sem Saldo)'
-        : 'memoria_calculo (status = Sem Saldo)';
+      var isPipeline = isPipelineColetaBlocked(row);
+      var isBlacklist = !isPipeline && row && row.source === 'blacklist';
+      var pipelineStatus = row && (row.pipeline_status || row.controle_coleta_status)
+        ? String(row.pipeline_status || row.controle_coleta_status)
+        : '—';
       var motivoBlacklist = row && row.blacklist_motivo ? '\nMotivo blacklist: ' + String(row.blacklist_motivo) : '';
-      var txt =
-        (isBlacklist
-          ? 'Este caso consta na blacklist e está inapto.\nO cálculo não pode ser mostrado.\n\n'
-          : 'Este caso está inapto («Sem Saldo»).\n\n') +
-        'Requerente: ' + req + '\n' +
-        'Processo: ' + proc + '\n' +
-        'Incidente: ' + inc + motivoBlacklist + '\n\n' +
-        'Os valores da memória de cálculo não serão exibidos. ' +
-        'Os botões Atualizar Cálculo e Análise Processual estão desativados.';
+      var txt;
+      if (isPipeline) {
+        txt =
+          'Coleta bloqueada no controle_coleta_TJSP.\n' +
+          'Status: ' + pipelineStatus + '\n\n' +
+          'Requerente: ' + req + '\n' +
+          'Processo: ' + proc + '\n' +
+          'Incidente: ' + inc + '\n\n' +
+          'Este é um bloqueio técnico do pipeline TJSP (ex.: autos blacklisted), ' +
+          'distinto da blacklist EDA.\n' +
+          'Os valores da memória de cálculo não serão exibidos. ' +
+          'Os botões Atualizar Cálculo e Análise Processual estão desativados.';
+      } else {
+        txt =
+          (isBlacklist
+            ? 'Este caso consta na blacklist e está inapto.\nO cálculo não pode ser mostrado.\n\n'
+            : 'Este caso está inapto («Sem Saldo»).\n\n') +
+          'Requerente: ' + req + '\n' +
+          'Processo: ' + proc + '\n' +
+          'Incidente: ' + inc + motivoBlacklist + '\n\n' +
+          'Os valores da memória de cálculo não serão exibidos. ' +
+          'Os botões Atualizar Cálculo e Análise Processual estão desativados.';
+      }
       showModal(txt, false);
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
-      setMsg(isBlacklist ? 'Caso inapto por blacklist. Cálculo não exibido.' : 'Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
+      if (isPipeline) {
+        setMsg('Coleta bloqueada (' + pipelineStatus + '). Cálculo não exibido.', false);
+      } else {
+        setMsg(isBlacklist ? 'Caso inapto por blacklist. Cálculo não exibido.' : 'Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
+      }
+    }
+
+    function updateBlacklistAuthorizationState() {
+      var value = blacklistJustificativa ? String(blacklistJustificativa.value || '').trim() : '';
+      var valid = value.length >= 5;
+      if (blacklistConfirm) blacklistConfirm.disabled = !valid;
+      if (blacklistCounter) blacklistCounter.textContent = String(blacklistJustificativa ? blacklistJustificativa.value.length : 0) + '/500';
+      if (blacklistValidation) {
+        blacklistValidation.textContent = valid ? 'Justificativa válida para auditoria.' : 'Informe pelo menos 5 caracteres.';
+        blacklistValidation.classList.toggle('is-valid', valid);
+      }
+    }
+
+    function hideBlacklistModal() {
+      if (!blacklistModal) return;
+      blacklistModal.setAttribute('hidden', '');
+      blacklistPendingRow = null;
     }
 
     function requestBlacklistOverride(row) {
-      var req = row && row.requerente ? String(row.requerente) : '—';
-      var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
-      var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
-        ? String(row.numero_do_incidente) : '—';
-      var ok = window.confirm(
-        'ATENÇÃO: este caso consta na blacklist.\n\n' +
-        'Requerente: ' + req + '\n' +
-        'Processo: ' + proc + '\n' +
-        'Incidente: ' + inc + '\n\n' +
-        'Os valores só devem ser exibidos se você tem autorização e ciência do risco.\n' +
-        'Deseja prosseguir mesmo assim?'
-      );
-      if (!ok) return false;
-      var motivo = window.prompt(
-        'Informe o motivo/autorização para auditoria antes de liberar os valores:',
-        ''
-      );
-      motivo = motivo == null ? '' : String(motivo).trim();
-      if (motivo.length < 5) {
-        setMsg('Liberação cancelada: informe um motivo de auditoria com pelo menos 5 caracteres.', true);
-        return false;
+      if (!blacklistModal) return false;
+      blacklistPendingRow = row;
+      if (blacklistMotivo) blacklistMotivo.textContent = row && row.blacklist_motivo ? String(row.blacklist_motivo) : 'Blacklist';
+      if (blacklistReq) blacklistReq.textContent = row && row.requerente ? String(row.requerente) : '—';
+      if (blacklistProc) blacklistProc.textContent = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
+      if (blacklistInc) {
+        blacklistInc.textContent = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
+          ? String(row.numero_do_incidente)
+          : '—';
       }
-      doSearch({
-        skipAutoAnalise: true,
-        blacklistOverride: true,
-        blacklistReason: motivo
-      });
+      if (blacklistJustificativa) blacklistJustificativa.value = '';
+      updateBlacklistAuthorizationState();
+      blacklistModal.removeAttribute('hidden');
+      window.setTimeout(function () {
+        if (blacklistJustificativa) blacklistJustificativa.focus();
+      }, 50);
       return true;
+    }
+
+    function applyInaptoRow(r, showNotice) {
+      clearCasoAusenteTodasBases();
+      resetMemoriaVazia();
+      showCaseMeta(r);
+      escolher.setAttribute('hidden', '');
+      escolherList.innerHTML = '';
+      if (r.id_precainfosnew != null && r.id_precainfosnew !== '') {
+        var pInap = parseInt(r.id_precainfosnew, 10);
+        if (!isNaN(pInap)) { idPrecainfosnewSelecionado = pInap; }
+      }
+      currentRow = r;
+      syncAtualizarCalculoButtonState(r);
+      syncVerificarMesesAlert(r);
+      syncAnaliseProcessualButton();
+      if (showNotice !== false) showInaptoSemSaldoModal(r);
+      else setMsg('Caso mantido bloqueado por blacklist. Cálculo não exibido.', false);
     }
 
     function tryApplyRow(r) {
@@ -1331,21 +1666,12 @@
       if (r.source === 'blacklist' && r.blacklist_can_override) {
         if (requestBlacklistOverride(r)) return;
       }
+      if (isPipelineColetaBlocked(r)) {
+        applyInaptoRow(r, true);
+        return;
+      }
       if (isCasoSemSaldo(r)) {
-        clearCasoAusenteTodasBases();
-        resetMemoriaVazia();
-        showCaseMeta(r);
-        escolher.setAttribute('hidden', '');
-        escolherList.innerHTML = '';
-        if (r.id_precainfosnew != null && r.id_precainfosnew !== '') {
-          var pInap = parseInt(r.id_precainfosnew, 10);
-          if (!isNaN(pInap)) { idPrecainfosnewSelecionado = pInap; }
-        }
-        currentRow = r;
-        syncAtualizarCalculoButtonState(r);
-        syncVerificarMesesAlert(r);
-        syncAnaliseProcessualButton();
-        showInaptoSemSaldoModal(r);
+        applyInaptoRow(r, true);
         return;
       }
       applyRow(r);
@@ -1485,6 +1811,27 @@
                         resetMemoriaVazia();
                         var ctlStatus = String(o2.d.status || '');
                         hideModal();
+                        if (o2.d.pipeline_blocked) {
+                          tryApplyRow({
+                            source: 'controle_coleta',
+                            pipeline_blocked: true,
+                            pipeline_status: ctlStatus,
+                            controle_coleta_status: ctlStatus,
+                            numero_de_processo: p2,
+                            numero_do_incidente: i2,
+                            status: 'Sem Saldo',
+                            calculo_atualizado: 'Sem Saldo',
+                            principal_bruto: 0,
+                            juros: 0,
+                            desc_saude_prev: 0,
+                            desc_ir: 0,
+                            percentual_honorarios: 30,
+                            total_bruto: 0,
+                            reserva_honorarios: 0,
+                            total_liquido: 0
+                          });
+                          return;
+                        }
                         setMsg('Não localizado na memória/preca. Status no controle_coleta_TJSP: ' + ctlStatus, false);
                         if (
                           !skipAutoAnalise &&
@@ -1551,7 +1898,21 @@
               (row.ultima_atualizacao ? (' · Últ. atual.: ' + formatUltimaAtualizacao(row.ultima_atualizacao)) : '');
             b.appendChild(n1);
             b.appendChild(n2);
-            if (isCasoSemSaldo(row)) {
+            if (row && row.source === 'blacklist') {
+              var tagBl = document.createElement('span');
+              tagBl.className = 'memoria-escolher-tag';
+              tagBl.textContent = row.blacklist_motivo
+                ? (' · Blacklist: ' + String(row.blacklist_motivo))
+                : ' · Blacklist (inapto)';
+              b.appendChild(tagBl);
+            } else if (isPipelineColetaBlocked(row)) {
+              var tagPipe = document.createElement('span');
+              tagPipe.className = 'memoria-escolher-tag';
+              tagPipe.textContent = ' · Coleta bloqueada: ' + String(
+                row.pipeline_status || row.controle_coleta_status || 'controle_coleta'
+              );
+              b.appendChild(tagPipe);
+            } else if (isCasoSemSaldo(row)) {
               var tagInap = document.createElement('span');
               tagInap.className = 'memoria-escolher-tag';
               tagInap.textContent = ' · Inapto (Sem Saldo)';
@@ -1852,6 +2213,52 @@
     }
     if (filaCancel) filaCancel.addEventListener('click', hideFilaModal);
     if (filaX) filaX.addEventListener('click', hideFilaModal);
+
+    if (blacklistJustificativa) {
+      blacklistJustificativa.addEventListener('input', updateBlacklistAuthorizationState);
+      blacklistJustificativa.addEventListener('keydown', function (e) {
+        if (e && (e.ctrlKey || e.metaKey) && e.key === 'Enter' && blacklistConfirm && !blacklistConfirm.disabled) {
+          e.preventDefault();
+          blacklistConfirm.click();
+        }
+      });
+    }
+    if (blacklistConfirm) {
+      blacklistConfirm.addEventListener('click', function () {
+        var motivo = blacklistJustificativa
+          ? String(blacklistJustificativa.value || '').trim()
+          : '';
+        if (motivo.length < 5) {
+          updateBlacklistAuthorizationState();
+          if (blacklistJustificativa) blacklistJustificativa.focus();
+          return;
+        }
+        hideBlacklistModal();
+        doSearch({
+          skipAutoAnalise: true,
+          blacklistOverride: true,
+          blacklistReason: motivo
+        });
+      });
+    }
+    if (blacklistCancel) {
+      blacklistCancel.addEventListener('click', function () {
+        var blockedRow = blacklistPendingRow;
+        hideBlacklistModal();
+        if (blockedRow) applyInaptoRow(blockedRow, false);
+      });
+    }
+    if (blacklistX) blacklistX.addEventListener('click', hideBlacklistModal);
+    if (blacklistModal) {
+      blacklistModal.addEventListener('click', function (e) {
+        if (e && e.target === blacklistModal) hideBlacklistModal();
+      });
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e && e.key === 'Escape' && blacklistModal && !blacklistModal.hasAttribute('hidden')) {
+        hideBlacklistModal();
+      }
+    });
 
     if (btnSalvarMeses) {
       btnSalvarMeses.addEventListener('click', function () {

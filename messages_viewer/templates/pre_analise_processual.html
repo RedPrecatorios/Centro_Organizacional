@@ -12,7 +12,9 @@
 <body class="dashboard-body"
   data-pre-analise-configured='{{ pre_analise_api_configured | tojson }}'
   data-pre-analise-poll-ms='{{ pre_analise_poll_interval_ms | tojson }}'
-  data-pre-analise-drive-configured='{{ (pre_analise_drive_configured|default(false)) | tojson }}'>
+  data-pre-analise-drive-configured='{{ (pre_analise_drive_configured|default(false)) | tojson }}'
+  data-contratos-configured='{{ (contratos_mysql_configured|default(false)) | tojson }}'
+  data-cessionarias='{{ (contratos_cessionarias|default([])) | tojson }}'>
   {% include 'partials/sidebar_navegacao.html' %}
 
   <div class="dash-main">
@@ -31,6 +33,12 @@
       {% elif not pre_analise_api_healthy %}
       <div class="prop-card prop-msg prop-msg--err" role="alert">
         API de pré-análise configurada, mas indisponível no momento. Verifique o serviço em <code>PRE_ANALISE_API_URL</code>.
+      </div>
+      {% endif %}
+
+      {% if not contratos_mysql_configured %}
+      <div class="prop-card prop-msg prop-msg--err" role="alert">
+        Emissão de contratos indisponível: configure <code>CONTRATOS_MYSQL_*</code>, <code>CONTRATOS_ENGINE_PATH</code>, <code>CONTRATOS_API_TOKEN</code> e <code>PHP_BIN</code> no .env e reinicie o servidor Flask.
       </div>
       {% endif %}
 
@@ -126,6 +134,27 @@
           <span class="pre-list-count" id="pre-list-count">0 processos</span>
         </div>
 
+        <form class="pre-list-search" id="pre-list-search-form" role="search" aria-label="Pesquisar casos analisados">
+          <label class="prop-sr" for="pre-list-q">Pesquisar casos</label>
+          <div class="pre-search-wrap">
+            <input
+              type="search"
+              id="pre-list-q"
+              class="auth-input pre-search-input"
+              placeholder="Processo, incidente, nome, DEPRE, status…"
+              autocomplete="off"
+              enterkeyhint="search"
+            />
+            <button type="submit" class="camp-btn camp-btn-primary pre-search-btn" id="pre-list-search-btn" title="Pesquisar" aria-label="Pesquisar">
+              <svg class="pre-search-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M16.2 16.2 L20.5 20.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button type="button" class="camp-btn camp-btn-ghost pre-search-clear" id="pre-list-search-clear" hidden title="Limpar pesquisa">Limpar</button>
+          </div>
+        </form>
+
         <div class="pre-table-wrap">
           <table class="dash-table pre-table">
             <thead>
@@ -186,11 +215,81 @@
         <div class="pre-row-actions">
           <button type="button" class="camp-btn camp-btn-primary" id="pre-ficha-save">Salvar</button>
           <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-validate-herdeiros" title="Salvar e validar herdeiros">Validar herdeiros</button>
+          <button type="button" class="camp-btn camp-btn-primary" id="pre-ficha-contratos">Gerar contratos</button>
           <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-close">Fechar</button>
         </div>
       </div>
       <p class="prop-msg" id="pre-ficha-msg" role="status" aria-live="polite"></p>
       <form id="pre-ficha-form" class="pre-ficha-form"></form>
+    </div>
+  </div>
+
+  <div class="pre-ficha-overlay" id="pre-contratos-overlay" hidden>
+    <div class="pre-ficha-modal" role="dialog" aria-modal="true" aria-labelledby="pre-contratos-title">
+      <div class="pre-ficha-header">
+        <div>
+          <h2 class="pre-ficha-title" id="pre-contratos-title">Gerar contratos</h2>
+          <p class="pre-ficha-sub" id="pre-contratos-sub"></p>
+        </div>
+        <div class="pre-row-actions">
+          <button type="button" class="camp-btn camp-btn-primary" id="pre-contratos-submit">Gerar ZIP</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="pre-contratos-close">Fechar</button>
+        </div>
+      </div>
+      <p class="prop-msg" id="pre-contratos-msg" role="status" aria-live="polite"></p>
+      <div class="pre-contratos-validacao" id="pre-contratos-validacao" hidden></div>
+      <div class="pre-ficha-grid pre-contratos-form">
+        <div class="pre-ficha-field">
+          <label for="pre-contratos-tipo">Tipo</label>
+          <select class="auth-input" id="pre-contratos-tipo">
+            <option value="preca">Precatório</option>
+            <option value="rpv">RPV</option>
+          </select>
+        </div>
+        <div class="pre-ficha-field">
+          <label for="pre-contratos-select">Contrato</label>
+          <select class="auth-input" id="pre-contratos-select"></select>
+        </div>
+        <div class="pre-ficha-field pre-contratos-field-wide">
+          <label for="pre-contratos-cessionaria">Cessionária</label>
+          <input type="text" class="auth-input pre-field-readonly" id="pre-contratos-cessionaria" readonly autocomplete="off" />
+        </div>
+        <div class="pre-ficha-field">
+          <label for="pre-contratos-recupere">Recupere</label>
+          <select class="auth-input" id="pre-contratos-recupere">
+            <option value="nao" selected>Não</option>
+            <option value="sim">Sim</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pre-ficha-confirm-overlay" id="pre-ficha-confirm-overlay" hidden>
+    <div class="pre-ficha-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="pre-ficha-confirm-title" aria-describedby="pre-ficha-confirm-message">
+      <h3 class="pre-ficha-confirm-title" id="pre-ficha-confirm-title"></h3>
+      <p class="pre-ficha-confirm-message" id="pre-ficha-confirm-message"></p>
+      <div class="pre-ficha-confirm-actions">
+        <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-confirm-cancel">Cancelar</button>
+        <button type="button" class="camp-btn camp-btn-ghost" id="pre-ficha-confirm-secondary" hidden>Fechar sem salvar</button>
+        <button type="button" class="camp-btn camp-btn-primary" id="pre-ficha-confirm-primary">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pre-contratos-process-overlay" id="pre-contratos-process-overlay" hidden>
+    <div class="pre-contratos-process-modal" id="pre-contratos-process-modal" role="dialog" aria-modal="true" aria-labelledby="pre-contratos-process-title" aria-describedby="pre-contratos-process-status">
+      <div class="pre-contratos-process-head">
+        <div class="pre-contratos-process-spinner" id="pre-contratos-process-spinner" aria-hidden="true"></div>
+        <div class="pre-contratos-process-head-text">
+          <h3 class="pre-contratos-process-title" id="pre-contratos-process-title">Processando contratos</h3>
+          <p class="pre-contratos-process-status" id="pre-contratos-process-status">Iniciando…</p>
+        </div>
+      </div>
+      <ol class="pre-contratos-process-log" id="pre-contratos-process-log" aria-live="polite"></ol>
+      <div class="pre-contratos-process-actions" id="pre-contratos-process-actions" hidden>
+        <button type="button" class="camp-btn camp-btn-primary" id="pre-contratos-process-close" disabled>Fechar</button>
+      </div>
     </div>
   </div>
 
@@ -219,6 +318,34 @@
       color: var(--muted);
       font-size: 0.8rem;
       font-weight: 600;
+    }
+    .pre-list-search {
+      margin: 0 0 12px;
+    }
+    .pre-search-wrap {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      max-width: 560px;
+    }
+    .pre-search-input {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .pre-search-btn {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+    .pre-search-icon {
+      display: block;
+    }
+    .pre-search-clear {
+      flex: 0 0 auto;
     }
     .pre-table-wrap {
       overflow-x: auto;
@@ -333,6 +460,13 @@
         align-items: stretch;
         flex-direction: column;
       }
+      .pre-search-wrap {
+        max-width: none;
+        flex-wrap: wrap;
+      }
+      .pre-search-input {
+        flex: 1 1 100%;
+      }
     }
     .pre-anexos-overlay {
       position: fixed;
@@ -418,9 +552,70 @@
       place-items: center;
       padding: 12px;
       background: color-mix(in srgb, #0f172a 45%, transparent);
+      animation: preOverlayIn 0.2s ease forwards;
     }
     .pre-ficha-overlay[hidden] {
       display: none !important;
+    }
+    #pre-contratos-overlay {
+      z-index: 95;
+      background: color-mix(in srgb, #0f172a 50%, transparent);
+    }
+    .pre-ficha-confirm-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 12px;
+      background: color-mix(in srgb, #0f172a 58%, transparent);
+      animation: preOverlayIn 0.18s ease forwards;
+    }
+    .pre-ficha-confirm-overlay[hidden] {
+      display: none !important;
+    }
+    @keyframes preOverlayIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes preModalIn {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.985);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+    .pre-ficha-confirm-modal {
+      width: min(440px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px 22px;
+      box-shadow: 0 16px 48px rgba(15, 23, 42, 0.22);
+      animation: preModalIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .pre-ficha-confirm-modal.is-warning {
+      border-color: color-mix(in srgb, rgb(197, 161, 0) 45%, var(--border));
+    }
+    .pre-ficha-confirm-title {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+    .pre-ficha-confirm-message {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+      white-space: pre-line;
+    }
+    .pre-ficha-confirm-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
     }
     .pre-ficha-modal {
       width: min(1100px, 100%);
@@ -428,6 +623,7 @@
       overflow: auto;
       background: var(--surface);
       border: 1px solid var(--border);
+      animation: preModalIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
       border-radius: var(--r);
       padding: 16px 18px 20px;
     }
@@ -452,6 +648,15 @@
       margin: 4px 0 0;
       color: var(--muted);
       font-size: 0.86rem;
+    }
+    .pre-ficha-header .camp-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .pre-ficha-overlay.is-loading .pre-ficha-form {
+      pointer-events: none;
+      opacity: 0.72;
     }
     .pre-ficha-section {
       margin: 0 0 18px;
@@ -481,6 +686,192 @@
     .pre-ficha-field input {
       width: 100%;
       box-sizing: border-box;
+    }
+    .pre-ficha-field select.auth-input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .pre-ficha-section.is-hidden {
+      display: none;
+    }
+    .pre-herdeiro-sub.is-hidden {
+      display: none;
+    }
+    .pre-ficha-field input[type="date"].auth-input {
+      min-height: 42px;
+    }
+    .pre-ficha-field input.pre-field-readonly {
+      background: var(--surface-muted);
+      color: var(--muted);
+    }
+    .pre-ficha-field input.pre-field-required,
+    .pre-ficha-field select.pre-field-required {
+      border: 1px solid rgb(197, 161, 0);
+    }
+    .pre-ficha-field input.pre-field-required:focus,
+    .pre-ficha-field select.pre-field-required:focus {
+      border-color: rgb(197, 161, 0);
+      box-shadow: 0 0 0 0.2rem rgba(197, 161, 0, 0.25);
+      outline: none;
+    }
+    .pre-field-cep.is-loading {
+      opacity: 0.65;
+      background-image: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.04), transparent);
+      background-size: 200% 100%;
+      animation: pre-cep-loading 1s linear infinite;
+    }
+    @keyframes pre-cep-loading {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    .pre-contratos-form {
+      padding: 0 4px 8px;
+      align-items: end;
+    }
+    .pre-contratos-field-wide {
+      grid-column: span 2;
+    }
+    @media (max-width: 720px) {
+      .pre-contratos-field-wide {
+        grid-column: span 1;
+      }
+    }
+    .pre-contratos-validacao {
+      margin: 0 4px 12px;
+      padding: 10px 12px;
+      border: 1px solid #f0c2c2;
+      border-radius: var(--r);
+      background: #fff5f5;
+      color: #8a1f1f;
+      font-size: 0.85rem;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .pre-contratos-validacao-title {
+      margin: 0 0 8px;
+      font-weight: 600;
+    }
+    .pre-contratos-validacao-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .pre-contratos-validacao-list li {
+      margin-bottom: 6px;
+    }
+    .pre-contratos-process-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 98;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      background: color-mix(in srgb, #0f172a 62%, transparent);
+      animation: preOverlayIn 0.2s ease forwards;
+    }
+    .pre-contratos-process-overlay[hidden] {
+      display: none !important;
+    }
+    .pre-contratos-process-modal {
+      width: min(480px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 22px 24px 20px;
+      box-shadow: 0 20px 56px rgba(15, 23, 42, 0.24);
+      animation: preModalIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .pre-contratos-process-modal.is-success {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    }
+    .pre-contratos-process-modal.is-error {
+      border-color: color-mix(in srgb, #c0392b 35%, var(--border));
+    }
+    .pre-contratos-process-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .pre-contratos-process-head-text {
+      flex: 1;
+      min-width: 0;
+    }
+    .pre-contratos-process-title {
+      margin: 0 0 4px;
+      font-size: 1.08rem;
+    }
+    .pre-contratos-process-status {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .pre-contratos-process-spinner {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 3px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+      border-top-color: var(--accent);
+      animation: preProcessSpin 0.75s linear infinite;
+    }
+    .pre-contratos-process-spinner[hidden] {
+      display: none !important;
+    }
+    @keyframes preProcessSpin {
+      to { transform: rotate(360deg); }
+    }
+    .pre-contratos-process-log {
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      max-height: 220px;
+      overflow-y: auto;
+      list-style: none;
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--r) - 2px);
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+    .pre-contratos-process-log:empty {
+      display: none;
+    }
+    .pre-contratos-process-log li {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 5px 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      color: var(--text);
+    }
+    .pre-contratos-process-log li:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+    .pre-contratos-process-log li:first-child {
+      padding-top: 0;
+    }
+    .pre-contratos-process-log-time {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      min-width: 3.6em;
+    }
+    .pre-contratos-process-log-msg.is-info { color: var(--text); }
+    .pre-contratos-process-log-msg.is-success { color: var(--accent); font-weight: 600; }
+    .pre-contratos-process-log-msg.is-warn { color: #9a6700; }
+    .pre-contratos-process-log-msg.is-error { color: #a12824; font-weight: 600; }
+    .pre-contratos-process-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .pre-contratos-process-actions[hidden] {
+      display: none !important;
+    }
+    #pre-contratos-overlay.is-processing .pre-ficha-header .pre-row-actions {
+      visibility: hidden;
+      pointer-events: none;
     }
     .pre-ficha-source {
       margin-left: 4px;
@@ -577,6 +968,7 @@
     var bodyEl = document.body;
     var apiConfigured = bodyEl && bodyEl.getAttribute('data-pre-analise-configured') === 'true';
     var driveConfigured = bodyEl && bodyEl.getAttribute('data-pre-analise-drive-configured') === 'true';
+    var contratosConfigured = bodyEl && bodyEl.getAttribute('data-contratos-configured') === 'true';
     var pollMs = 5000;
     try {
       pollMs = parseInt(bodyEl.getAttribute('data-pre-analise-poll-ms') || '5000', 10) || 5000;
@@ -591,6 +983,9 @@
     var pageInfo = document.getElementById('pre-page-info');
     var prevBtn = document.getElementById('pre-prev-page');
     var nextBtn = document.getElementById('pre-next-page');
+    var searchForm = document.getElementById('pre-list-search-form');
+    var searchInput = document.getElementById('pre-list-q');
+    var searchClearBtn = document.getElementById('pre-list-search-clear');
 
     var currentPage = 1;
     var totalPages = 1;
@@ -598,6 +993,7 @@
     var activeCount = 0;
     var expandedId = null;
     var items = [];
+    var searchQuery = '';
     var pollTimer = null;
     var submitInFlight = false;
     var syncInFlight = false;
@@ -618,15 +1014,1188 @@
     var fichaClose = document.getElementById('pre-ficha-close');
     var fichaSave = document.getElementById('pre-ficha-save');
     var fichaValidateHerdeiros = document.getElementById('pre-ficha-validate-herdeiros');
+    var fichaContratosBtn = document.getElementById('pre-ficha-contratos');
     var fichaContext = null;
     var fichaSaveInFlight = false;
+    var fichaLoadInFlight = false;
+    var fichaCleanSignature = '';
+    var fichaConfirmOverlay = document.getElementById('pre-ficha-confirm-overlay');
+    var fichaConfirmTitle = document.getElementById('pre-ficha-confirm-title');
+    var fichaConfirmMessage = document.getElementById('pre-ficha-confirm-message');
+    var fichaConfirmCancel = document.getElementById('pre-ficha-confirm-cancel');
+    var fichaConfirmSecondary = document.getElementById('pre-ficha-confirm-secondary');
+    var fichaConfirmPrimary = document.getElementById('pre-ficha-confirm-primary');
+    var fichaConfirmResolver = null;
     var fichaState = {
       herdeirosAbertos: false,
       herdeiros: [],
       temHerdeiros: false,
       herdeirosFlagTexto: '',
-      herdeiroSchema: null
+      herdeiroSchema: null,
+      schema: null,
+      herdeirosValidado: false,
+      fichaSalva: false
     };
+
+    var contratosOverlay = document.getElementById('pre-contratos-overlay');
+    var contratosMsg = document.getElementById('pre-contratos-msg');
+    var contratosSub = document.getElementById('pre-contratos-sub');
+    var contratosTipo = document.getElementById('pre-contratos-tipo');
+    var contratosSelect = document.getElementById('pre-contratos-select');
+    var contratosCessionaria = document.getElementById('pre-contratos-cessionaria');
+    var contratosRecupere = document.getElementById('pre-contratos-recupere');
+    var contratosSubmit = document.getElementById('pre-contratos-submit');
+    var contratosClose = document.getElementById('pre-contratos-close');
+    var contratosValidacao = document.getElementById('pre-contratos-validacao');
+    var contratosContext = null;
+    var contratosGenerateInFlight = false;
+    var contratosProcessOverlay = document.getElementById('pre-contratos-process-overlay');
+    var contratosProcessModal = document.getElementById('pre-contratos-process-modal');
+    var contratosProcessTitle = document.getElementById('pre-contratos-process-title');
+    var contratosProcessStatus = document.getElementById('pre-contratos-process-status');
+    var contratosProcessLog = document.getElementById('pre-contratos-process-log');
+    var contratosProcessSpinner = document.getElementById('pre-contratos-process-spinner');
+    var contratosProcessActions = document.getElementById('pre-contratos-process-actions');
+    var contratosProcessClose = document.getElementById('pre-contratos-process-close');
+    var contratosProcessLocked = false;
+    var cessionariasList = (function () {
+      try {
+        var raw = bodyEl && bodyEl.getAttribute('data-cessionarias');
+        if (!raw) return [];
+        var parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) {
+        return [];
+      }
+    })();
+
+    function parseNum(val) {
+      var n = parseFloat(String(val || '').replace(',', '.').replace(/[^\d.-]/g, ''));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function parseMoneyBr(val) {
+      var s = String(val || '').trim();
+      if (!s) return 0;
+      s = s.replace(/R\$\s?/gi, '').trim();
+      if (s.indexOf(',') >= 0) {
+        s = s.replace(/\./g, '').replace(',', '.');
+      } else if ((s.match(/\./g) || []).length > 1) {
+        var parts = s.split('.');
+        s = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
+      }
+      var n = parseFloat(s.replace(/[^\d.-]/g, ''));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function templateFromCessionaria(name) {
+      var n = String(name || '').trim();
+      if (n === 'RED PRECATÓRIOS E INTERMEDIAÇÃO LTDA') return 'RED';
+      if (n === 'GT PRECATÓRIOS E ASSESSORIA LTDA') return 'GT';
+      if (!n) return '';
+      return 'NENHUM';
+    }
+
+    function procuradoriaTipoFromValue(proc) {
+      var p = String(proc || '').trim();
+      if (p === 'PROCURADORIA DO ESTADO DE SÃO PAULO (PGE/SP)') return '1';
+      if (p === 'PROCURADORIA GERAL DO MUNICÍPIO (PGM/SP)') return '2';
+      if (p === 'PROCURADORIA GERAL DA FAZENDA NACIONAL (PGFN)') return '3';
+      return '';
+    }
+
+    function toDateInputValue(raw) {
+      var s = String(raw || '').trim();
+      if (!s) return '';
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      var m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s);
+      if (m) return m[3] + '-' + m[2] + '-' + m[1];
+      return '';
+    }
+
+    function formatMoneyBr(val) {
+      var n = parseMoneyBr(val);
+      var fixed = Math.abs(n).toFixed(2).replace('.', ',');
+      var parts = fixed.split(',');
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      return (n < 0 ? '-R$ ' : 'R$ ') + parts.join(',');
+    }
+
+    function formatPercentVal(val) {
+      var n = parseNum(val);
+      if (!n && String(val || '').trim() === '') return '';
+      return String(n).replace('.', ',') + '%';
+    }
+
+    function digitsOnly(val, max) {
+      var d = String(val || '').replace(/\D/g, '');
+      return max ? d.slice(0, max) : d;
+    }
+
+    function formatCpfCnpj(val) {
+      var d = digitsOnly(val, 14);
+      if (d.length <= 11) {
+        d = d.slice(0, 11);
+        return d
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d)/, '$1.$2')
+          .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+      }
+      return d
+        .replace(/^(\d{2})(\d)/, '$1.$2')
+        .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/\.(\d{3})(\d)/, '.$1/$2')
+        .replace(/(\d{4})(\d)/, '$1-$2');
+    }
+
+    function formatCep(val) {
+      var d = digitsOnly(val, 8);
+      return d.length > 5 ? d.slice(0, 5) + '-' + d.slice(5) : d;
+    }
+
+    function formatPhone(val) {
+      var d = digitsOnly(val, 11);
+      if (d.length <= 10) {
+        return d
+          .replace(/^(\d{2})(\d)/, '($1) $2')
+          .replace(/(\d{4})(\d)/, '$1-$2');
+      }
+      return d
+        .replace(/^(\d{2})(\d)/, '($1) $2')
+        .replace(/(\d{5})(\d)/, '$1-$2');
+    }
+
+    function renderSelectOptions(options, selected) {
+      var sel = String(selected || '');
+      return (options || []).map(function (o) {
+        var v = String(o.value != null ? o.value : '');
+        return '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(o.label || v) + '</option>';
+      }).join('');
+    }
+
+    function renderFieldControl(key, fieldDef, dados, name, id, readonly) {
+      var widget = (fieldDef && fieldDef.widget) || { type: 'text' };
+      var val = dados[key] || '';
+      var wtype = widget.type || 'text';
+      var ro = readonly || widget.readonly ? ' readonly' : '';
+      var reqCls = widget.required ? ' pre-field-required' : '';
+      var cls = 'auth-input' + reqCls + ((readonly || widget.readonly || wtype === 'readonly') ? ' pre-field-readonly' : '');
+
+      if (wtype === 'cessionaria_select') {
+        var opts = cessionariasList.map(function (c) {
+          return '<option value="' + esc(c) + '"' + (val === c ? ' selected' : '') + '>' + esc(c) + '</option>';
+        }).join('');
+        if (val && cessionariasList.indexOf(val) < 0) {
+          opts = '<option value="' + esc(val) + '" selected>' + esc(val) + '</option>' + opts;
+        }
+        return '<select class="' + cls + ' pre-cessionaria-select" id="' + esc(id) + '" name="' + esc(name) + '"><option value="">Selecione</option>' + opts + '</select>';
+      }
+
+      if (wtype === 'select') {
+        return '<select class="' + cls + '" id="' + esc(id) + '" name="' + esc(name) + '"' + (readonly ? ' disabled' : '') + '>' +
+          renderSelectOptions(widget.options, val) + '</select>';
+      }
+
+      if (wtype === 'date') {
+        return '<input type="date" class="' + cls + '" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(toDateInputValue(val)) + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'money') {
+        return '<input type="text" inputmode="decimal" class="' + cls + ' pre-field-money" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(val ? formatMoneyBr(val) : '') + '" autocomplete="off"' + ro +
+          (widget.sum_into ? ' data-sum-into="' + esc(widget.sum_into) + '"' : '') + ' />';
+      }
+
+      if (wtype === 'percent') {
+        return '<input type="text" inputmode="decimal" class="' + cls + ' pre-field-percent" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(val ? formatPercentVal(val) : '') + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'number') {
+        return '<input type="number" class="' + cls + '" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(val) + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'cpf') {
+        return '<input type="text" class="' + cls + ' pre-field-cpf" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(formatCpfCnpj(val)) + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'cep') {
+        return '<input type="text" class="' + cls + ' pre-field-cep" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(formatCep(val)) + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'phone') {
+        return '<input type="text" class="' + cls + ' pre-field-phone" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(formatPhone(val)) + '" autocomplete="off"' + ro + ' />';
+      }
+
+      if (wtype === 'readonly') {
+        return '<input type="text" class="' + cls + '" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(val) + '" readonly autocomplete="off" />';
+      }
+
+      return '<input type="text" class="' + cls + '" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(val) + '" autocomplete="off"' + ro + ' />';
+    }
+
+    function recalcTotalRequisicao() {
+      if (!fichaForm) return;
+      var fields = fichaForm.querySelectorAll('.pre-field-money[data-sum-into="total_da_requisicao"]');
+      var total = 0;
+      for (var i = 0; i < fields.length; i++) total += parseMoneyBr(fields[i].value);
+      var el = fichaForm.querySelector('[name="total_da_requisicao"]');
+      if (el) el.value = formatMoneyBr(total);
+    }
+
+    function applyProcuradoriaFromTipo(scope) {
+      var root = scope || fichaForm;
+      if (!root) return;
+      var tipoEl = root.querySelector('[name$="procuradoria_tipo"]') || root.querySelector('[name="procuradoria_tipo"]');
+      var procEl = root.querySelector('[name$="procuradoria"]') || root.querySelector('[name="procuradoria"]');
+      if (!tipoEl || !procEl) return;
+      var meta = (fichaState.schema && fichaState.schema.widgets_meta) || {};
+      var map = meta.procuradoria_by_tipo || {
+        '1': 'PROCURADORIA DO ESTADO DE SÃO PAULO (PGE/SP)',
+        '2': 'PROCURADORIA GERAL DO MUNICÍPIO (PGM/SP)',
+        '3': 'PROCURADORIA GERAL DA FAZENDA NACIONAL (PGFN)'
+      };
+      procEl.value = map[String(tipoEl.value || '')] || '';
+    }
+
+    function syncProcuradoriaTipoFromValue(scope) {
+      var root = scope || fichaForm;
+      if (!root) return;
+      var tipoEl = root.querySelector('[name="procuradoria_tipo"]');
+      var procEl = root.querySelector('[name="procuradoria"]');
+      if (!tipoEl || !procEl || tipoEl.value) return;
+      var inferred = procuradoriaTipoFromValue(procEl.value);
+      if (inferred) tipoEl.value = inferred;
+    }
+
+    function updateFichaConditionalSections() {
+      if (!fichaForm) return;
+      var estadoCivil = (fichaForm.querySelector('[name="estado_civil_credor"]') || {}).value || '';
+      var regime = (fichaForm.querySelector('[name="regime_conjuge_credor"]') || {}).value || '';
+      var falecido = String((fichaForm.querySelector('[name="credor_falecido"]') || {}).value || '').toLowerCase();
+      var anuente = String((fichaForm.querySelector('[name="anuente_credor"]') || {}).value || '').toLowerCase();
+      var pixCredor = String((fichaForm.querySelector('[name="tem_chave_pix_credor"]') || {}).value || '').toLowerCase();
+
+      var showConjuge = estadoCivil === 'casado(a)' && regime !== 'Separação Total de Bens';
+      ['conjuge_credor', 'endereco_conjuge_credor', 'banco_conjuge_credor'].forEach(function (sid) {
+        var sec = fichaForm.querySelector('.pre-ficha-section[data-section-id="' + sid + '"]');
+        if (sec) sec.classList.toggle('is-hidden', !showConjuge);
+      });
+
+      ['anuente', 'endereco_anuente'].forEach(function (sid) {
+        var sec = fichaForm.querySelector('.pre-ficha-section[data-section-id="' + sid + '"]');
+        if (sec) sec.classList.toggle('is-hidden', anuente !== 'sim');
+      });
+
+      var regimeEl = fichaForm.querySelector('[name="regime_conjuge_credor"]');
+      if (regimeEl) regimeEl.disabled = estadoCivil !== 'casado(a)';
+
+      var obitoEl = fichaForm.querySelector('[name="data_do_obito"]');
+      if (obitoEl) obitoEl.disabled = falecido !== 'sim';
+
+      var pixEl = fichaForm.querySelector('[name="chave_pix_credor"]');
+      if (pixEl) pixEl.disabled = pixCredor !== 'sim';
+    }
+
+    function parseScopedFieldName(name) {
+      var n = String(name || '');
+      var idx = n.indexOf('__');
+      if (idx >= 0) return { prefix: n.slice(0, idx + 2), key: n.slice(idx + 2) };
+      return { prefix: '', key: n };
+    }
+
+    function cepLookupGroups() {
+      var meta = (fichaState.schema && fichaState.schema.widgets_meta) || {};
+      return meta.cep_lookup_groups || {
+        cep_credor: {
+          logradouro: 'logradouro_credor', complemento: 'complemento_credor', bairro: 'bairro_credor', cidade: 'cidade_credor',
+          estado: 'estado_credor', numero: 'numero_logradouro_credor'
+        },
+        cep_conjuge_credor: {
+          logradouro: 'logradouro_conjuge_credor', bairro: 'bairro_conjuge_credor', cidade: 'cidade_conjuge_credor',
+          estado: 'estado_conjuge_credor', numero: 'numero_logradouro_conjuge_credor'
+        },
+        cep_anuente_credor: {
+          logradouro: 'logradouro_anuente_credor', bairro: 'bairro_anuente_credor', cidade: 'cidade_anuente_credor',
+          estado: 'estado_anuente_credor', numero: 'numero_logradouro_anuente_credor'
+        },
+        cep_advogado: {
+          logradouro: 'logradouro_advogado', bairro: 'bairro_advogado', cidade: 'cidade_advogado',
+          estado: 'estado_advogado', numero: 'numero_logradouro_advogado'
+        },
+        cep_herdeiro: {
+          logradouro: 'logradouro_herdeiro', bairro: 'bairro_herdeiro', cidade: 'cidade_herdeiro',
+          estado: 'estado_herdeiro', numero: 'numero_logradouro_herdeiro'
+        },
+        cep_conjuge_herdeiro: {
+          logradouro: 'logradouro_conjuge_herdeiro', bairro: 'bairro_conjuge_herdeiro', cidade: 'cidade_conjuge_herdeiro',
+          estado: 'estado_conjuge_herdeiro', numero: 'numero_logradouro_conjuge_herdeiro'
+        }
+      };
+    }
+
+    function setScopedInput(scope, prefix, fieldName, value) {
+      if (!scope || !fieldName) return;
+      var el = scope.querySelector('[name="' + prefix + fieldName + '"]');
+      if (!el || el.readOnly || el.disabled) return;
+      el.value = value != null ? String(value) : '';
+    }
+
+    function clearCepAddress(scope, prefix, group) {
+      if (!group) return;
+      ['logradouro', 'bairro', 'cidade', 'estado', 'numero'].forEach(function (part) {
+        if (group[part]) setScopedInput(scope, prefix, group[part], '');
+      });
+    }
+
+    function fillCepAddress(scope, prefix, group, data) {
+      if (!group || !data) return;
+      setScopedInput(scope, prefix, group.logradouro, data.logradouro || '');
+      if (group.complemento && data.complemento) {
+        setScopedInput(scope, prefix, group.complemento, data.complemento);
+      }
+      setScopedInput(scope, prefix, group.bairro, data.bairro || '');
+      setScopedInput(scope, prefix, group.cidade, data.localidade || '');
+      setScopedInput(scope, prefix, group.estado, data.uf || '');
+    }
+
+    function lookupCepForInput(cepEl) {
+      if (!cepEl || cepEl.readOnly || cepEl.disabled) return;
+      var scope = cepEl.closest('.pre-herdeiro-card') || fichaForm;
+      if (!scope) return;
+      var parsed = parseScopedFieldName(cepEl.name || '');
+      var groups = cepLookupGroups();
+      var group = groups[parsed.key];
+      if (!group) return;
+
+      var cep = digitsOnly(cepEl.value, 8);
+      cepEl.value = formatCep(cep);
+      if (cep.length !== 8) {
+        clearCepAddress(scope, parsed.prefix, group);
+        return;
+      }
+
+      var last = cepEl.getAttribute('data-last-cep-lookup');
+      if (last === cep) return;
+
+      var meta = (fichaState.schema && fichaState.schema.widgets_meta) || {};
+      var urlTemplate = meta.viacep_url || 'https://viacep.com.br/ws/{cep}/json/';
+      var url = urlTemplate.replace('{cep}', cep);
+
+      cepEl.classList.add('is-loading');
+      fetch(url, { headers: { Accept: 'application/json' } })
+        .then(function (res) {
+          if (!res.ok) throw new Error('Falha ao consultar CEP.');
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data || data.erro) {
+            window.alert('CEP não encontrado.');
+            clearCepAddress(scope, parsed.prefix, group);
+            cepEl.removeAttribute('data-last-cep-lookup');
+            return;
+          }
+          fillCepAddress(scope, parsed.prefix, group, data);
+          cepEl.setAttribute('data-last-cep-lookup', cep);
+        })
+        .catch(function () {
+          window.alert('Não foi possível consultar o CEP. Verifique a conexão e tente novamente.');
+        })
+        .finally(function () {
+          cepEl.classList.remove('is-loading');
+        });
+    }
+
+    function bindFieldMasks(scope) {
+      var root = scope || fichaForm;
+      if (!root) return;
+      root.querySelectorAll('.pre-field-money').forEach(function (el) {
+        el.addEventListener('blur', function () {
+          if (el.readOnly || el.disabled) return;
+          el.value = formatMoneyBr(el.value);
+          if (el.getAttribute('data-sum-into')) recalcTotalRequisicao();
+        });
+      });
+      root.querySelectorAll('.pre-field-percent').forEach(function (el) {
+        el.addEventListener('blur', function () {
+          if (el.readOnly || el.disabled) return;
+          el.value = formatPercentVal(el.value);
+        });
+      });
+      root.querySelectorAll('.pre-field-cpf').forEach(function (el) {
+        el.addEventListener('blur', function () { el.value = formatCpfCnpj(el.value); });
+      });
+      root.querySelectorAll('.pre-field-cep').forEach(function (el) {
+        if (el.getAttribute('data-cep-bound') === '1') return;
+        el.setAttribute('data-cep-bound', '1');
+        el.addEventListener('blur', function () { lookupCepForInput(el); });
+      });
+      root.querySelectorAll('.pre-field-phone').forEach(function (el) {
+        el.addEventListener('blur', function () { el.value = formatPhone(el.value); });
+      });
+    }
+
+    function calcularPercentualDetidoTotal(herdeiros) {
+      var total = 0;
+      (herdeiros || []).forEach(function (h) {
+        var d = (h && h.dados) || h || {};
+        total += parseNum(d.percentual_detido);
+      });
+      return total;
+    }
+
+    function recalcHerdeiroCardValues(card) {
+      if (!card) return;
+      var detido = parseNum(card.querySelector('[name$="__percentual_detido"]') && card.querySelector('[name$="__percentual_detido"]').value);
+      var honor = parseNum(card.querySelector('[name$="__percentual_honorarios_herdeiro"]') && card.querySelector('[name$="__percentual_honorarios_herdeiro"]').value);
+      var cedido = parseNum(card.querySelector('[name$="__percentual_cedido"]') && card.querySelector('[name$="__percentual_cedido"]').value);
+      var reservados = Math.ceil((detido / 100) * (honor / 100) * 100);
+      var naoCedido = detido - cedido - reservados;
+      var elRes = card.querySelector('[name$="__honorarios_reservados"]');
+      var elNao = card.querySelector('[name$="__percentual_nao_cedido"]');
+      if (elRes) elRes.value = String(reservados);
+      if (elNao) elNao.value = String(naoCedido);
+    }
+
+    function recalcProcessAggregates() {
+      if (!fichaForm) return;
+      syncHerdeiroStateFromDom();
+      var total = calcularPercentualDetidoTotal(fichaState.herdeiros);
+      var sobra = 100 - total;
+      var elTotal = fichaForm.querySelector('[name="percentual_detido_herdeiros"]');
+      var elSobra = fichaForm.querySelector('[name="sobra"]');
+      if (elTotal) elTotal.value = String(Math.round(total * 100) / 100);
+      if (elSobra) elSobra.value = String(Math.round(sobra * 100) / 100);
+    }
+
+    function recalcPercentualCompra() {
+      if (!fichaForm) return;
+      var honorEl = fichaForm.querySelector('[name="percentual_honorarios"]');
+      var compraEl = fichaForm.querySelector('[name="percentual_de_compra"]');
+      if (!honorEl || !compraEl) return;
+
+      var honorRaw = parseNum(honorEl.value);
+      var compraPct;
+
+      if (honorRaw < 1) {
+        compraPct = 100;
+        if (String(honorEl.value || '').trim() !== '') {
+          honorEl.value = formatPercentVal(0);
+        }
+      } else if (honorRaw > 100) {
+        compraPct = 0;
+        honorEl.value = formatPercentVal(100);
+      } else {
+        compraPct = 100 - honorRaw;
+      }
+
+      compraEl.value = formatPercentVal(compraPct);
+    }
+
+    function normalizeCpfDigits(val) {
+      return String(val || '').replace(/\D/g, '');
+    }
+
+    function cardFieldValue(card, suffix) {
+      var el = card.querySelector('[name$="__' + suffix + '"]');
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    var HERDEIRO_REQUIRED_FIELDS = [
+      'herdeiro_habilitado',
+      'nome_herdeiro',
+      'cpf_herdeiro',
+      'parentesco_herdeiro',
+      'nacionalidade_herdeiro',
+      'estado_civil_herdeiro',
+      'percentual_detido',
+      'herdeiro_cedente',
+      'percentual_honorarios_herdeiro'
+    ];
+
+    var HERDEIRO_FIELD_LABELS = {
+      herdeiro_habilitado: 'Herdeiro habilitado',
+      nome_herdeiro: 'Nome do herdeiro',
+      cpf_herdeiro: 'CPF do herdeiro',
+      parentesco_herdeiro: 'Parentesco',
+      nacionalidade_herdeiro: 'Nacionalidade',
+      estado_civil_herdeiro: 'Estado civil',
+      percentual_detido: 'Percentual detido',
+      herdeiro_cedente: 'Herdeiro cedente',
+      percentual_honorarios_herdeiro: 'Percentual honorários',
+      regime_herdeiro_conjuge: 'Regime do cônjuge',
+      percentual_cedido: 'Percentual cedido',
+      valor_da_proposta_herdeiro: 'Valor da proposta',
+      banco_herdeiro: 'Banco',
+      agencia_herdeiro: 'Agência',
+      conta_herdeiro: 'Conta',
+      tipo_conta_herdeiro: 'Tipo de conta',
+      tem_chave_pix_herdeiro: 'Tem chave PIX',
+      chave_pix_herdeiro: 'Chave PIX'
+    };
+
+    function getProcessPercentualHonorarios() {
+      if (!fichaForm) return '';
+      var el = fichaForm.querySelector('[name="percentual_honorarios"]');
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    function newHerdeiroDados(keys) {
+      var d = emptyHerdeiroDados(keys);
+      var honor = getProcessPercentualHonorarios();
+      if (honor) d.percentual_honorarios_herdeiro = honor;
+      return d;
+    }
+
+    function applyHonorariosToHerdeiroCards() {
+      if (!fichaForm || !fichaState.herdeirosAbertos) return;
+      var honor = getProcessPercentualHonorarios();
+      if (!honor) return;
+      var cards = fichaForm.querySelectorAll('.pre-herdeiro-card');
+      for (var i = 0; i < cards.length; i++) {
+        var el = cards[i].querySelector('[name$="__percentual_honorarios_herdeiro"]');
+        if (el && !String(el.value || '').trim()) {
+          el.value = honor;
+        }
+        recalcHerdeiroCardValues(cards[i]);
+      }
+      recalcProcessAggregates();
+    }
+
+    function updateProcessHonorariosState() {
+      if (!fichaForm) return;
+      var honorEl = fichaForm.querySelector('[name="percentual_honorarios"]');
+      if (!honorEl) return;
+      var hasHerdeiros = fichaState.herdeirosAbertos && fichaState.herdeiros && fichaState.herdeiros.length > 0;
+      honorEl.disabled = !!hasHerdeiros;
+      if (hasHerdeiros) {
+        applyHonorariosToHerdeiroCards();
+      }
+    }
+
+    function validateHerdeiroRules(showAlert) {
+      if (!fichaState.herdeirosAbertos) return true;
+      syncHerdeiroStateFromDom();
+      var total = calcularPercentualDetidoTotal(fichaState.herdeiros);
+      if (total > 100) {
+        if (showAlert) window.alert('O percentual detido total excede 100%.');
+        return false;
+      }
+      if (Math.abs(total - 100) > 0.01) {
+        if (showAlert) {
+          window.alert('A soma dos percentuais detidos pelos herdeiros é ' + total + '% (esperado 100%).');
+        }
+        return false;
+      }
+      var cards = fichaForm ? fichaForm.querySelectorAll('.pre-herdeiro-card') : [];
+      var cpfsVistos = {};
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var labelIdx = ' (herdeiro ' + (i + 1) + ')';
+        for (var r = 0; r < HERDEIRO_REQUIRED_FIELDS.length; r++) {
+          var fk = HERDEIRO_REQUIRED_FIELDS[r];
+          if (!cardFieldValue(card, fk)) {
+            if (showAlert) {
+              window.alert('Preencha ' + (HERDEIRO_FIELD_LABELS[fk] || fk) + labelIdx + '.');
+            }
+            return false;
+          }
+        }
+        var cpf = normalizeCpfDigits(cardFieldValue(card, 'cpf_herdeiro'));
+        if (cpf) {
+          if (cpfsVistos[cpf]) {
+            if (showAlert) window.alert('CPF duplicado entre herdeiros' + labelIdx + '.');
+            return false;
+          }
+          cpfsVistos[cpf] = true;
+        }
+        var estado = cardFieldValue(card, 'estado_civil_herdeiro');
+        var regime = cardFieldValue(card, 'regime_herdeiro_conjuge');
+        if (estado === 'casado(a)' && !regime) {
+          if (showAlert) window.alert('Herdeiro casado exige regime do cônjuge' + labelIdx + '.');
+          return false;
+        }
+        if (estado === 'casado(a)' && (regime === 'Comunhão Universal de Bens' || regime === 'Comunhão Parcial de Bens')) {
+          if (!cardFieldValue(card, 'nome_conjuge_herdeiro') || !cardFieldValue(card, 'cpf_conjuge_herdeiro')) {
+            if (showAlert) window.alert('Herdeiro casado com comunhão universal/parcial exige dados do cônjuge' + labelIdx + '.');
+            return false;
+          }
+        }
+        var cedente = cardFieldValue(card, 'herdeiro_cedente');
+        var detido = parseNum(cardFieldValue(card, 'percentual_detido'));
+        if (cedente === 'sim') {
+          var cedido = parseNum(cardFieldValue(card, 'percentual_cedido'));
+          if (!cedido) {
+            if (showAlert) window.alert('Herdeiro cedente exige percentual cedido' + labelIdx + '.');
+            return false;
+          }
+          if (cedido > detido) {
+            if (showAlert) window.alert('Percentual cedido não pode exceder o percentual detido' + labelIdx + '.');
+            return false;
+          }
+          if (!cardFieldValue(card, 'valor_da_proposta_herdeiro')) {
+            if (showAlert) window.alert('Herdeiro cedente exige valor da proposta' + labelIdx + '.');
+            return false;
+          }
+          var bankRequired = ['banco_herdeiro', 'agencia_herdeiro', 'conta_herdeiro', 'tipo_conta_herdeiro', 'tem_chave_pix_herdeiro'];
+          for (var b = 0; b < bankRequired.length; b++) {
+            if (!cardFieldValue(card, bankRequired[b])) {
+              if (showAlert) {
+                window.alert('Herdeiro cedente exige ' + (HERDEIRO_FIELD_LABELS[bankRequired[b]] || bankRequired[b]) + labelIdx + '.');
+              }
+              return false;
+            }
+          }
+          if (cardFieldValue(card, 'tem_chave_pix_herdeiro') === 'sim' && !cardFieldValue(card, 'chave_pix_herdeiro')) {
+            if (showAlert) window.alert('Herdeiro cedente com PIX exige chave PIX' + labelIdx + '.');
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function loadCessionarias(forceRefresh) {
+      if (!forceRefresh && cessionariasList.length) {
+        return Promise.resolve(cessionariasList);
+      }
+      if (!contratosConfigured) return Promise.resolve(cessionariasList);
+      return fetch('/api/contratos/cessionarias', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok && Array.isArray(d.cessionarias) && d.cessionarias.length) {
+            cessionariasList = d.cessionarias;
+          }
+          return cessionariasList;
+        })
+        .catch(function () { return cessionariasList; });
+    }
+
+    function setContratosMsg(text, isError) {
+      if (!contratosMsg) return;
+      contratosMsg.textContent = text || '';
+      contratosMsg.className = 'prop-msg' + (isError ? ' prop-msg--err' : '');
+    }
+
+    function isContratosRecupere() {
+      if (!contratosRecupere) return false;
+      var v = String(contratosRecupere.value || '').trim().toLowerCase();
+      return v === 'sim' || v === '1' || v === 'true';
+    }
+
+    function loadContratoTipos() {
+      if (!contratosSelect) return;
+      var tipo = contratosTipo ? contratosTipo.value : 'preca';
+      var recupere = isContratosRecupere();
+      var qs = new URLSearchParams();
+      qs.set('tipo', tipo);
+      if (recupere) qs.set('recupere', '1');
+      fetch('/api/contratos/tipos?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var opts = (d && d.ok && Array.isArray(d.contratos)) ? d.contratos : [];
+          contratosSelect.innerHTML = opts.map(function (o) {
+            return '<option value="' + esc(o.id) + '">' + esc(o.label) + '</option>';
+          }).join('');
+        })
+        .catch(function () {
+          contratosSelect.innerHTML = '<option value="0">TODOS</option>';
+        });
+    }
+
+    function contratosContextFromItem(item) {
+      if (!item) return null;
+      return {
+        caso_id: item.caso_id || '',
+        id_externo: item.id_externo || '',
+        numero_cumprimento: String(item.numero_cumprimento || item.numero_de_processo || '').trim(),
+        numero_incidente: String(item.numero_incidente || item.numero_do_incidente || '').trim(),
+        nome_credor: String(item.nome_credor || item.nome || '').trim(),
+        depre: String(item.numero_depre || item.numero_depre_input || item.depre || '').trim()
+      };
+    }
+
+    function setContratosCessionariaValue(value) {
+      if (!contratosCessionaria) return;
+      contratosCessionaria.value = String(value || '').trim();
+    }
+
+    function fichaContextMatchesContratos(ctx) {
+      if (!fichaContext || !ctx) return false;
+      return String(fichaContext.numero_cumprimento || '') === String(ctx.numero_cumprimento || '') &&
+        String(fichaContext.numero_incidente || '') === String(ctx.numero_incidente || '');
+    }
+
+    function readCessionariaFromFichaDom(ctx) {
+      if (!fichaForm || !fichaContextMatchesContratos(ctx)) return '';
+      var cel = fichaForm.querySelector('[name="cessionaria"]');
+      if (!cel) return '';
+      var v = String(cel.value || '').trim();
+      if (v) return v;
+      if (cel.selectedIndex >= 0 && cel.options[cel.selectedIndex]) {
+        return String(cel.options[cel.selectedIndex].value || cel.options[cel.selectedIndex].text || '').trim();
+      }
+      var st = collectFichaFormState();
+      return st && st.dados ? String(st.dados.cessionaria || '').trim() : '';
+    }
+
+    function resolveCessionariaPreselect(ctx) {
+      ctx = ctx || contratosContext || {};
+      var domVal = readCessionariaFromFichaDom(ctx);
+      if (domVal) return domVal;
+      return String(ctx.cessionaria || '').trim();
+    }
+
+    function fetchFichaCessionaria(ctx) {
+      ctx = ctx || {};
+      var qs = new URLSearchParams();
+      qs.set('numero_cumprimento', ctx.numero_cumprimento || '');
+      qs.set('numero_incidente', ctx.numero_incidente || '');
+      if (ctx.nome_credor) qs.set('nome_credor', ctx.nome_credor);
+      if (ctx.caso_id) qs.set('caso_id', ctx.caso_id);
+      if (ctx.id_externo) qs.set('id_externo', ctx.id_externo);
+      if (ctx.depre) qs.set('depre', ctx.depre);
+      return fetch('/api/pre-analise-processual/ficha?' + qs.toString(), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok && d.dados) {
+            return String(d.dados.cessionaria || '').trim();
+          }
+          return '';
+        })
+        .catch(function () { return ''; });
+    }
+
+    function loadContratosCessionariaSelect(ctx) {
+      ctx = ctx || contratosContext || {};
+      var domVal = readCessionariaFromFichaDom(ctx);
+      var ctxVal = String(ctx.cessionaria || '').trim();
+      setContratosCessionariaValue(domVal || ctxVal);
+      return fetchFichaCessionaria(ctx).then(function (apiVal) {
+        var best = domVal || ctxVal || String(apiVal || '').trim();
+        setContratosCessionariaValue(best);
+        return best;
+      });
+    }
+
+    function applyFichaFieldValue(el, rawValue) {
+      var v = rawValue == null ? '' : String(rawValue);
+      if (el.tagName === 'SELECT') {
+        if (v && !Array.from(el.options).some(function (opt) { return opt.value === v; })) {
+          var opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          el.appendChild(opt);
+        }
+        el.value = v;
+        if (el.name === 'cessionaria') {
+          var templateEl = fichaForm && fichaForm.querySelector('[name="template"]');
+          if (templateEl) templateEl.value = templateFromCessionaria(v);
+        }
+        return;
+      }
+      el.value = v;
+    }
+
+    function clearContratosValidacao() {
+      if (!contratosValidacao) return;
+      contratosValidacao.innerHTML = '';
+      contratosValidacao.hidden = true;
+    }
+
+    function collectContratosFichaPayload() {
+      if (!fichaForm || !contratosContext || !fichaContextMatchesContratos(contratosContext)) {
+        return null;
+      }
+      syncHerdeiroStateFromDom();
+      recalcProcessAggregates();
+      recalcTotalRequisicao();
+      recalcPercentualCompra();
+      applyProcuradoriaFromTipo(fichaForm);
+      var st = collectFichaFormState();
+      if (!st) return null;
+      return {
+        dados: st.dados,
+        herdeiros: st.herdeiros,
+        herdeiros_abertos: st.herdeirosAbertos,
+        herdeiros_validado: !!fichaState.herdeirosValidado
+      };
+    }
+
+    function renderContratosValidacao(data) {
+      if (!contratosValidacao) return;
+      var bloqueios = (data && Array.isArray(data.bloqueios)) ? data.bloqueios : [];
+      var agregados = (data && Array.isArray(data.campos_faltantes_agregados))
+        ? data.campos_faltantes_agregados
+        : [];
+      var items = (data && Array.isArray(data.contratos))
+        ? data.contratos.filter(function (c) { return !c.ok; })
+        : [];
+      if (!bloqueios.length && !items.length && !agregados.length) {
+        clearContratosValidacao();
+        return;
+      }
+      var html = '';
+      if (bloqueios.length) {
+        html += '<ul class="pre-contratos-validacao-list">' +
+          bloqueios.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') +
+          '</ul>';
+      }
+      if (agregados.length) {
+        html += '<p class="pre-contratos-validacao-title">Campos pendentes na ficha:</p>' +
+          '<ul class="pre-contratos-validacao-list">' +
+          agregados.map(function (f) {
+            return '<li>' + esc(f.label || f.key) + '</li>';
+          }).join('') +
+          '</ul>';
+      }
+      if (items.length) {
+        html += '<p class="pre-contratos-validacao-title">Contratos que não podem ser gerados:</p>' +
+          '<ul class="pre-contratos-validacao-list">';
+        items.forEach(function (c) {
+          html += '<li><strong>' + esc(c.label) + '</strong>';
+          var parts = [];
+          (c.campos_faltantes || []).forEach(function (f) {
+            parts.push(esc(f.label || f.key));
+          });
+          (c.motivos || []).forEach(function (m) { parts.push(esc(m)); });
+          if (parts.length) html += ': ' + parts.join('; ');
+          html += '</li>';
+        });
+        html += '</ul>';
+      }
+      contratosValidacao.innerHTML = html;
+      contratosValidacao.hidden = false;
+    }
+
+    function buildContratosPayload(force) {
+      var cessionariaVal = contratosCessionaria ? String(contratosCessionaria.value || '').trim() : '';
+      var payload = {
+        cumprimento: contratosContext.numero_cumprimento,
+        incidente: contratosContext.numero_incidente,
+        nome_credor: contratosContext.nome_credor,
+        caso_id: contratosContext.caso_id || null,
+        id_externo: contratosContext.id_externo || null,
+        depre: contratosContext.depre || null,
+        tipo: contratosTipo ? contratosTipo.value : 'preca',
+        contrato_id: contratosSelect ? contratosSelect.value : '0',
+        recupere: isContratosRecupere() ? 1 : 0,
+        cessionaria: cessionariaVal
+      };
+      var fichaPayload = collectContratosFichaPayload();
+      if (fichaPayload) {
+        payload.dados = fichaPayload.dados;
+        payload.herdeiros = fichaPayload.herdeiros;
+        payload.herdeiros_abertos = fichaPayload.herdeiros_abertos;
+        payload.herdeiros_validado = fichaPayload.herdeiros_validado;
+      }
+      if (force) payload.force = 1;
+      return payload;
+    }
+
+    function isContratosProcessingLocked() {
+      return contratosProcessLocked;
+    }
+
+    function formatProcessTime(date) {
+      var d = date || new Date();
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+    }
+
+    function appendContratosProcessLog(message, tone) {
+      if (!contratosProcessLog || !message) return;
+      var li = document.createElement('li');
+      var time = document.createElement('span');
+      time.className = 'pre-contratos-process-log-time';
+      time.textContent = formatProcessTime();
+      var msg = document.createElement('span');
+      msg.className = 'pre-contratos-process-log-msg is-' + (tone || 'info');
+      msg.textContent = message;
+      li.appendChild(time);
+      li.appendChild(msg);
+      contratosProcessLog.appendChild(li);
+      contratosProcessLog.scrollTop = contratosProcessLog.scrollHeight;
+    }
+
+    function setContratosProcessStatus(text) {
+      if (contratosProcessStatus) contratosProcessStatus.textContent = text || '';
+    }
+
+    function setContratosProcessTitle(text) {
+      if (contratosProcessTitle) contratosProcessTitle.textContent = text || 'Processando contratos';
+    }
+
+    function setContratosUiBlocked(blocked) {
+      if (contratosOverlay) contratosOverlay.classList.toggle('is-processing', !!blocked);
+      if (contratosClose) contratosClose.disabled = !!blocked;
+      if (contratosSubmit) contratosSubmit.disabled = !!blocked;
+      if (fichaContratosBtn) fichaContratosBtn.disabled = !!blocked;
+    }
+
+    function resetContratosProcessModal() {
+      if (contratosProcessLog) contratosProcessLog.innerHTML = '';
+      if (contratosProcessModal) {
+        contratosProcessModal.classList.remove('is-success', 'is-error');
+      }
+      if (contratosProcessSpinner) contratosProcessSpinner.hidden = false;
+      if (contratosProcessActions) contratosProcessActions.hidden = true;
+      if (contratosProcessClose) contratosProcessClose.disabled = true;
+      setContratosProcessTitle('Processando contratos');
+      setContratosProcessStatus('Iniciando…');
+    }
+
+    function openContratosProcessingModal() {
+      if (!contratosProcessOverlay) return;
+      contratosProcessLocked = true;
+      resetContratosProcessModal();
+      contratosProcessOverlay.hidden = false;
+      setContratosUiBlocked(true);
+      appendContratosProcessLog('Processamento iniciado.', 'info');
+    }
+
+    function finishContratosProcessing(outcome, statusText, logMessage) {
+      contratosProcessLocked = false;
+      if (contratosProcessSpinner) contratosProcessSpinner.hidden = true;
+      if (contratosProcessModal) {
+        contratosProcessModal.classList.toggle('is-success', outcome === 'success');
+        contratosProcessModal.classList.toggle('is-error', outcome === 'error' || outcome === 'cancelled');
+      }
+      if (outcome === 'success') {
+        setContratosProcessTitle('Contratos gerados');
+      } else if (outcome === 'cancelled') {
+        setContratosProcessTitle('Processamento cancelado');
+      } else {
+        setContratosProcessTitle('Erro na geração');
+      }
+      if (statusText) setContratosProcessStatus(statusText);
+      if (logMessage) {
+        appendContratosProcessLog(
+          logMessage,
+          outcome === 'success' ? 'success' : (outcome === 'cancelled' ? 'warn' : 'error')
+        );
+      }
+      if (contratosProcessActions) contratosProcessActions.hidden = false;
+      if (contratosProcessClose) {
+        contratosProcessClose.disabled = false;
+        contratosProcessClose.focus();
+      }
+    }
+
+    function closeContratosProcessingModal() {
+      if (!contratosProcessOverlay || contratosProcessLocked) return;
+      contratosProcessOverlay.hidden = true;
+      resetContratosProcessModal();
+      setContratosUiBlocked(false);
+    }
+
+    function fetchGerarContratos(force) {
+      appendContratosProcessLog('Enviando dados ao motor de contratos…', 'info');
+      setContratosProcessStatus('Gerando documentos no servidor…');
+      return fetch('/api/pre-analise-processual/contratos/gerar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/zip, application/json' },
+        body: JSON.stringify(buildContratosPayload(force))
+      })
+        .then(function (res) {
+          if (!res.ok) {
+            var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+            if (ct.indexOf('application/json') >= 0) {
+              return res.json().then(function (d) {
+                if (d && Array.isArray(d.contratos)) renderContratosValidacao(d);
+                var err = new Error((d && d.error) ? d.error : 'Falha ao gerar contratos.');
+                err.validation = d;
+                throw err;
+              });
+            }
+            return res.text().then(function () {
+              throw new Error('Erro no servidor ao gerar contratos (HTTP ' + res.status + ').');
+            });
+          }
+          appendContratosProcessLog('Documentos gerados. Preparando download…', 'info');
+          setContratosProcessStatus('Baixando arquivo ZIP…');
+          var cd = res.headers.get('Content-Disposition') || '';
+          var fn = 'contratos.zip';
+          var m = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+          if (m && m[1]) fn = decodeURIComponent(m[1].replace(/"/g, ''));
+          return res.blob().then(function (blob) { return { blob: blob, fn: fn }; });
+        })
+        .then(function (o) {
+          var url = URL.createObjectURL(o.blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = o.fn;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+          clearContratosValidacao();
+          appendContratosProcessLog('Download iniciado: ' + o.fn, 'success');
+          setContratosMsg('ZIP gerado com sucesso.', false);
+          finishContratosProcessing(
+            'success',
+            'O arquivo ZIP foi gerado e o download foi iniciado.',
+            'Processamento concluído com sucesso.'
+          );
+        });
+    }
+
+    function openContratosModal(ctx) {
+      if (!contratosOverlay) return;
+      contratosContext = ctx || fichaContext;
+      if (!contratosContext) return;
+      contratosOverlay.hidden = false;
+      setContratosMsg('', false);
+      clearContratosValidacao();
+      if (!contratosConfigured) {
+        setContratosMsg(
+          'Emissão de contratos não configurada no servidor. Verifique CONTRATOS_MYSQL_*, CONTRATOS_ENGINE_PATH, CONTRATOS_API_TOKEN e PHP_BIN no .env e reinicie o Flask.',
+          true
+        );
+        if (contratosSubmit) contratosSubmit.disabled = true;
+      } else if (contratosSubmit) {
+        contratosSubmit.disabled = false;
+      }
+      if (contratosSub) {
+        contratosSub.textContent = [contratosContext.numero_cumprimento, contratosContext.numero_incidente, contratosContext.nome_credor].filter(Boolean).join(' / ');
+      }
+      if (contratosCessionaria) contratosCessionaria.value = '';
+      loadContratosCessionariaSelect(contratosContext).then(function (cessionariaVal) {
+        if (!cessionariaVal) {
+          setContratosMsg('Preencha a cessionária na ficha de informações e salve antes de gerar.', true);
+        }
+      });
+      loadContratoTipos();
+    }
+
+    function closeContratosModal() {
+      if (!contratosOverlay || isContratosProcessingLocked()) return;
+      contratosOverlay.hidden = true;
+      contratosContext = null;
+    }
+
+    function submitGerarContratos() {
+      if (!contratosContext || contratosGenerateInFlight || isContratosProcessingLocked()) return;
+      if (contratosProcessOverlay && !contratosProcessOverlay.hidden) return;
+      var cessionariaVal = contratosCessionaria ? String(contratosCessionaria.value || '').trim() : '';
+      if (!cessionariaVal) {
+        setContratosMsg('Preencha a cessionária na ficha de informações e salve antes de gerar.', true);
+        return;
+      }
+      confirmUnsavedFichaForContratos('generate').then(function (proceed) {
+        if (!proceed) return;
+        runGerarContratosFlow();
+      });
+    }
+
+    function runGerarContratosFlow() {
+      if (!contratosContext || contratosGenerateInFlight) return;
+      contratosGenerateInFlight = true;
+      clearContratosValidacao();
+      setContratosMsg('', false);
+      openContratosProcessingModal();
+      appendContratosProcessLog('Validando dados da ficha…', 'info');
+      setContratosProcessStatus('Validando campos obrigatórios…');
+      fetch('/api/pre-analise-processual/contratos/validar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(buildContratosPayload(false))
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) {
+            throw new Error((d && d.error) ? d.error : 'Falha ao validar contratos.');
+          }
+          if (d.bloqueado) {
+            renderContratosValidacao(d);
+            setContratosMsg(d.resumo || 'Preencha os campos obrigatórios na ficha.', true);
+            finishContratosProcessing(
+              'error',
+              d.resumo || 'Corrija os campos obrigatórios na ficha antes de gerar.',
+              'Validação bloqueada: campos obrigatórios pendentes.'
+            );
+            return null;
+          }
+          appendContratosProcessLog('Validação concluída.', 'success');
+          if (!d.valido && d.todos) {
+            renderContratosValidacao(d);
+            appendContratosProcessLog('Existem campos pendentes. Aguardando sua confirmação…', 'warn');
+            setContratosProcessStatus('Aguardando confirmação…');
+            return showFichaConfirmDialog({
+              title: 'Gerar com campos pendentes?',
+              message: (d.resumo || 'Alguns contratos não podem ser gerados.') +
+                '\n\nDeseja gerar mesmo assim? O ZIP pode ficar incompleto.',
+              warning: true,
+              cancelLabel: 'Cancelar',
+              primaryLabel: 'Gerar mesmo assim',
+              dangerPrimary: true
+            }).then(function (action) {
+              if (action !== 'primary') {
+                setContratosMsg('Geração cancelada. Corrija os campos indicados ou escolha outro contrato.', true);
+                finishContratosProcessing(
+                  'cancelled',
+                  'Geração cancelada. Você pode ajustar a ficha e tentar novamente.',
+                  'Operação cancelada pelo usuário.'
+                );
+                return null;
+              }
+              appendContratosProcessLog('Confirmação recebida. Iniciando geração…', 'info');
+              setContratosProcessStatus('Gerando documentos no servidor…');
+              return fetchGerarContratos(true);
+            });
+          }
+          if (!d.valido) {
+            renderContratosValidacao(d);
+            setContratosMsg(d.resumo || 'Preencha os campos obrigatórios na ficha.', true);
+            finishContratosProcessing(
+              'error',
+              d.resumo || 'Corrija os campos indicados na ficha.',
+              'Validação reprovada para o contrato selecionado.'
+            );
+            return null;
+          }
+          appendContratosProcessLog('Iniciando geração dos contratos…', 'info');
+          setContratosProcessStatus('Gerando documentos no servidor…');
+          return fetchGerarContratos(false);
+        })
+        .catch(function (err) {
+          var msg = err && err.message ? err.message : 'Erro ao gerar contratos.';
+          setContratosMsg(msg, true);
+          if (err && err.validation) renderContratosValidacao(err.validation);
+          finishContratosProcessing('error', msg, 'Falha: ' + msg);
+        })
+        .finally(function () {
+          contratosGenerateInFlight = false;
+        });
+    }
+
+    function updateContratosButtons() {
+      /* botão sempre visível; estado vem do banner/modal se não configurado */
+    }
+
+    function isFichaBusy() {
+      return !!(fichaLoadInFlight || fichaSaveInFlight);
+    }
+
+    function setFichaHeaderBusy(busy) {
+      var disabled = !!busy;
+      if (fichaSave) fichaSave.disabled = disabled;
+      if (fichaValidateHerdeiros) fichaValidateHerdeiros.disabled = disabled;
+      if (fichaContratosBtn) fichaContratosBtn.disabled = disabled;
+      if (fichaClose) fichaClose.disabled = disabled;
+      if (fichaOverlay) {
+        fichaOverlay.classList.toggle('is-loading', disabled);
+        fichaOverlay.setAttribute('aria-busy', disabled ? 'true' : 'false');
+      }
+    }
 
     function setFichaMsg(text, isError) {
       if (!fichaMsg) return;
@@ -634,10 +2203,161 @@
       fichaMsg.className = 'prop-msg' + (isError ? ' prop-msg--err' : '');
     }
 
+    function closeFichaConfirmDialog(action) {
+      if (fichaConfirmOverlay) fichaConfirmOverlay.hidden = true;
+      if (fichaConfirmPrimary) {
+        fichaConfirmPrimary.classList.remove('camp-btn-danger');
+        if (!fichaConfirmPrimary.classList.contains('camp-btn-primary')) {
+          fichaConfirmPrimary.classList.add('camp-btn-primary');
+        }
+      }
+      var confirmModal = fichaConfirmOverlay && fichaConfirmOverlay.querySelector('.pre-ficha-confirm-modal');
+      if (confirmModal) confirmModal.classList.remove('is-warning');
+      var resolve = fichaConfirmResolver;
+      fichaConfirmResolver = null;
+      if (resolve) resolve(action || 'cancel');
+    }
+
+    function showFichaConfirmDialog(config) {
+      config = config || {};
+      if (!fichaConfirmOverlay || !fichaConfirmPrimary) {
+        return Promise.resolve(window.confirm(config.message || config.title || 'Confirmar?') ? 'primary' : 'cancel');
+      }
+      if (fichaConfirmTitle) fichaConfirmTitle.textContent = config.title || '';
+      if (fichaConfirmMessage) fichaConfirmMessage.textContent = config.message || '';
+      var confirmModal = fichaConfirmOverlay.querySelector('.pre-ficha-confirm-modal');
+      if (confirmModal) {
+        confirmModal.classList.toggle('is-warning', !!config.warning);
+      }
+      if (fichaConfirmCancel) {
+        fichaConfirmCancel.textContent = config.cancelLabel || 'Cancelar';
+        fichaConfirmCancel.hidden = config.cancelLabel === false;
+      }
+      if (fichaConfirmSecondary) {
+        if (config.secondaryLabel) {
+          fichaConfirmSecondary.textContent = config.secondaryLabel;
+          fichaConfirmSecondary.hidden = false;
+        } else {
+          fichaConfirmSecondary.hidden = true;
+        }
+      }
+      if (fichaConfirmPrimary) {
+        fichaConfirmPrimary.textContent = config.primaryLabel || 'Confirmar';
+        fichaConfirmPrimary.hidden = config.primaryLabel === false;
+        fichaConfirmPrimary.classList.toggle('camp-btn-danger', !!config.dangerPrimary);
+        fichaConfirmPrimary.classList.toggle('camp-btn-primary', !config.dangerPrimary);
+      }
+      fichaConfirmOverlay.hidden = false;
+      if (fichaConfirmPrimary && !fichaConfirmPrimary.hidden) fichaConfirmPrimary.focus();
+      else if (fichaConfirmCancel && !fichaConfirmCancel.hidden) fichaConfirmCancel.focus();
+      return new Promise(function (resolve) {
+        fichaConfirmResolver = resolve;
+      });
+    }
+
+    function buildContratosContextFromFicha() {
+      if (!fichaContext) return null;
+      var ctx = contratosContextFromItem(fichaContext) || fichaContext;
+      ctx.cessionaria = readCessionariaFromFichaDom(ctx);
+      return ctx;
+    }
+
+    function confirmUnsavedFichaForContratos(purpose) {
+      if (!isFichaDirty() || !fichaContext) {
+        return Promise.resolve(true);
+      }
+      var isGenerate = purpose === 'generate';
+      return showFichaConfirmDialog({
+        title: 'Alterações não salvas',
+        message: isGenerate
+          ? 'Existem alterações pendentes nesta ficha que ainda não foram salvas.\n\nDeseja salvar antes de gerar os contratos?'
+          : 'Existem alterações pendentes nesta ficha.\n\nDeseja salvar antes de continuar?',
+        warning: true,
+        cancelLabel: 'Continuar editando',
+        secondaryLabel: isGenerate ? 'Gerar sem salvar' : 'Continuar sem salvar',
+        primaryLabel: isGenerate ? 'Salvar e gerar' : 'Salvar'
+      }).then(function (action) {
+        if (action === 'cancel') return false;
+        if (action === 'secondary') return true;
+        if (action === 'primary') {
+          return saveFicha({ skipConfirm: true }).then(function (ok) { return !!ok; });
+        }
+        return false;
+      });
+    }
+
+    function requestOpenContratosFromFicha() {
+      if (!fichaContext || isFichaBusy()) return;
+      confirmUnsavedFichaForContratos('open').then(function (proceed) {
+        if (!proceed) return;
+        var ctx = buildContratosContextFromFicha();
+        if (ctx) openContratosModal(ctx);
+      });
+    }
+
+    function collectFichaFormState() {
+      if (!fichaForm) return null;
+      syncHerdeiroStateFromDom();
+      var dados = {};
+      var fields = fichaForm.querySelectorAll('input[name], select[name], textarea[name]');
+      for (var i = 0; i < fields.length; i++) {
+        var n = fields[i].name;
+        if (!n || n.indexOf('herdeiro_') === 0) continue;
+        if (fields[i].type === 'checkbox') {
+          dados[n] = fields[i].checked ? '1' : '0';
+        } else {
+          dados[n] = String(fields[i].value || '').trim();
+        }
+      }
+      return {
+        dados: dados,
+        herdeiros: JSON.parse(JSON.stringify(fichaState.herdeiros || [])),
+        herdeirosAbertos: !!fichaState.herdeirosAbertos
+      };
+    }
+
+    function fichaStateSignature(state) {
+      return JSON.stringify(state || {});
+    }
+
+    function markFichaClean() {
+      fichaCleanSignature = fichaStateSignature(collectFichaFormState());
+    }
+
+    function isFichaDirty() {
+      if (!fichaForm || !fichaContext) return false;
+      return fichaStateSignature(collectFichaFormState()) !== fichaCleanSignature;
+    }
+
     function closeFichaModal() {
       if (!fichaOverlay) return;
       fichaOverlay.hidden = true;
       fichaContext = null;
+      fichaCleanSignature = '';
+    }
+
+    function requestCloseFichaModal() {
+      if (!fichaOverlay || fichaOverlay.hidden || isFichaBusy() || isContratosProcessingLocked()) return;
+      if (!isFichaDirty()) {
+        closeFichaModal();
+        return;
+      }
+      showFichaConfirmDialog({
+        title: 'Alterações não salvas',
+        message: 'Existem alterações pendentes nesta ficha.\n\nDeseja salvar antes de fechar?',
+        warning: true,
+        cancelLabel: 'Continuar editando',
+        secondaryLabel: 'Fechar sem salvar',
+        primaryLabel: 'Salvar'
+      }).then(function (action) {
+        if (action === 'secondary') {
+          closeFichaModal();
+          return;
+        }
+        if (action === 'primary') {
+          saveFicha({ skipConfirm: true, closeAfterSave: true });
+        }
+      });
     }
 
     function emptyHerdeiroDados(keys) {
@@ -652,14 +2372,23 @@
       namePrefix = namePrefix || '';
       idPrefix = idPrefix || 'ficha-';
       return (sec.fields || []).map(function (f) {
-        var key = f.key;
+        var key = f.key || f;
+        var label = (f.label || key).replace(/_/g, ' ');
         var name = namePrefix ? (namePrefix + key) : key;
         var id = idPrefix + name.replace(/[^a-zA-Z0-9_-]/g, '_');
         var src = (!namePrefix && fontes[key]) ? '<span class="pre-ficha-source">(' + esc(fontes[key]) + ')</span>' : '';
+        var readonly = !namePrefix && sec && sec.id === 'metadados';
+        if (namePrefix && (key === 'honorarios_reservados' || key === 'percentual_nao_cedido')) readonly = true;
+
+        if (!namePrefix && key === 'template') {
+          var tpl = dados.template || templateFromCessionaria(dados.cessionaria);
+          dados = Object.assign({}, dados, { template: tpl });
+        }
+
         return '' +
           '<div class="pre-ficha-field">' +
-            '<label for="' + esc(id) + '">' + esc(f.label || key) + src + '</label>' +
-            '<input type="text" class="auth-input" id="' + esc(id) + '" name="' + esc(name) + '" value="' + esc(dados[key] || '') + '" autocomplete="off" />' +
+            '<label for="' + esc(id) + '">' + esc(label) + src + '</label>' +
+            renderFieldControl(key, f, dados, name, id, readonly) +
           '</div>';
       }).join('');
     }
@@ -672,9 +2401,9 @@
       var body = sections.map(function (sec) {
         var fieldsHtml = '<div class="pre-ficha-grid">' + renderSectionFields(sec, dados, {}, prefix, idPrefix) + '</div>';
         if (sec.collapsible) {
-          return '<details class="pre-herdeiro-sub"><summary>' + esc(sec.title || '') + '</summary>' + fieldsHtml + '</details>';
+          return '<details class="pre-herdeiro-sub" data-herdeiro-section-id="' + esc(sec.id || '') + '"><summary>' + esc(sec.title || '') + '</summary>' + fieldsHtml + '</details>';
         }
-        return '<div class="pre-herdeiro-sub"><h4 style="margin:0 0 8px;font-size:0.85rem;color:var(--muted)">' + esc(sec.title || '') + '</h4>' + fieldsHtml + '</div>';
+        return '<div class="pre-herdeiro-sub" data-herdeiro-section-id="' + esc(sec.id || '') + '"><h4 style="margin:0 0 8px;font-size:0.85rem;color:var(--muted)">' + esc(sec.title || '') + '</h4>' + fieldsHtml + '</div>';
       }).join('');
       return '' +
         '<div class="pre-herdeiro-card" data-herdeiro-index="' + index + '">' +
@@ -720,7 +2449,7 @@
       var cards = '';
       if (fichaState.herdeirosAbertos) {
         if (!fichaState.herdeiros.length) {
-          fichaState.herdeiros = [{ ordem: 1, dados: emptyHerdeiroDados(schema.keys) }];
+          fichaState.herdeiros = [{ ordem: 1, dados: newHerdeiroDados(schema.keys) }];
         }
         cards = fichaState.herdeiros.map(function (h, i) {
           return renderHerdeiroCard(i, h, schema);
@@ -735,7 +2464,7 @@
           '<div class="pre-herdeiros-body">' +
             '<p class="pre-herdeiros-hint">' + esc(hint) + '</p>' +
             '<div class="pre-herdeiros-toolbar">' +
-              '<button type="button" class="camp-btn camp-btn-primary camp-btn-sm" id="pre-herdeiro-add">Adicionar herdeiro</button>' +
+              '<button type="button" class="camp-btn camp-btn-primary camp-btn-sm" id="pre-herdeiro-add">Adicionar outro herdeiro</button>' +
             '</div>' +
             '<div id="pre-herdeiros-cards">' + cards + '</div>' +
           '</div>' +
@@ -749,13 +2478,14 @@
       var dados = (payload && payload.dados) || {};
       var fontes = (payload && payload.fontes) || {};
       fichaState.herdeiroSchema = schema.herdeiros || { sections: [], keys: [] };
+      fichaState.schema = schema;
       fichaState.herdeirosAbertos = !!(payload && payload.herdeiros_abertos);
       fichaState.temHerdeiros = !!(payload && payload.tem_herdeiros);
       fichaState.herdeirosFlagTexto = (payload && payload.herdeiros_flag_texto) || '';
       fichaState.herdeiros = Array.isArray(payload && payload.herdeiros) ? payload.herdeiros.slice() : [];
 
       var mainHtml = sections.map(function (sec) {
-        return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+        return '<section class="pre-ficha-section" data-section-id="' + esc(sec.id || '') + '"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
           renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
       }).join('');
 
@@ -763,11 +2493,11 @@
       var metaIdx = sections.findIndex(function (s) { return s.id === 'metadados'; });
       if (metaIdx >= 0) {
         var before = sections.slice(0, metaIdx).map(function (sec) {
-          return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+          return '<section class="pre-ficha-section" data-section-id="' + esc(sec.id || '') + '"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
             renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
         }).join('');
         var after = sections.slice(metaIdx).map(function (sec) {
-          return '<section class="pre-ficha-section"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
+          return '<section class="pre-ficha-section" data-section-id="' + esc(sec.id || '') + '"><h3>' + esc(sec.title || '') + '</h3><div class="pre-ficha-grid">' +
             renderSectionFields(sec, dados, fontes, '', 'ficha-') + '</div></section>';
         }).join('');
         fichaForm.innerHTML = before + renderHerdeirosBlock() + after;
@@ -775,16 +2505,111 @@
         fichaForm.innerHTML = mainHtml + renderHerdeirosBlock();
       }
       bindHerdeirosUi();
+      bindFichaFieldUi();
+      recalcProcessAggregates();
+      updateContratosButtons();
+      markFichaClean();
+    }
+
+    function bindFichaFieldUi() {
+      if (!fichaForm) return;
+      syncProcuradoriaTipoFromValue(fichaForm);
+      applyProcuradoriaFromTipo(fichaForm);
+
+      var cessionariaEl = fichaForm.querySelector('[name="cessionaria"]');
+      var templateEl = fichaForm.querySelector('[name="template"]');
+      if (cessionariaEl && templateEl) {
+        cessionariaEl.addEventListener('change', function () {
+          templateEl.value = templateFromCessionaria(cessionariaEl.value);
+        });
+      }
+
+      var procTipoEl = fichaForm.querySelector('[name="procuradoria_tipo"]');
+      if (procTipoEl) {
+        procTipoEl.addEventListener('change', function () {
+          applyProcuradoriaFromTipo(fichaForm);
+        });
+      }
+
+      ['estado_civil_credor', 'regime_conjuge_credor', 'credor_falecido', 'anuente_credor', 'tem_chave_pix_credor'].forEach(function (fname) {
+        var el = fichaForm.querySelector('[name="' + fname + '"]');
+        if (el) el.addEventListener('change', updateFichaConditionalSections);
+      });
+
+      bindFieldMasks(fichaForm);
+      updateFichaConditionalSections();
+      recalcTotalRequisicao();
+
+      var honorariosEl = fichaForm.querySelector('[name="percentual_honorarios"]');
+      if (honorariosEl && honorariosEl.getAttribute('data-compra-bound') !== '1') {
+        honorariosEl.setAttribute('data-compra-bound', '1');
+        honorariosEl.addEventListener('input', recalcPercentualCompra);
+        honorariosEl.addEventListener('blur', function () {
+          if (!honorariosEl.readOnly && !honorariosEl.disabled) {
+            honorariosEl.value = formatPercentVal(honorariosEl.value);
+          }
+          recalcPercentualCompra();
+          applyHonorariosToHerdeiroCards();
+        });
+      }
+      recalcPercentualCompra();
+      updateProcessHonorariosState();
+    }
+
+    function updateHerdeiroCardCond(card) {
+      if (!card) return;
+      var estado = cardFieldValue(card, 'estado_civil_herdeiro');
+      var regime = cardFieldValue(card, 'regime_herdeiro_conjuge');
+      var cedente = cardFieldValue(card, 'herdeiro_cedente');
+      var pixFlag = String(cardFieldValue(card, 'tem_chave_pix_herdeiro')).toLowerCase();
+      var pixConjFlag = String(cardFieldValue(card, 'tem_chave_pix_conjuge_herdeiro')).toLowerCase();
+
+      var regimeEl = card.querySelector('[name$="__regime_herdeiro_conjuge"]');
+      if (regimeEl) {
+        regimeEl.disabled = estado !== 'casado(a)';
+        if (estado !== 'casado(a)') regimeEl.value = '';
+      }
+
+      var showConjuge = estado === 'casado(a)' && regime !== 'Separação Total de Bens';
+      ['conjuge_herdeiro', 'endereco_conjuge_herdeiro'].forEach(function (sid) {
+        var sec = card.querySelector('[data-herdeiro-section-id="' + sid + '"]');
+        if (sec) sec.classList.toggle('is-hidden', !showConjuge);
+      });
+
+      var isCedente = cedente === 'sim';
+      var cedidoEl = card.querySelector('[name$="__percentual_cedido"]');
+      var bankFields = [
+        'percentual_cedido', 'valor_da_proposta_herdeiro', 'codigo_banco_herdeiro',
+        'banco_herdeiro', 'agencia_herdeiro', 'conta_herdeiro', 'tipo_conta_herdeiro',
+        'tem_chave_pix_herdeiro', 'chave_pix_herdeiro'
+      ];
+      bankFields.forEach(function (suffix) {
+        var el = card.querySelector('[name$="__' + suffix + '"]');
+        if (!el) return;
+        el.disabled = !isCedente;
+      });
+      if (!isCedente && cedidoEl) {
+        cedidoEl.value = '0';
+      }
+
+      var pixEl = card.querySelector('[name$="__chave_pix_herdeiro"]');
+      if (pixEl) pixEl.disabled = !isCedente || pixFlag !== 'sim';
+
+      var pixConjEl = card.querySelector('[name$="__chave_pix_conjuge_herdeiro"]');
+      if (pixConjEl) pixConjEl.disabled = pixConjFlag !== 'sim';
     }
 
     function reRenderHerdeirosOnly() {
-      syncHerdeiroStateFromDom();
       var block = document.getElementById('pre-herdeiros-block');
       if (!block) return;
       var wrapper = document.createElement('div');
       wrapper.innerHTML = renderHerdeirosBlock();
       block.replaceWith(wrapper.firstChild);
       bindHerdeirosUi();
+      var cardsWrap = document.getElementById('pre-herdeiros-cards');
+      if (cardsWrap && cardsWrap.lastElementChild) {
+        cardsWrap.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function bindHerdeirosUi() {
@@ -794,7 +2619,7 @@
           syncHerdeiroStateFromDom();
           fichaState.herdeirosAbertos = !fichaState.herdeirosAbertos;
           if (fichaState.herdeirosAbertos && !fichaState.herdeiros.length) {
-            fichaState.herdeiros = [{ ordem: 1, dados: emptyHerdeiroDados((fichaState.herdeiroSchema || {}).keys) }];
+            fichaState.herdeiros = [{ ordem: 1, dados: newHerdeiroDados((fichaState.herdeiroSchema || {}).keys) }];
           }
           if (!fichaState.herdeirosAbertos) {
             // keep data in state but collapse
@@ -805,11 +2630,11 @@
       var addBtn = document.getElementById('pre-herdeiro-add');
       if (addBtn) {
         addBtn.addEventListener('click', function () {
-          syncHerdeiroStateFromDom();
           fichaState.herdeirosAbertos = true;
+          syncHerdeiroStateFromDom();
           fichaState.herdeiros.push({
             ordem: fichaState.herdeiros.length + 1,
-            dados: emptyHerdeiroDados((fichaState.herdeiroSchema || {}).keys)
+            dados: newHerdeiroDados((fichaState.herdeiroSchema || {}).keys)
           });
           reRenderHerdeirosOnly();
         });
@@ -828,11 +2653,46 @@
           reRenderHerdeirosOnly();
         });
       }
+      var cards = fichaForm ? fichaForm.querySelectorAll('.pre-herdeiro-card') : [];
+      for (var c = 0; c < cards.length; c++) {
+        recalcHerdeiroCardValues(cards[c]);
+        bindFieldMasks(cards[c]);
+        (function (card) {
+          updateHerdeiroCardCond(card);
+          [
+            'estado_civil_herdeiro', 'regime_herdeiro_conjuge', 'herdeiro_cedente',
+            'tem_chave_pix_herdeiro', 'tem_chave_pix_conjuge_herdeiro'
+          ].forEach(function (suffix) {
+            var el = card.querySelector('[name$="__' + suffix + '"]');
+            if (el) {
+              el.addEventListener('change', function () {
+                updateHerdeiroCardCond(card);
+                recalcHerdeiroCardValues(card);
+                recalcProcessAggregates();
+              });
+            }
+          });
+        })(cards[c]);
+        var triggers = cards[c].querySelectorAll(
+          '[name$="__percentual_detido"], [name$="__percentual_honorarios_herdeiro"], [name$="__percentual_cedido"]'
+        );
+        for (var t = 0; t < triggers.length; t++) {
+          triggers[t].addEventListener('blur', function (ev) {
+            var card = ev.target.closest('.pre-herdeiro-card');
+            recalcHerdeiroCardValues(card);
+            recalcProcessAggregates();
+          });
+        }
+      }
+      recalcProcessAggregates();
+      updateProcessHonorariosState();
     }
 
     function openFichaModal(item) {
       if (!fichaOverlay) return;
       fichaOverlay.hidden = false;
+      fichaLoadInFlight = true;
+      setFichaHeaderBusy(true);
       setFichaMsg('Carregando ficha…', false);
       if (fichaForm) fichaForm.innerHTML = '<p class="dash-empty">Carregando…</p>';
       fichaContext = {
@@ -866,6 +2726,8 @@
             return;
           }
           renderFichaForm(o.d);
+          fichaState.herdeirosValidado = !!o.d.herdeiros_validado;
+          fichaState.fichaSalva = !!o.d.saved;
           var notes = [];
           if (o.d.saved) notes.push('Dados locais salvos.');
           if (o.d.herdeiros_validado) notes.push('Herdeiros validados.');
@@ -876,39 +2738,53 @@
         .catch(function (e) {
           setFichaMsg(e && e.message ? e.message : 'Falha de rede ao carregar ficha.', true);
           if (fichaForm) fichaForm.innerHTML = '';
+        })
+        .finally(function () {
+          fichaLoadInFlight = false;
+          setFichaHeaderBusy(false);
         });
     }
 
     function saveFicha(opts) {
       opts = opts || {};
       var validarHerdeiros = !!opts.validarHerdeiros;
-      if (!fichaForm || !fichaContext || fichaSaveInFlight) return;
-      syncHerdeiroStateFromDom();
-
-      var dados = {};
-      var inputs = fichaForm.querySelectorAll('input[name]');
-      for (var i = 0; i < inputs.length; i++) {
-        var n = inputs[i].name;
-        if (n.indexOf('herdeiro_') === 0) continue;
-        dados[n] = String(inputs[i].value || '').trim();
-      }
-      dados.cumprimento_de_sentenca = dados.cumprimento_de_sentenca || fichaContext.numero_cumprimento;
-      dados.incidente = dados.incidente || fichaContext.numero_incidente;
+      if (!fichaForm || !fichaContext || isFichaBusy()) return Promise.resolve(false);
 
       if (validarHerdeiros && !fichaState.herdeirosAbertos) {
         setFichaMsg('Expanda o bloco Herdeiros antes de validar.', true);
-        return;
+        return Promise.resolve(false);
       }
-      if (validarHerdeiros && !window.confirm('Validar e salvar os herdeiros preenchidos?')) {
-        return;
+
+      if (!opts.skipConfirm) {
+        var confirmTitle = validarHerdeiros ? 'Validar herdeiros' : 'Confirmar salvamento';
+        var confirmMessage = validarHerdeiros
+          ? 'Deseja validar e salvar os herdeiros preenchidos?'
+          : 'Deseja salvar as alterações desta ficha?';
+        var confirmLabel = validarHerdeiros ? 'Validar e salvar' : 'Salvar';
+        return showFichaConfirmDialog({
+          title: confirmTitle,
+          message: confirmMessage,
+          cancelLabel: 'Cancelar',
+          primaryLabel: confirmLabel
+        }).then(function (action) {
+          if (action !== 'primary') return false;
+          if (validarHerdeiros && !validateHerdeiroRules(true)) return false;
+          return saveFicha(Object.assign({}, opts, { skipConfirm: true }));
+        });
       }
+
+      var collected = collectFichaFormState();
+      if (!collected) return Promise.resolve(false);
+      var dados = Object.assign({}, collected.dados);
+      dados.cumprimento_de_sentenca = dados.cumprimento_de_sentenca || fichaContext.numero_cumprimento;
+      dados.incidente = dados.incidente || fichaContext.numero_incidente;
+      recalcProcessAggregates();
 
       fichaSaveInFlight = true;
-      if (fichaSave) fichaSave.disabled = true;
-      if (fichaValidateHerdeiros) fichaValidateHerdeiros.disabled = true;
+      setFichaHeaderBusy(true);
       setFichaMsg(validarHerdeiros ? 'Validando herdeiros…' : 'Salvando…', false);
 
-      fetch('/api/pre-analise-processual/ficha', {
+      return fetch('/api/pre-analise-processual/ficha', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -929,9 +2805,11 @@
         .then(function (o) {
           if (!o.ok || !o.d.ok) {
             setFichaMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível salvar.', true);
-            return;
+            return false;
           }
           setFichaMsg(o.d.mensagem || 'Ficha salva.', false);
+          fichaState.herdeirosValidado = !!o.d.herdeiros_validado;
+          fichaState.fichaSalva = true;
           if (Array.isArray(o.d.herdeiros)) {
             fichaState.herdeiros = o.d.herdeiros;
             fichaState.herdeirosAbertos = !!o.d.herdeiros_abertos;
@@ -942,18 +2820,21 @@
             for (var j = 0; j < keys.length; j++) {
               var el = fichaForm.querySelector('[name="' + keys[j] + '"]');
               if (el && keys[j].indexOf('herdeiro_') !== 0) {
-                el.value = o.d.dados[keys[j]] == null ? '' : String(o.d.dados[keys[j]]);
+                applyFichaFieldValue(el, o.d.dados[keys[j]]);
               }
             }
           }
+          markFichaClean();
+          if (opts.closeAfterSave) closeFichaModal();
+          return true;
         })
         .catch(function (e) {
           setFichaMsg(e && e.message ? e.message : 'Falha de rede ao salvar.', true);
+          return false;
         })
         .finally(function () {
           fichaSaveInFlight = false;
-          if (fichaSave) fichaSave.disabled = false;
-          if (fichaValidateHerdeiros) fichaValidateHerdeiros.disabled = false;
+          setFichaHeaderBusy(false);
         });
     }
 
@@ -1001,7 +2882,7 @@
         meta += '<p class="prop-msg prop-msg--err" style="margin:0 0 10px">' + esc(d.aviso) + '</p>';
       }
       if (folderLabel) {
-        meta += '<p class="pre-list-sub" style="margin:0 0 10px">Pasta: ' + esc(folderLabel) + ' · apenas ficheiros com «redator»</p>';
+        meta += '<p class="pre-list-sub" style="margin:0 0 10px">Pasta: ' + esc(folderLabel) + ' · parecer («parecer»/«redator» ou «Proc N - Inci N»)</p>';
       }
 
       if (!items.length) {
@@ -1101,9 +2982,13 @@
       var text = status ? String(status) : 'desconhecido';
       var cls = 'pre-status-badge';
       var norm = text.toLowerCase();
-      if (bloqueado) cls += ' pre-status-badge--err';
-      else if (norm === 'coleta_concluida') cls += ' pre-status-badge--done';
-      else cls += ' pre-status-badge--active';
+      if (bloqueado || norm === 'blacklist' || norm === 'erro_processamento' || norm === 'analise_gpt_erro' || norm === 'erro' || norm === 'falha') {
+        cls += ' pre-status-badge--err';
+      } else if (norm === 'coleta_concluida' || norm === 'analise_gpt_concluida' || norm === 'cancelado' || norm === 'cancelada') {
+        cls += ' pre-status-badge--done';
+      } else {
+        cls += ' pre-status-badge--active';
+      }
       return '<span class="' + cls + '">' + esc(text) + '</span>';
     }
 
@@ -1113,8 +2998,29 @@
       totalPages = Math.max(1, Number(d.pages) || 1);
       activeCount = Number(d.active_count) || 0;
       currentPage = Math.min(Math.max(1, Number(d.page) || currentPage), totalPages);
+      if (typeof d.q === 'string') searchQuery = d.q;
+      updateSearchUi();
       renderTable();
       updatePollTimer();
+    }
+
+    function updateSearchUi() {
+      if (searchInput && document.activeElement !== searchInput) {
+        searchInput.value = searchQuery || '';
+      }
+      if (searchClearBtn) searchClearBtn.hidden = !searchQuery;
+    }
+
+    function readSearchInput() {
+      return searchInput ? String(searchInput.value || '').trim() : '';
+    }
+
+    function runSearch(nextQ) {
+      searchQuery = String(nextQ || '').trim();
+      currentPage = 1;
+      expandedId = null;
+      updateSearchUi();
+      return loadCasos(false);
     }
 
     function detailRow(item) {
@@ -1149,11 +3055,16 @@
     function renderTable() {
       if (!tbody) return;
       if (countEl) {
-        countEl.textContent = totalItems + ' processo' + (totalItems === 1 ? '' : 's');
+        var label = totalItems + ' processo' + (totalItems === 1 ? '' : 's');
+        if (searchQuery) label += ' encontrado' + (totalItems === 1 ? '' : 's');
+        countEl.textContent = label;
       }
 
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="dash-empty">Nenhum processo cadastrado.</td></tr>';
+        var emptyMsg = searchQuery
+          ? ('Nenhum processo encontrado para «' + searchQuery + '».')
+          : 'Nenhum processo cadastrado.';
+        tbody.innerHTML = '<tr><td colspan="8" class="dash-empty">' + esc(emptyMsg) + '</td></tr>';
       } else {
         tbody.innerHTML = items.map(function (item) {
           var casoId = item.caso_id;
@@ -1217,6 +3128,7 @@
         return Promise.resolve();
       }
       var qs = 'page=' + currentPage + '&page_size=' + PAGE_SIZE;
+      if (searchQuery) qs += '&q=' + encodeURIComponent(searchQuery);
       if (reconciliar) qs += '&reconciliar=1';
       return fetch('/api/pre-analise-processual/casos?' + qs, {
         credentials: 'same-origin',
@@ -1246,7 +3158,7 @@
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ page: currentPage, page_size: PAGE_SIZE })
+        body: JSON.stringify({ page: currentPage, page_size: PAGE_SIZE, q: searchQuery || '' })
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (o) {
@@ -1308,6 +3220,9 @@
               return;
             }
             currentPage = 1;
+            searchQuery = '';
+            if (searchInput) searchInput.value = '';
+            updateSearchUi();
             expandedId = o.d.caso_id || null;
             var texto = o.d.mensagem || 'Processamento iniciado.';
             if (o.d.reutilizado) texto = 'Caso já em andamento — reutilizado. ' + texto;
@@ -1428,7 +3343,36 @@
         if (event.target === anexosOverlay) closeAnexosModal();
       });
     }
-    if (fichaClose) fichaClose.addEventListener('click', closeFichaModal);
+    if (fichaClose) fichaClose.addEventListener('click', requestCloseFichaModal);
+    if (fichaConfirmCancel) {
+      fichaConfirmCancel.addEventListener('click', function () { closeFichaConfirmDialog('cancel'); });
+    }
+    if (fichaConfirmSecondary) {
+      fichaConfirmSecondary.addEventListener('click', function () { closeFichaConfirmDialog('secondary'); });
+    }
+    if (fichaConfirmPrimary) {
+      fichaConfirmPrimary.addEventListener('click', function () { closeFichaConfirmDialog('primary'); });
+    }
+    if (fichaConfirmOverlay) {
+      fichaConfirmOverlay.addEventListener('click', function (event) {
+        if (event.target === fichaConfirmOverlay) closeFichaConfirmDialog('cancel');
+      });
+    }
+    if (fichaContratosBtn) {
+      fichaContratosBtn.addEventListener('click', requestOpenContratosFromFicha);
+    }
+    if (contratosProcessClose) {
+      contratosProcessClose.addEventListener('click', closeContratosProcessingModal);
+    }
+    if (contratosClose) contratosClose.addEventListener('click', closeContratosModal);
+    if (contratosSubmit) contratosSubmit.addEventListener('click', submitGerarContratos);
+    if (contratosTipo) contratosTipo.addEventListener('change', loadContratoTipos);
+    if (contratosRecupere) contratosRecupere.addEventListener('change', loadContratoTipos);
+    if (contratosOverlay) {
+      contratosOverlay.addEventListener('click', function (event) {
+        if (event.target === contratosOverlay && !isContratosProcessingLocked()) closeContratosModal();
+      });
+    }
     if (fichaSave) fichaSave.addEventListener('click', function (e) { e.preventDefault(); saveFicha({ validarHerdeiros: false }); });
     if (fichaValidateHerdeiros) {
       fichaValidateHerdeiros.addEventListener('click', function (e) {
@@ -1438,7 +3382,7 @@
     }
     if (fichaOverlay) {
       fichaOverlay.addEventListener('click', function (event) {
-        if (event.target === fichaOverlay) closeFichaModal();
+        if (event.target === fichaOverlay) requestCloseFichaModal();
       });
     }
     if (fichaForm) {
@@ -1449,14 +3393,49 @@
     }
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape') return;
+      if (isContratosProcessingLocked()) return;
+      if (contratosProcessOverlay && !contratosProcessOverlay.hidden) {
+        closeContratosProcessingModal();
+        return;
+      }
+      if (fichaConfirmOverlay && !fichaConfirmOverlay.hidden) {
+        closeFichaConfirmDialog('cancel');
+        return;
+      }
+      if (contratosOverlay && !contratosOverlay.hidden) {
+        closeContratosModal();
+        return;
+      }
       if (fichaOverlay && !fichaOverlay.hidden) {
-        closeFichaModal();
+        if (isFichaBusy()) return;
+        requestCloseFichaModal();
         return;
       }
       if (anexosOverlay && !anexosOverlay.hidden) {
         closeAnexosModal();
       }
     });
+
+    if (searchForm) {
+      searchForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        runSearch(readSearchInput());
+      });
+    }
+    if (searchClearBtn) {
+      searchClearBtn.addEventListener('click', function () {
+        if (searchInput) searchInput.value = '';
+        runSearch('');
+      });
+    }
+    if (searchInput) {
+      searchInput.addEventListener('search', function () {
+        // Native clear (x) on type=search
+        if (!String(searchInput.value || '').trim() && searchQuery) {
+          runSearch('');
+        }
+      });
+    }
 
     if (prevBtn) {
       prevBtn.addEventListener('click', function () {
@@ -1486,6 +3465,7 @@
     loadCasos(false).then(function () {
       if (activeCount > 0) syncCasos(false);
     });
+    updateContratosButtons();
   })();
   </script>
 </body>

@@ -127,7 +127,7 @@ def resolve_planilha_template_path(calc_dir: str | None = None) -> str:
             return path
 
     for name in (
-        "Planilha de Cálculos V32 01062026 (Pós PEC 66).xlsm",
+        "Planilha de Cálculos V32 03082026 (Pós PEC 66).xlsm",
     ):
         path = os.path.join(base, name)
         if os.path.isfile(path):
@@ -146,7 +146,7 @@ def resolve_planilha_template_path(calc_dir: str | None = None) -> str:
     except OSError:
         pass
 
-    return os.path.join(base, "Planilha de Cálculos V32 01062026 (Pós PEC 66).xlsm")
+    return os.path.join(base, "Planilha de Cálculos V32 03082026 (Pós PEC 66).xlsm")
 
 
 class CalculationAutomation:

@@ -79,6 +79,9 @@ from messages_viewer.pre_analise_ficha import (
     carregar_ficha as pre_analise_carregar_ficha,
     salvar_ficha as pre_analise_salvar_ficha,
 )
+from messages_viewer.contratos_adapter import get_cessionarias_names, listar_cessionarias
+from messages_viewer.contratos_db import is_configured as contratos_mysql_configured
+from messages_viewer.contratos_service import gerar_contratos, tipos_payload, validar_contratos
 from messages_viewer.levantamento_processual import (
     api_health as levantamento_api_health,
     create_search as levantamento_create_search,
@@ -88,6 +91,17 @@ from messages_viewer.levantamento_processual import (
 )
 from messages_viewer.proposta_pdf import gerar_pdf_proposta, nome_arquivo_proposta
 from messages_viewer.proposta_service import buscar_por_processo_incidente
+from messages_viewer.atualizacao_imposto import (
+    create_job_from_uploads as atualizacao_imposto_create_job,
+    delete_job as atualizacao_imposto_delete_job,
+    get_job_status as atualizacao_imposto_get_job_status,
+    is_package_configured as atualizacao_imposto_package_configured,
+    list_completed_cases as atualizacao_imposto_list_completed,
+)
+from messages_viewer.atualizacao_imposto_pdf import (
+    gerar_pdf_resumo_imposto,
+    nome_arquivo_resumo as atualizacao_imposto_nome_pdf,
+)
 from messages_viewer.tabela_juros_calc import (
     DEFAULTS as TABELA_JUROS_DEFAULTS,
     TIPOS_ESFERA,
@@ -475,10 +489,263 @@ def _normalizar_blacklist_status(value: object) -> str:
 
 
 def _blacklist_status_bloqueia_memoria(row: dict) -> bool:
+    """
+    Só bloqueia (e dispara o pop-up) quando o motivo/status da blacklist
+    é um dos canónicos: Solicitou remoção, Fez Acordo, Acordo, PF, Blacklist.
+    Outros motivos (ex.: Importado de BACKUP DELETED PROCESSES) não geram
+    o aviso nem ocultam o cálculo na Memória.
+    """
     status = _normalizar_blacklist_status(row.get("motivo"))
     if not status:
         return False
     return status in _BLACKLIST_MEMORIA_STATUS_BLOQUEANTES
+
+
+# Status gravados pelo REFACTOR_TJSP em controle_coleta_TJSP que a Memória
+# trata como bloqueio técnico (check distinto da blacklist EDA).
+_PIPELINE_COLETA_STATUS_BLOQUEANTES: frozenset[str] = frozenset(
+    {
+        "AUTOS BLACKLISTED",
+        "EXTINTO",
+        "SUSPENSO",
+        "ARQUIVADO",
+        "CANCELADO",
+        "EM GRAU DE RECURSO",
+        "CESSAO",
+        "CESSÃO",
+    }
+)
+
+
+def _normalizar_pipeline_coleta_status(value: object) -> str:
+    return _normalizar_blacklist_status(value)
+
+
+def _pipeline_coleta_status_bloqueia(status: object) -> bool:
+    normalized = _normalizar_pipeline_coleta_status(status)
+    if not normalized:
+        return False
+    blocked = {
+        _normalizar_pipeline_coleta_status(item)
+        for item in _PIPELINE_COLETA_STATUS_BLOQUEANTES
+    }
+    if normalized in blocked:
+        return True
+    if "AUTOS BLACKLISTED" in normalized:
+        return True
+    if "HOMOLOGACAO" in normalized:
+        return True
+    if normalized.startswith("CESSAO"):
+        return True
+    return False
+
+
+def _lookup_controle_coleta_status(
+    processo: str,
+    incidente: str = "",
+) -> dict | None:
+    """
+    Consulta ``controle_coleta_TJSP`` (flaskdb). Soft-fail: None se indisponível.
+    Retorna ``{"status": str, "found": True}`` quando há linha com status.
+    """
+    proc = str(processo or "").strip()
+    if not proc:
+        return None
+    inc = str(incidente or "").strip()
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return None
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'controle_coleta_TJSP'")
+        if not cur.fetchone():
+            return None
+
+        cur.execute("SHOW COLUMNS FROM `controle_coleta_TJSP`")
+        raw_cols = cur.fetchall() or []
+        fields: set[str] = set()
+        for r in raw_cols:
+            if isinstance(r, dict):
+                nm = r.get("Field") or r.get("field")
+                if nm:
+                    fields.add(str(nm))
+            else:
+                fields.add(str(r[0]))
+
+        f_proc = _pick_field(
+            fields,
+            "numero_de_processo",
+            "Numero_de_processo",
+            "Numero_de_Processo",
+            "processo",
+            "Processo",
+        )
+        f_inc = _pick_field(
+            fields,
+            "numero_do_incidente",
+            "Numero_do_incidente",
+            "Numero_do_Incidente",
+            "numero_de_incidente",
+            "Numero_de_incidente",
+            "incidente",
+            "Incidente",
+        )
+        f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
+        if not f_proc or not f_status:
+            return None
+
+        if f_inc and inc:
+            cur.execute(
+                f"""
+                SELECT `{f_status}` AS status
+                FROM controle_coleta_TJSP
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                ORDER BY 1 DESC
+                LIMIT 1
+                """,
+                (proc, inc),
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT `{f_status}` AS status
+                FROM controle_coleta_TJSP
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                ORDER BY 1 DESC
+                LIMIT 1
+                """,
+                (proc,),
+            )
+        row = cur.fetchone() or {}
+        status = row.get("status")
+        if status is None:
+            return None
+        return {"status": str(status).strip(), "found": True}
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] controle_coleta lookup falhou: {e}")
+        return None
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _pipeline_coleta_result_row(
+    *,
+    status: str,
+    processo: str | None = None,
+    incidente: str | None = None,
+    requerente: str | None = None,
+    id_precainfosnew: object = None,
+) -> dict:
+    return {
+        "id": None,
+        "id_precainfosnew": id_precainfosnew,
+        "requerente": requerente,
+        "numero_de_processo": processo,
+        "numero_do_incidente": incidente,
+        "calculo_atualizado": "Sem Saldo",
+        "status": "Sem Saldo",
+        "principal_bruto": 0,
+        "juros": 0,
+        "desc_saude_prev": 0,
+        "desc_ir": 0,
+        "percentual_honorarios": 30,
+        "total_bruto": 0,
+        "reserva_honorarios": 0,
+        "total_liquido": 0,
+        "ultima_atualizacao": None,
+        "source": "controle_coleta",
+        "pipeline_blocked": True,
+        "pipeline_status": status,
+        "controle_coleta_status": status,
+        "blacklist_can_override": False,
+    }
+
+
+def _pipeline_coleta_memoria_response(
+    *,
+    modo: str,
+    status: str,
+    processo: str | None = None,
+    incidente: str | None = None,
+    requerente: str | None = None,
+):
+    return jsonify(
+        {
+            "ok": True,
+            "modo": modo,
+            "source": "controle_coleta",
+            "controle_coleta": {"status": status},
+            "message": (
+                f"Coleta bloqueada no controle_coleta_TJSP (status: {status}). "
+                "Bloqueio técnico do pipeline TJSP — distinto da blacklist EDA."
+            ),
+            "results": [
+                _pipeline_coleta_result_row(
+                    status=status,
+                    processo=processo,
+                    incidente=incidente,
+                    requerente=requerente,
+                )
+            ],
+        }
+    )
+
+
+def _apply_pipeline_coleta_blocks(results: list[dict]) -> list[dict]:
+    """
+    Check duplo: se o caso estiver com status bloqueante em controle_coleta_TJSP,
+    oculta valores e marca ``pipeline_blocked`` (sem misturar com blacklist EDA).
+    Soft-fail quando flaskdb indisponível.
+    """
+    if not results:
+        return results
+    out: list[dict] = []
+    cache: dict[tuple[str, str], dict | None] = {}
+    for row in results:
+        if row.get("source") == "blacklist" or row.get("pipeline_blocked"):
+            out.append(row)
+            continue
+        proc = str(row.get("numero_de_processo") or "").strip()
+        inc = str(row.get("numero_do_incidente") or "").strip()
+        if not proc:
+            out.append(row)
+            continue
+        key = (proc, inc)
+        if key not in cache:
+            cache[key] = _lookup_controle_coleta_status(proc, inc)
+        ctl = cache[key]
+        if not ctl or not _pipeline_coleta_status_bloqueia(ctl.get("status")):
+            if ctl and ctl.get("status") is not None:
+                row = dict(row)
+                row["controle_coleta_status"] = ctl["status"]
+            out.append(row)
+            continue
+        status = str(ctl.get("status") or "").strip()
+        out.append(
+            _pipeline_coleta_result_row(
+                status=status,
+                processo=proc,
+                incidente=inc or None,
+                requerente=row.get("requerente"),
+                id_precainfosnew=row.get("id_precainfosnew") or row.get("id"),
+            )
+        )
+    return out
 
 
 class _BlacklistUnavailable(RuntimeError):
@@ -1035,6 +1302,10 @@ def pre_analise_processual_page():
         pre_analise_api_healthy=bool(health_payload.get("healthy")),
         pre_analise_poll_interval_ms=pre_analise_poll_interval_ms(),
         pre_analise_drive_configured=pre_analise_drive_configured(),
+        contratos_mysql_configured=contratos_mysql_configured(),
+        contratos_cessionarias=(
+            get_cessionarias_names() if contratos_mysql_configured() else []
+        ),
     )
 
 
@@ -1091,7 +1362,10 @@ def api_pre_analise_casos():
     reconciliar = str(request.args.get("reconciliar") or "").strip().lower() in {
         "1", "true", "yes", "sim",
     }
-    out, code = pre_analise_list_casos(page=page, page_size=page_size, reconciliar=reconciliar)
+    q = (request.args.get("q") or request.args.get("search") or "").strip()
+    out, code = pre_analise_list_casos(
+        page=page, page_size=page_size, reconciliar=reconciliar, q=q or None
+    )
     return jsonify(out), code
 
 
@@ -1112,7 +1386,8 @@ def api_pre_analise_sincronizar():
         page_size = int(data.get("page_size") or request.args.get("page_size") or "15")
     except ValueError:
         page_size = 15
-    out, code = pre_analise_sincronizar_casos(page=page, page_size=page_size)
+    q = str(data.get("q") or data.get("search") or request.args.get("q") or "").strip()
+    out, code = pre_analise_sincronizar_casos(page=page, page_size=page_size, q=q or None)
     return jsonify(out), code
 
 
@@ -1190,6 +1465,88 @@ def api_pre_analise_ficha_save():
         data, user_id=user_id_int, user_name=str(user_name or "").strip() or None
     )
     return jsonify(out), code
+
+
+@app.route("/api/contratos/cessionarias")
+def api_contratos_cessionarias():
+    out, code = listar_cessionarias()
+    return jsonify(out), code
+
+
+@app.route("/api/contratos/tipos")
+def api_contratos_tipos():
+    recupere = str(request.args.get("recupere") or "").strip().lower() in {
+        "1", "true", "yes", "sim",
+    }
+    tipo = (request.args.get("tipo") or "preca").strip().lower()
+    return jsonify(tipos_payload(tipo=tipo, recupere=recupere)), 200
+
+
+def _contratos_payload_from_request(data: dict) -> dict:
+    herdeiros_raw = data.get("herdeiros")
+    herdeiros_override = herdeiros_raw if isinstance(herdeiros_raw, list) else None
+    dados_raw = data.get("dados")
+    dados_override = dados_raw if isinstance(dados_raw, dict) else None
+    ha = data.get("herdeiros_abertos")
+    hv = data.get("herdeiros_validado")
+    return {
+        "cumprimento_de_sentenca": str(
+            data.get("cumprimento") or data.get("cumprimento_de_sentenca") or ""
+        ),
+        "incidente": str(data.get("incidente") or ""),
+        "nome_credor": str(data.get("nome_credor") or ""),
+        "tipo": str(data.get("tipo") or "preca"),
+        "contrato_id": str(data.get("contrato_id") or data.get("contrato") or "0"),
+        "recupere": 1 if data.get("recupere") in (1, "1", True, "true", "sim") else 0,
+        "caso_id": data.get("caso_id"),
+        "id_externo": data.get("id_externo"),
+        "cessionaria": str(data.get("cessionaria") or "").strip() or None,
+        "dados_override": dados_override,
+        "herdeiros_override": herdeiros_override,
+        "herdeiros_abertos_override": bool(ha) if ha is not None else None,
+        "herdeiros_validado_override": bool(hv) if hv is not None else None,
+        "depre_hint": str(data.get("depre") or "").strip() or None,
+    }
+
+
+@app.route("/api/pre-analise-processual/contratos/validar", methods=["POST"])
+def api_pre_analise_contratos_validar():
+    try:
+        data = request.get_json(silent=True) or {}
+        out, code = validar_contratos(**_contratos_payload_from_request(data))
+        return jsonify(out), code
+    except Exception as e:
+        app.logger.exception("contratos/validar")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pre-analise-processual/contratos/gerar", methods=["POST"])
+def api_pre_analise_contratos_gerar():
+    try:
+        data = request.get_json(silent=True) or {}
+        user = current_user() or {}
+        user_name = (
+            user.get("nome")
+            or user.get("name")
+            or user.get("usuario")
+            or user.get("username")
+            or user.get("login")
+            or "Centro Organizacional"
+        )
+        user_email = user.get("email") or user.get("mail") or ""
+        payload = _contratos_payload_from_request(data)
+        body, code, headers = gerar_contratos(
+            **payload,
+            user_name=str(user_name),
+            user_email=str(user_email) if user_email else None,
+            force=data.get("force") in (1, "1", True, "true", "sim"),
+        )
+        if headers:
+            return Response(body, status=code, headers=headers, mimetype="application/zip")
+        return jsonify(body), code
+    except Exception as e:
+        app.logger.exception("contratos/gerar")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/levantamento-processual")
@@ -1315,6 +1672,15 @@ def api_memoria_buscar():
                 bl_row=bl_row,
                 processo=proc,
                 incidente=inc,
+            )
+        # Check duplo: status bloqueante no controle_coleta_TJSP (pipeline TJSP).
+        ctl = _lookup_controle_coleta_status(proc, inc)
+        if ctl and _pipeline_coleta_status_bloqueia(ctl.get("status")):
+            return _pipeline_coleta_memoria_response(
+                modo="processo",
+                status=str(ctl.get("status") or "").strip(),
+                processo=proc,
+                incidente=inc or None,
             )
     else:
         bl_row = _blacklist_nome_match(blacklist, nome=nome)
@@ -1459,6 +1825,7 @@ def api_memoria_buscar():
             500,
         )
     if results:
+        results = _apply_pipeline_coleta_blocks(results)
         _enrich_results_precainfos_numero_de_meses(results)
         return jsonify(
             {
@@ -1714,6 +2081,7 @@ def api_memoria_buscar():
                     bl_row.get("motivo") or bl_row.get("tipo") or "blacklist"
                 ).strip()
             out_rows.append(out_item)
+        out_rows = _apply_pipeline_coleta_blocks(out_rows)
         return jsonify(
             {
                 "ok": True,
@@ -2381,89 +2749,23 @@ def api_memoria_controle_coleta_status():
     if not proc:
         return jsonify({"ok": False, "error": "Obrigatório: numero_de_processo."}), 400
 
-    cfg = _flask_mysql_config()
-    if not cfg:
+    if not _flask_mysql_config():
         return (
             jsonify({"ok": False, "error": "MySQL do flaskdb não configurado (FLASK_MYSQL_*)."}),
             503,
         )
-    try:
-        conn = mysql.connector.connect(**cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci")
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SHOW TABLES LIKE 'controle_coleta_TJSP'")
-        if not cur.fetchone():
-            return jsonify({"ok": True, "found": False, "status": None, "error": None})
 
-        cur.execute("SHOW COLUMNS FROM `controle_coleta_TJSP`")
-        raw_cols = cur.fetchall() or []
-        fields: set[str] = set()
-        for r in raw_cols:
-            if isinstance(r, dict):
-                nm = r.get("Field") or r.get("field")
-                if nm:
-                    fields.add(str(nm))
-            else:
-                fields.add(str(r[0]))
-
-        f_proc = _pick_field(
-            fields,
-            "numero_de_processo",
-            "Numero_de_processo",
-            "Numero_de_Processo",
-            "processo",
-            "Processo",
-        )
-        f_inc = _pick_field(
-            fields,
-            "numero_do_incidente",
-            "Numero_do_incidente",
-            "Numero_do_Incidente",
-            "numero_de_incidente",
-            "Numero_de_incidente",
-            "incidente",
-            "Incidente",
-        )
-        f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
-        if not f_proc or not f_status:
-            return jsonify({"ok": True, "found": False, "status": None, "error": None})
-
-        if f_inc:
-            cur.execute(
-                f"""
-                SELECT `{f_status}` AS status
-                FROM controle_coleta_TJSP
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
-                ORDER BY 1 DESC
-                LIMIT 1
-                """,
-                (proc, inc),
-            )
-        else:
-            cur.execute(
-                f"""
-                SELECT `{f_status}` AS status
-                FROM controle_coleta_TJSP
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                ORDER BY 1 DESC
-                LIMIT 1
-                """,
-                (proc,),
-            )
-        row = cur.fetchone() or {}
-        status = row.get("status")
-        return jsonify({"ok": True, "found": bool(status is not None), "status": status})
-    except mysql.connector.Error as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-        try:
-            conn.close()
-        except Exception:
-            pass
+    ctl = _lookup_controle_coleta_status(proc, inc)
+    if ctl is None:
+        return jsonify({"ok": True, "found": False, "status": None, "error": None})
+    return jsonify(
+        {
+            "ok": True,
+            "found": True,
+            "status": ctl.get("status"),
+            "pipeline_blocked": _pipeline_coleta_status_bloqueia(ctl.get("status")),
+        }
+    )
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────
@@ -3222,6 +3524,114 @@ def api_proposta_gerar_pdf():
             "Cache-Control": "no-store",
         },
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ATUALIZAÇÃO DE IMPOSTO — upload de 2 PDFs (automação a ligar depois)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/atualizacao-imposto")
+def atualizacao_imposto_page():
+    return render_template(
+        "atualizacao_imposto.html",
+        calculo_package_configured=atualizacao_imposto_package_configured(),
+    )
+
+
+@app.route("/api/atualizacao-imposto/enviar", methods=["POST"], endpoint="api_atualizacao_imposto_enviar")
+def api_atualizacao_imposto_enviar():
+    if not atualizacao_imposto_package_configured():
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Pacote de cálculo não encontrado. Defina PACOTE_CALCULO_PATH no .env.",
+            }
+        ), 503
+    u = current_user()
+    try:
+        out = atualizacao_imposto_create_job(
+            files=request.files,
+            user_id=int(u["id"]) if u and u.get("id") is not None else None,
+            username=(u.get("username") if u else None),
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"Falha ao guardar ficheiros: {e}"}), 500
+    return jsonify(out)
+
+
+@app.route(
+    "/api/atualizacao-imposto/historico",
+    methods=["GET"],
+    endpoint="api_atualizacao_imposto_historico",
+)
+def api_atualizacao_imposto_historico():
+    try:
+        limit = int(request.args.get("limit", "100") or "100")
+    except ValueError:
+        limit = 100
+    return jsonify(atualizacao_imposto_list_completed(limit=limit))
+
+
+@app.route(
+    "/api/atualizacao-imposto/<job_id>",
+    methods=["DELETE"],
+    endpoint="api_atualizacao_imposto_delete",
+)
+def api_atualizacao_imposto_delete(job_id: str):
+    try:
+        return jsonify(atualizacao_imposto_delete_job(job_id))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 404
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"Falha ao remover: {e}"}), 500
+
+
+@app.route(
+    "/api/atualizacao-imposto/pdf",
+    methods=["POST"],
+    endpoint="api_atualizacao_imposto_pdf",
+)
+def api_atualizacao_imposto_pdf():
+    data = request.get_json(silent=True) or {}
+    if not str(data.get("nome") or "").strip() and not str(data.get("processo") or "").strip():
+        return jsonify({"ok": False, "error": "Dados do resumo incompletos."}), 400
+    try:
+        pdf_bytes = gerar_pdf_resumo_imposto(data)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Erro ao gerar PDF: {e}"}), 500
+    fn = atualizacao_imposto_nome_pdf(
+        str(data.get("nome") or ""),
+        str(data.get("processo") or ""),
+    )
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fn}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.route(
+    "/api/atualizacao-imposto/<job_id>",
+    methods=["GET"],
+    endpoint="api_atualizacao_imposto_status",
+)
+def api_atualizacao_imposto_status(job_id: str):
+    out = atualizacao_imposto_get_job_status(job_id)
+    if not out.get("ok"):
+        return jsonify(out), 404
+    return jsonify(out)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

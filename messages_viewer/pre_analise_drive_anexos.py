@@ -18,12 +18,29 @@ _PDF_MIME = "application/pdf"
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _MAX_DEPTH = 2
 _MAX_FILES = 50
-_NOME_PERMITIDO = "redator"
+# Padrão legado: parecer_redator.pdf / parecer_redator.docx
+_NOMES_PARECER = ("parecer", "redator")
+# Padrão novo: "{NOME} Proc {n} - Inci {n}.pdf" (ex.: JOSE LUIZ ... Proc 0027090 - Inci 03.pdf)
+_RE_PROC_INCI = re.compile(
+    r"proc\s+\d+.*inci\s+\d+",
+    re.IGNORECASE,
+)
+
+
+def _match_parecer(filename: str) -> bool:
+    """Nome legado com «parecer» ou «redator»."""
+    name = str(filename or "").lower()
+    return any(token in name for token in _NOMES_PARECER)
+
+
+def _match_proc_inci(filename: str) -> bool:
+    """Nome novo «… Proc N - Inci N»."""
+    return bool(_RE_PROC_INCI.search(str(filename or "")))
 
 
 def _nome_permitido_download(filename: str) -> bool:
-    """Só ficheiros com «redator» no nome podem ser listados/baixados."""
-    return _NOME_PERMITIDO in str(filename or "").lower()
+    """Permite download do parecer (legado) ou do padrão Proc/Inci."""
+    return _match_parecer(filename) or _match_proc_inci(filename)
 
 
 
@@ -270,30 +287,47 @@ def _collect_caso_files(service: Any, folder_id: str) -> list[dict[str, Any]]:
     return files
 
 
+def _montar_item_anexo(f: dict[str, Any], tipo: str, label: str) -> dict[str, Any] | None:
+    fid = f.get("id")
+    name = str(f.get("name") or "")
+    if not fid or not name:
+        return None
+    return {
+        "tipo": tipo,
+        "label": label,
+        "available": True,
+        "id": fid,
+        "name": name,
+        "size": f.get("size"),
+        "modified_time": f.get("modified_time"),
+        "web_view_link": f.get("web_view_link"),
+        "download_url": f"/api/pre-analise-processual/anexos/{fid}?download=1",
+        "view_url": f"/api/pre-analise-processual/anexos/{fid}",
+    }
+
+
 def _montar_anexos_redator(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Apenas ficheiros cujo nome contém «redator» ficam disponíveis para download."""
-    out: list[dict[str, Any]] = []
+    """
+    Lista anexos do parecer para download.
+
+    Prioridade:
+    1. Nomes com «parecer» / «redator» (legado: parecer_redator.*)
+    2. Se nenhum, padrão novo «Proc N - Inci N»
+    """
+    parecer: list[dict[str, Any]] = []
+    proc_inci: list[dict[str, Any]] = []
     for f in files:
         name = str(f.get("name") or "")
-        if not _nome_permitido_download(name):
-            continue
-        fid = f.get("id")
-        if not fid:
-            continue
-        out.append(
-            {
-                "tipo": "redator",
-                "label": "Redator",
-                "available": True,
-                "id": fid,
-                "name": name,
-                "size": f.get("size"),
-                "modified_time": f.get("modified_time"),
-                "web_view_link": f.get("web_view_link"),
-                "download_url": f"/api/pre-analise-processual/anexos/{fid}?download=1",
-                "view_url": f"/api/pre-analise-processual/anexos/{fid}",
-            }
-        )
+        if _match_parecer(name):
+            item = _montar_item_anexo(f, "parecer", "Parecer")
+            if item:
+                parecer.append(item)
+        elif _match_proc_inci(name):
+            item = _montar_item_anexo(f, "proc_inci", "Parecer (Proc/Inci)")
+            if item:
+                proc_inci.append(item)
+
+    out = parecer if parecer else proc_inci
     out.sort(key=lambda x: str(x.get("name") or "").lower())
     return out[:_MAX_FILES]
 
@@ -394,7 +428,8 @@ def listar_anexos_pdf(
         aviso = None
         if available_count == 0:
             aviso = (
-                "Nenhum ficheiro com «redator» no nome foi encontrado nesta pasta. "
+                "Nenhum parecer encontrado nesta pasta "
+                "(nem «parecer»/«redator», nem o padrão «Proc N - Inci N»). "
                 "Cumprimento, DEPRE e Incidente não estão disponíveis para download."
             )
         return (
@@ -471,7 +506,8 @@ def baixar_anexo_pdf(
                 {
                     "ok": False,
                     "error": (
-                        "Download permitido apenas para ficheiros com «redator» no nome."
+                        "Download permitido apenas para pareceres "
+                        "(nome com «parecer»/«redator» ou padrão «Proc N - Inci N»)."
                     ),
                 },
                 403,

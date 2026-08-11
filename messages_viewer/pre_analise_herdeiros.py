@@ -27,6 +27,7 @@ HERDEIRO_SECTIONS: list[dict[str, Any]] = [
             "parentesco_herdeiro",
             "nacionalidade_herdeiro",
             "estado_civil_herdeiro",
+            "regime_herdeiro_conjuge",
             "percentual_detido",
             "herdeiro_cedente",
             "percentual_honorarios_herdeiro",
@@ -96,13 +97,24 @@ HERDEIRO_SECTIONS: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "banco_conjuge_herdeiro",
+        "title": "Banco do cônjuge do herdeiro",
+        "collapsible": True,
+        "fields": [
+            "banco_conjuge_herdeiro",
+            "agencia_conjuge_herdeiro",
+            "conta_conjuge_herdeiro",
+            "tipo_conta_conjuge_herdeiro",
+            "tem_chave_pix_conjuge_herdeiro",
+            "chave_pix_conjuge_herdeiro",
+        ],
+    },
+    {
         "id": "calculados_herdeiro",
         "title": "Campos calculados (herdeiro)",
         "fields": [
             "honorarios_reservados",
             "percentual_nao_cedido",
-            "percentual_detido_herdeiros",
-            "sobra",
         ],
     },
 ]
@@ -135,6 +147,8 @@ def field_label(key: str) -> str:
 
 
 def herdeiro_schema_payload() -> dict[str, Any]:
+    from messages_viewer.pre_analise_ficha_widgets import attach_widgets_to_fields, widgets_payload
+
     sections = []
     for sec in HERDEIRO_SECTIONS:
         sections.append(
@@ -142,10 +156,12 @@ def herdeiro_schema_payload() -> dict[str, Any]:
                 "id": sec["id"],
                 "title": sec["title"],
                 "collapsible": bool(sec.get("collapsible")),
-                "fields": [{"key": f, "label": field_label(f)} for f in sec["fields"]],
+                "fields": attach_widgets_to_fields(
+                    [{"key": f, "label": field_label(f)} for f in sec["fields"]]
+                ),
             }
         )
-    return {"sections": sections, "keys": herdeiro_field_keys()}
+    return {"sections": sections, "keys": herdeiro_field_keys(), "widgets_meta": widgets_payload()}
 
 
 def _serialize_cell(value: Any) -> str:

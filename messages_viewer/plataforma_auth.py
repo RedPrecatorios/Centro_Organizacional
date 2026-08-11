@@ -57,6 +57,11 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
         "Comparativo de rendimento: manter OC vs venda antecipada",
     ),
     ("proposta", "Gerar Proposta", "PDF comercial para formalização com o cliente"),
+    (
+        "atualizacao_imposto",
+        "Atualização De Imposto",
+        "Envio de 2 PDFs para atualização automática de valores de imposto",
+    ),
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
     ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
@@ -314,6 +319,38 @@ def _migrate_levantamento_processual_once() -> None:
         conn.commit()
 
 
+def _migrate_atualizacao_imposto_once() -> None:
+    """Quem já tem Memória de cálculo ou Proposta recebe Atualização De Imposto (uma vez)."""
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_atualizacao_imposto_v1'"
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            "SELECT 1 FROM plataforma_user_permissions WHERE tab_id = 'atualizacao_imposto' LIMIT 1"
+        )
+        had_any = cur.fetchone()
+        if not had_any:
+            cur.execute(
+                """
+                INSERT IGNORE INTO plataforma_user_permissions (user_id, tab_id)
+                SELECT DISTINCT user_id, 'atualizacao_imposto'
+                FROM plataforma_user_permissions
+                WHERE tab_id IN ('memoria_calculo', 'proposta')
+                """
+            )
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_atualizacao_imposto_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
+        )
+        conn.commit()
+
+
 def init_db() -> None:
     with auth_connection() as conn:
         init_auth_schema(conn)
@@ -323,6 +360,7 @@ def init_db() -> None:
     _migrate_tabela_juros_once()
     _migrate_proposta_once()
     _migrate_levantamento_processual_once()
+    _migrate_atualizacao_imposto_once()
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -412,6 +450,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("levantamento_processual", "levantamento_processual_page"),
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
+        ("atualizacao_imposto", "atualizacao_imposto_page"),
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
@@ -445,6 +484,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "tabela_juros"
     if path.startswith("/proposta"):
         return "proposta"
+    if path.startswith("/atualizacao-imposto"):
+        return "atualizacao_imposto"
     if path.startswith("/embedded"):
         return "outro_modulo"
     if path.startswith("/campanha"):
@@ -516,6 +557,10 @@ def _endpoint_to_tab() -> str | None:
         "api_pre_analise_anexo_download": "pre_analise_processual",
         "api_pre_analise_ficha_get": "pre_analise_processual",
         "api_pre_analise_ficha_save": "pre_analise_processual",
+        "api_contratos_cessionarias": "pre_analise_processual",
+        "api_contratos_tipos": "pre_analise_processual",
+        "api_pre_analise_contratos_validar": "pre_analise_processual",
+        "api_pre_analise_contratos_gerar": "pre_analise_processual",
         "levantamento_processual_page": "levantamento_processual",
         "api_levantamento_health": "levantamento_processual",
         "api_levantamento_iniciar": "levantamento_processual",
@@ -525,6 +570,12 @@ def _endpoint_to_tab() -> str | None:
         "proposta_page": "proposta",
         "api_proposta_buscar": "proposta",
         "api_proposta_gerar_pdf": "proposta",
+        "atualizacao_imposto_page": "atualizacao_imposto",
+        "api_atualizacao_imposto_enviar": "atualizacao_imposto",
+        "api_atualizacao_imposto_status": "atualizacao_imposto",
+        "api_atualizacao_imposto_historico": "atualizacao_imposto",
+        "api_atualizacao_imposto_delete": "atualizacao_imposto",
+        "api_atualizacao_imposto_pdf": "atualizacao_imposto",
         "embedded.index": "outro_modulo",
         "get_summary": "index",
         "get_instances": "conversas",

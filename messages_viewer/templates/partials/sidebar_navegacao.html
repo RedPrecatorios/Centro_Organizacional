@@ -63,6 +63,14 @@
       Gerar Proposta{% if page_in_maintenance('proposta') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
+    {% if user_can('atualizacao_imposto') %}
+    <a class="dash-nav-item{% if request.endpoint == 'atualizacao_imposto_page' %} active{% endif %}{% if page_in_maintenance('atualizacao_imposto') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('atualizacao_imposto_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>
+      </span>
+      Atualização De Imposto{% if page_in_maintenance('atualizacao_imposto') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
     {% if user_can('campanha') %}
     <a class="dash-nav-item{% if request.endpoint == 'campanha_page' %} active{% endif %}{% if page_in_maintenance('campanha') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('campanha_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">

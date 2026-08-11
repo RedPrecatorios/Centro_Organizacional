@@ -17,10 +17,24 @@ from zoneinfo import ZoneInfo
 
 import mysql.connector
 
+# Status finais da API externa — param o polling local.
+# Importante: analise_gpt_concluida / analise_gpt_erro / erro_processamento /
+# blacklist NÃO estavam aqui; casos concluídos ficavam com polling_ativo=1
+# e monopolizavam o lote de sync (LIMIT), impedindo actualizar casos novos.
 _TERMINAL_STATUSES = frozenset(
-    {"coleta_concluida", "erro", "falha", "cancelado", "cancelada"}
+    {
+        "coleta_concluida",
+        "analise_gpt_concluida",
+        "analise_gpt_erro",
+        "erro_processamento",
+        "blacklist",
+        "erro",
+        "falha",
+        "cancelado",
+        "cancelada",
+    }
 )
-_SYNC_BATCH_LIMIT = 20
+_SYNC_BATCH_LIMIT = 50
 _DEFAULT_PAGE_SIZE = 15
 _DISPLAY_TZ = ZoneInfo("America/Sao_Paulo")
 _DATETIME_FIELDS = frozenset({"criado_em", "atualizado_em", "synced_at"})
@@ -527,7 +541,9 @@ def _upsert_caso_from_inputs(
             mensagem = VALUES(mensagem),
             polling_ativo = IF(
                 polling_ativo = 0 AND VALUES(status) NOT IN (
-                    'coleta_concluida', 'erro', 'falha', 'cancelado', 'cancelada'
+                    'coleta_concluida', 'analise_gpt_concluida', 'analise_gpt_erro',
+                    'erro_processamento', 'blacklist',
+                    'erro', 'falha', 'cancelado', 'cancelada'
                 ),
                 1,
                 polling_ativo
@@ -739,12 +755,55 @@ def _count_active(cur) -> int:
     return int(row.get("n") or 0)
 
 
-def _list_casos_page(cur, page: int, page_size: int) -> tuple[list[dict], int]:
-    cur.execute("SELECT COUNT(*) AS n FROM pre_analise_casos")
+def _normalize_search_q(q: str | None) -> str:
+    text = " ".join(str(q or "").strip().split())
+    # Evita wildcards acidentais no LIKE.
+    text = text.replace("%", "").replace("_", "")
+    return " ".join(text.split())[:120]
+
+
+def _casos_search_clause(q: str | None) -> tuple[str, list[str]]:
+    """
+    Filtro por processo, incidente, nome, DEPRE, ids e status.
+    Retorna (SQL WHERE fragmento sem WHERE, params).
+    """
+    needle = _normalize_search_q(q)
+    if not needle:
+        return "", []
+    like = f"%{needle}%"
+    cols = (
+        "numero_cumprimento",
+        "numero_incidente",
+        "nome_credor",
+        "numero_depre_input",
+        "numero_depre",
+        "caso_id",
+        "id_externo",
+        "status",
+        "fase_atual",
+        "numero_processo_principal",
+    )
+    clause = "(" + " OR ".join(f"{c} LIKE %s" for c in cols) + ")"
+    return clause, [like] * len(cols)
+
+
+def _list_casos_page(
+    cur,
+    page: int,
+    page_size: int,
+    *,
+    q: str | None = None,
+) -> tuple[list[dict], int]:
+    where_sql, where_params = _casos_search_clause(q)
+    where = f"WHERE {where_sql}" if where_sql else ""
+    cur.execute(
+        f"SELECT COUNT(*) AS n FROM pre_analise_casos {where}",
+        tuple(where_params),
+    )
     total = int((cur.fetchone() or {}).get("n") or 0)
     offset = (page - 1) * page_size
     cur.execute(
-        """
+        f"""
         SELECT
             caso_id, id_externo, numero_cumprimento, numero_incidente,
             nome_credor, numero_depre_input, status, fase_atual,
@@ -752,10 +811,11 @@ def _list_casos_page(cur, page: int, page_size: int) -> tuple[list[dict], int]:
             blacklist_codigo, caminho_pasta, bloqueado, mensagem,
             polling_ativo, criado_em, atualizado_em, criado_por_user_id
         FROM pre_analise_casos
+        {where}
         ORDER BY criado_em DESC
         LIMIT %s OFFSET %s
         """,
-        (page_size, offset),
+        tuple(where_params) + (page_size, offset),
     )
     rows = [_serialize_row(r) for r in (cur.fetchall() or [])]
     return rows, total
@@ -884,9 +944,11 @@ def list_casos(
     page_size: int = _DEFAULT_PAGE_SIZE,
     *,
     reconciliar: bool = False,
+    q: str | None = None,
 ) -> tuple[dict, int]:
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
+    search_q = _normalize_search_q(q)
     conn = None
     try:
         conn = _db_connect()
@@ -895,7 +957,7 @@ def list_casos(
         if reconciliar and is_configured():
             _reconciliar_cache_da_api(cur, prune=True)
             conn.commit()
-        items, total = _list_casos_page(cur, page, page_size)
+        items, total = _list_casos_page(cur, page, page_size, q=search_q or None)
         active_count = _count_active(cur)
         pages = max(1, (total + page_size - 1) // page_size)
         return (
@@ -907,6 +969,7 @@ def list_casos(
                 "total": total,
                 "pages": pages,
                 "active_count": active_count,
+                "q": search_q,
             },
             200,
         )
@@ -1085,7 +1148,12 @@ def reconciliar_casos(page: int = 1, limit: int = 100) -> tuple[dict, int]:
                 pass
 
 
-def sincronizar_casos(page: int = 1, page_size: int = _DEFAULT_PAGE_SIZE) -> tuple[dict, int]:
+def sincronizar_casos(
+    page: int = 1,
+    page_size: int = _DEFAULT_PAGE_SIZE,
+    *,
+    q: str | None = None,
+) -> tuple[dict, int]:
     if not is_configured():
         return (
             {
@@ -1100,21 +1168,39 @@ def sincronizar_casos(page: int = 1, page_size: int = _DEFAULT_PAGE_SIZE) -> tup
 
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
+    search_q = _normalize_search_q(q)
     conn = None
     try:
         conn = _db_connect()
         cur = conn.cursor(dictionary=True)
         _ensure_table(cur)
 
+        # 1) Desliga polling de casos já terminais no cache (ex.: analise_gpt_concluida
+        #    gravado antes da lista de status terminais ser corrigida).
+        terminal_list = sorted(_TERMINAL_STATUSES)
+        placeholders = ", ".join(["%s"] * len(terminal_list))
+        cur.execute(
+            f"""
+            UPDATE pre_analise_casos
+            SET polling_ativo = 0
+            WHERE polling_ativo = 1
+              AND (
+                bloqueado = 1
+                OR LOWER(TRIM(status)) IN ({placeholders})
+              )
+            """,
+            tuple(terminal_list),
+        )
+
+        # 2) Sincroniza TODOS os casos ainda activos (em lotes), não só os 20 mais
+        #    antigos — senão casos novos ficam eternamente em mapeamento_iniciado.
         cur.execute(
             """
             SELECT caso_id
             FROM pre_analise_casos
             WHERE polling_ativo = 1
             ORDER BY atualizado_em ASC
-            LIMIT %s
-            """,
-            (_SYNC_BATCH_LIMIT,),
+            """
         )
         active_rows = cur.fetchall() or []
         caso_ids = [
@@ -1124,19 +1210,21 @@ def sincronizar_casos(page: int = 1, page_size: int = _DEFAULT_PAGE_SIZE) -> tup
         ]
         sync_errors: list[dict[str, str]] = []
 
-        if caso_ids:
-            status_items, sync_errors, not_found_ids = _fetch_status_lote(caso_ids)
+        for offset in range(0, len(caso_ids), _SYNC_BATCH_LIMIT):
+            batch = caso_ids[offset : offset + _SYNC_BATCH_LIMIT]
+            status_items, batch_errors, not_found_ids = _fetch_status_lote(batch)
+            sync_errors.extend(batch_errors)
             for index, api_out in enumerate(status_items):
                 cid = str(api_out.get("caso_id") or "").strip()
-                if not cid and index < len(caso_ids):
-                    cid = caso_ids[index]
+                if not cid and index < len(batch):
+                    cid = batch[index]
                 if cid:
                     _apply_status_snapshot(cur, cid, api_out)
             for cid in not_found_ids:
                 _remover_caso_local(cur, cid)
 
         conn.commit()
-        items, total = _list_casos_page(cur, page, page_size)
+        items, total = _list_casos_page(cur, page, page_size, q=search_q or None)
         active_count = _count_active(cur)
         pages = max(1, (total + page_size - 1) // page_size)
         out: dict[str, Any] = {
@@ -1147,6 +1235,7 @@ def sincronizar_casos(page: int = 1, page_size: int = _DEFAULT_PAGE_SIZE) -> tup
             "total": total,
             "pages": pages,
             "active_count": active_count,
+            "q": search_q,
             "synced_at": _to_display_iso(datetime.now(timezone.utc)),
         }
         if sync_errors:

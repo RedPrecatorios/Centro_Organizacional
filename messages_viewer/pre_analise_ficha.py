@@ -63,7 +63,6 @@ FIELD_SECTIONS: list[dict[str, Any]] = [
             "data_do_obito",
             "anuente_credor",
             "exequente",
-            "complemento_credor",
         ],
     },
     {
@@ -72,6 +71,7 @@ FIELD_SECTIONS: list[dict[str, Any]] = [
         "fields": [
             "cep_credor",
             "logradouro_credor",
+            "complemento_credor",
             "numero_logradouro_credor",
             "bairro_credor",
             "cidade_credor",
@@ -141,7 +141,11 @@ FIELD_SECTIONS: list[dict[str, Any]] = [
             "uf_anuente_credor",
             "interveniente_anuente",
             "estado_civil_anuente_credor",
+            "data_de_nascimento_anuente_credor",
+            "email_anuente_credor",
+            "telefone_anuente_credor",
             "nacionalidade_anuente_credor",
+            "ocupacao_anuente_credor",
         ],
     },
     {
@@ -204,6 +208,8 @@ FIELD_SECTIONS: list[dict[str, Any]] = [
         "title": "20. Metadados do processo",
         "fields": [
             "qtd_herdeiros",
+            "percentual_detido_herdeiros",
+            "sobra",
             "recupere",
             "incluido_por",
             "incluido_em",
@@ -305,6 +311,7 @@ def field_label(key: str) -> str:
 
 
 def schema_payload() -> dict[str, Any]:
+    from messages_viewer.pre_analise_ficha_widgets import attach_widgets_to_fields, widgets_payload
     from messages_viewer.pre_analise_herdeiros import herdeiro_schema_payload
 
     sections = []
@@ -313,15 +320,16 @@ def schema_payload() -> dict[str, Any]:
             {
                 "id": sec["id"],
                 "title": sec["title"],
-                "fields": [
-                    {"key": f, "label": field_label(f)} for f in sec["fields"]
-                ],
+                "fields": attach_widgets_to_fields(
+                    [{"key": f, "label": field_label(f)} for f in sec["fields"]]
+                ),
             }
         )
     return {
         "sections": sections,
         "keys": all_field_keys(),
         "herdeiros": herdeiro_schema_payload(),
+        "widgets_meta": widgets_payload(),
     }
 
 
@@ -1029,6 +1037,38 @@ def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None
 # ---------------------------------------------------------------------------
 
 
+def _row_to_local_pack(row: dict[str, Any] | None, cur) -> dict[str, Any] | None:
+    if not row:
+        return None
+    raw = row.get("dados")
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="replace")
+    if isinstance(raw, str):
+        try:
+            dados = json.loads(raw)
+        except json.JSONDecodeError:
+            dados = {}
+    elif isinstance(raw, dict):
+        dados = raw
+    else:
+        dados = {}
+
+    from messages_viewer.pre_analise_herdeiros import load_herdeiros_for_ficha
+
+    herdeiros_pack = load_herdeiros_for_ficha(cur, int(row["id"]))
+    return {
+        "id": int(row["id"]),
+        "dados": dados,
+        "incluido_por": row.get("incluido_por"),
+        "alterado_por": row.get("alterado_por"),
+        "criado_em": row.get("criado_em"),
+        "atualizado_em": row.get("atualizado_em"),
+        "caso_id": row.get("caso_id"),
+        "id_externo": row.get("id_externo"),
+        "herdeiros_pack": herdeiros_pack,
+    }
+
+
 def _local_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None:
     conn = None
     try:
@@ -1045,36 +1085,38 @@ def _local_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None:
             """,
             (cumprimento, incidente),
         )
-        row = cur.fetchone()
-        if not row:
-            return None
-        raw = row.get("dados")
-        if isinstance(raw, (bytes, bytearray)):
-            raw = raw.decode("utf-8", errors="replace")
-        if isinstance(raw, str):
+        return _row_to_local_pack(cur.fetchone(), cur)
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
             try:
-                dados = json.loads(raw)
-            except json.JSONDecodeError:
-                dados = {}
-        elif isinstance(raw, dict):
-            dados = raw
-        else:
-            dados = {}
+                conn.close()
+            except Exception:
+                pass
 
-        from messages_viewer.pre_analise_herdeiros import load_herdeiros_for_ficha
 
-        herdeiros_pack = load_herdeiros_for_ficha(cur, int(row["id"]))
-        return {
-            "id": int(row["id"]),
-            "dados": dados,
-            "incluido_por": row.get("incluido_por"),
-            "alterado_por": row.get("alterado_por"),
-            "criado_em": row.get("criado_em"),
-            "atualizado_em": row.get("atualizado_em"),
-            "caso_id": row.get("caso_id"),
-            "id_externo": row.get("id_externo"),
-            "herdeiros_pack": herdeiros_pack,
-        }
+def _local_fetch_by_caso_id(caso_id: str | None) -> dict[str, Any] | None:
+    cid = (caso_id or "").strip()
+    if not cid:
+        return None
+    conn = None
+    try:
+        conn = _db_connect()
+        cur = conn.cursor(dictionary=True)
+        _ensure_table(cur)
+        cur.execute(
+            """
+            SELECT id, dados, incluido_por, alterado_por, criado_em, atualizado_em,
+                   criado_por_user_id, alterado_por_user_id, caso_id, id_externo
+            FROM pre_analise_ficha
+            WHERE caso_id = %s
+            ORDER BY atualizado_em DESC
+            LIMIT 1
+            """,
+            (cid,),
+        )
+        return _row_to_local_pack(cur.fetchone(), cur)
     except Exception:
         return None
     finally:
@@ -1149,6 +1191,8 @@ def carregar_ficha(
                 fontes[k] = "precainfosnew"
 
     local = _local_fetch(cumprimento, incidente)
+    if not local and caso_id:
+        local = _local_fetch_by_caso_id(caso_id)
     saved = False
     herdeiros: list[dict[str, Any]] = []
     id_credor = None
@@ -1280,6 +1324,22 @@ def salvar_ficha(
     else:
         dados["qtd_herdeiros"] = "0"
         herdeiros_payload = []
+
+    if validar_herdeiros and herdeiros_abertos:
+        from messages_viewer.contratos_validacao import validar_herdeiros_save
+
+        herdeiro_issues = validar_herdeiros_save(herdeiros_payload)
+        if herdeiro_issues:
+            return (
+                {
+                    "ok": False,
+                    "error": "Herdeiros inválidos: "
+                    + "; ".join(herdeiro_issues[:8])
+                    + ("…" if len(herdeiro_issues) > 8 else ""),
+                    "herdeiro_issues": herdeiro_issues,
+                },
+                400,
+            )
 
     existing = _local_fetch(cumprimento, incidente)
     if existing:

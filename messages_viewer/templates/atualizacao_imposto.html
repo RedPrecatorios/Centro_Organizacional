@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Atualização De Imposto — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top ai-no-print">
+      <div>
+        <h1 class="dash-h1">Atualização De Imposto</h1>
+        <p class="dash-sub">Calcule o valor retido indevidamente atualizado e prepare o resumo para o cliente.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <div class="camp-tabs ai-no-print" role="tablist" aria-label="Atualização De Imposto">
+        <button type="button" class="camp-tab active" id="ai-tab-novo" data-tab="novo" role="tab" aria-selected="true">Novo cálculo</button>
+        <button type="button" class="camp-tab" id="ai-tab-historico" data-tab="historico" role="tab" aria-selected="false">Casos concluídos</button>
+      </div>
+
+      <div id="ai-panel-novo" class="ai-tab-panel" role="tabpanel">
+        {% if not calculo_package_configured %}
+        <p class="memoria-skeleton-note ai-no-print" role="status">
+          <strong>Pacote de cálculo não configurado.</strong> Defina <code>PACOTE_CALCULO_PATH</code> no <code>.env</code>.
+        </p>
+        {% endif %}
+
+        <form class="ai-card ai-no-print" id="ai-form" novalidate>
+          <p class="ai-hint">Anexos (obrigatórios)</p>
+
+          <div class="ai-upload-grid">
+            <div class="ai-upload-box" data-slot="demonstrativo">
+              <div class="ai-upload-box-head">
+                <p>Demonstrativo de Pagamento</p>
+                <span class="ai-badge ai-badge--pend" data-badge>Pendente</span>
+              </div>
+              <label class="ai-dropzone" data-dropzone>
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                  <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M12 18v-6M9 15l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="ai-dz-hint" data-hint>Clique ou arraste o PDF do demonstrativo</span>
+                <input type="file" name="demonstrativo" accept="application/pdf,.pdf" required {% if not calculo_package_configured %}disabled{% endif %} />
+              </label>
+              <p class="ai-file-meta" data-meta></p>
+            </div>
+
+            <div class="ai-upload-box" data-slot="comprovante">
+              <div class="ai-upload-box-head">
+                <p>Comprovante de levantamento</p>
+                <span class="ai-badge ai-badge--pend" data-badge>Pendente</span>
+              </div>
+              <label class="ai-dropzone" data-dropzone>
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                  <polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M12 18v-6M9 15l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="ai-dz-hint" data-hint>Clique ou arraste o PDF do comprovante (CEF/BB)</span>
+                <input type="file" name="comprovante" accept="application/pdf,.pdf" required {% if not calculo_package_configured %}disabled{% endif %} />
+              </label>
+              <p class="ai-file-meta" data-meta></p>
+            </div>
+          </div>
+
+          <div class="ai-actions">
+            <button type="submit" class="camp-btn camp-btn-primary camp-btn-lg" id="ai-btn-enviar" {% if not calculo_package_configured %}disabled{% endif %}>
+              Calcular atualização
+            </button>
+            <button type="button" class="camp-btn camp-btn-ghost" id="ai-btn-limpar">
+              Limpar
+            </button>
+          </div>
+          <p class="ai-msg" id="ai-msg" role="status" aria-live="polite"></p>
+        </form>
+
+        <section class="ai-card ai-result ai-no-print" id="ai-result" hidden>
+          <p class="ai-hint">Acompanhamento</p>
+          <dl class="ai-result-grid">
+            <div>
+              <dt>Job</dt>
+              <dd id="ai-job-id">—</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd id="ai-job-status">—</dd>
+            </div>
+            <div class="ai-result-wide">
+              <dt>Mensagem</dt>
+              <dd id="ai-job-message">—</dd>
+            </div>
+          </dl>
+          <div class="ai-progress" id="ai-progress" hidden>
+            <div class="ai-progress-bar" aria-hidden="true"></div>
+            <p class="ai-progress-text">A processar… isto pode levar alguns minutos.</p>
+          </div>
+        </section>
+
+        <section class="ai-print-wrap" id="ai-final" hidden>
+          <div class="ai-print-toolbar ai-no-print">
+            <p class="ai-hint" style="margin:0">Resumo para o cliente</p>
+            <div class="ai-print-toolbar-actions">
+              <button type="button" class="camp-btn camp-btn-secondary" id="ai-btn-print">Imprimir / PDF</button>
+            </div>
+          </div>
+
+          <article class="ai-client-card" id="ai-client-card" aria-label="Resumo da atualização de imposto">
+            <header class="ai-client-head">
+              <div class="ai-client-brand">
+                <img
+                  class="ai-client-logo"
+                  src="{{ url_for('static', filename='img/red/logo-horizontal-claro.jpg') }}"
+                  alt="RED Precatórios"
+                  width="200"
+                  height="48"
+                />
+              </div>
+              <div class="ai-client-head-text">
+                <!-- <p class="ai-client-kicker">Atualização de Imposto</p> -->
+                <h2 class="ai-client-title">Atualização de Imposto A Ser Restituído</h2>
+              </div>
+            </header>
+
+            <section class="ai-client-person">
+              <div>
+                <span class="ai-client-label">Nome</span>
+                <strong id="ai-pessoa-nome">—</strong>
+              </div>
+              <div>
+                <span class="ai-client-label">CPF</span>
+                <strong id="ai-pessoa-cpf">—</strong>
+              </div>
+              <div class="ai-client-person-wide">
+                <span class="ai-client-label">Nº do processo</span>
+                <strong id="ai-pessoa-processo">—</strong>
+              </div>
+            </section>
+
+            <section class="ai-client-values">
+              <div class="ai-client-value-row">
+                <span>IR retido no comprovante</span>
+                <strong id="ai-ir-retido">—</strong>
+              </div>
+              <div class="ai-client-value-row ai-client-value-row--liquido">
+                <span>Imposto retido indevidamente atualizado</span>
+                <strong id="ai-valor-final">—</strong>
+              </div>
+            </section>
+
+            <footer class="ai-client-foot">
+              <p>Valores atualizados conforme demonstrativo e comprovante de levantamento.</p>
+            </footer>
+          </article>
+        </section>
+      </div>
+
+      <div id="ai-panel-historico" class="ai-tab-panel" role="tabpanel" hidden>
+        <section class="ai-card ai-card--wide ai-no-print">
+          <div class="ai-hist-head">
+            <p class="ai-hint" style="margin:0">Casos concluídos</p>
+            <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="ai-btn-refresh-hist">Atualizar</button>
+          </div>
+          <p class="ai-hist-sub">Casos processados. Pode abrir o resumo ou remover do histórico.</p>
+          <p class="ai-msg" id="ai-hist-msg" role="status" aria-live="polite"></p>
+          <div class="ai-hist-table-wrap">
+              <table class="camp-table camp-table-sm" id="ai-hist-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Data</th>
+                    <th scope="col">Nome</th>
+                    <th scope="col">CPF</th>
+                    <th scope="col">Processo</th>
+                    <th scope="col" class="num">Restituído</th>
+                    <th scope="col" class="num">A restituir atualizado</th>
+                    <th scope="col" class="ai-hist-actions">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="ai-hist-body">
+                  <tr><td colspan="7">A carregar…</td></tr>
+                </tbody>
+              </table>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    var configured = {{ calculo_package_configured | tojson }};
+    var form = document.getElementById('ai-form');
+    var msg = document.getElementById('ai-msg');
+    var btnEnviar = document.getElementById('ai-btn-enviar');
+    var btnLimpar = document.getElementById('ai-btn-limpar');
+    var result = document.getElementById('ai-result');
+    var progress = document.getElementById('ai-progress');
+    var finalBox = document.getElementById('ai-final');
+    var elJobId = document.getElementById('ai-job-id');
+    var elJobStatus = document.getElementById('ai-job-status');
+    var elJobMessage = document.getElementById('ai-job-message');
+    var pollTimer = null;
+    var currentJob = null;
+    var histLoaded = false;
+
+    function setMsg(text, isErr) {
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.className = 'ai-msg' + (isErr ? ' ai-msg--err' : (text ? ' ai-msg--ok' : ''));
+    }
+
+    function formatBytes(n) {
+      if (!n && n !== 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace('.', ',') + ' KB';
+      return (n / (1024 * 1024)).toFixed(2).replace('.', ',') + ' MB';
+    }
+
+    function parseMoney(v) {
+      if (v === null || v === undefined || v === '') return null;
+      var s = String(v).trim().replace(/^R\$\s*/i, '');
+      var n;
+      if (s.indexOf(',') >= 0) n = Number(s.replace(/\./g, '').replace(',', '.'));
+      else n = Number(s);
+      return isFinite(n) ? n : null;
+    }
+
+    function moneyBR(v) {
+      var n = typeof v === 'number' ? v : parseMoney(v);
+      if (n === null) {
+        if (v === null || v === undefined || v === '') return '—';
+        return 'R$ ' + String(v);
+      }
+      return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function plainOrDash(v) {
+      if (v === null || v === undefined || v === '') return '—';
+      return String(v);
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '—';
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function updateSlot(box) {
+      var input = box.querySelector('input[type="file"]');
+      var badge = box.querySelector('[data-badge]');
+      var hint = box.querySelector('[data-hint]');
+      var meta = box.querySelector('[data-meta]');
+      var drop = box.querySelector('[data-dropzone]');
+      var file = input && input.files && input.files[0];
+      var defaultHint = box.getAttribute('data-slot') === 'demonstrativo'
+        ? 'Clique ou arraste o PDF do demonstrativo'
+        : 'Clique ou arraste o PDF do comprovante (CEF/BB)';
+      if (file) {
+        badge.textContent = 'Pronto';
+        badge.className = 'ai-badge ai-badge--ok';
+        hint.textContent = file.name;
+        meta.textContent = formatBytes(file.size);
+        drop.classList.add('ai-dropzone--filled');
+      } else {
+        badge.textContent = 'Pendente';
+        badge.className = 'ai-badge ai-badge--pend';
+        hint.textContent = defaultHint;
+        meta.textContent = '';
+        drop.classList.remove('ai-dropzone--filled');
+      }
+    }
+
+    function bindBox(box) {
+      var input = box.querySelector('input[type="file"]');
+      var drop = box.querySelector('[data-dropzone]');
+      input.addEventListener('change', function () { updateSlot(box); });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.add('ai-dropzone--drag');
+        });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.remove('ai-dropzone--drag');
+        });
+      });
+      drop.addEventListener('drop', function (e) {
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        var f = files[0];
+        if (f && f.type && f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name || '')) {
+          setMsg('Só são aceites ficheiros PDF.', true);
+          return;
+        }
+        try {
+          var dt = new DataTransfer();
+          dt.items.add(f);
+          input.files = dt.files;
+        } catch (err) {
+          setMsg('Não foi possível anexar o ficheiro neste navegador. Use o seletor de ficheiros.', true);
+          return;
+        }
+        updateSlot(box);
+        setMsg('');
+      });
+    }
+
+    document.querySelectorAll('.ai-upload-box').forEach(bindBox);
+
+    function stopPoll() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function isTerminal(status) {
+      return ['concluido', 'concluido_parcial', 'inapto', 'erro'].indexOf(status) >= 0;
+    }
+
+    function renderResultado(body) {
+      var res = body.resultado || {};
+      var pessoa = res.pessoa || {};
+      var ir = res.ir_comprovante || {};
+      var imposto = res.imposto_atualizado || {};
+      finalBox.hidden = false;
+      document.getElementById('ai-pessoa-nome').textContent = plainOrDash(pessoa.nome);
+      document.getElementById('ai-pessoa-cpf').textContent = plainOrDash(pessoa.cpf_cnpj);
+      document.getElementById('ai-pessoa-processo').textContent = plainOrDash(pessoa.processo);
+      document.getElementById('ai-ir-retido').textContent = moneyBR(ir.valor_ir_retido);
+
+      var valor = imposto.imposto_retido_indevidamente_atualizado;
+      var nValor = parseMoney(valor);
+      document.getElementById('ai-valor-final').textContent = nValor !== null ? moneyBR(nValor) : (imposto.motivo || body.message || 'Não calculado');
+      histLoaded = false;
+    }
+
+    function applyStatus(body) {
+      elJobId.textContent = body.job_id || '—';
+      elJobStatus.textContent = body.status || '—';
+      elJobMessage.textContent = body.message || '—';
+      result.hidden = false;
+      if (isTerminal(body.status)) {
+        progress.hidden = true;
+        stopPoll();
+        btnEnviar.disabled = !configured;
+        btnEnviar.textContent = 'Calcular atualização';
+        if (body.resultado) renderResultado(body);
+        if (body.status === 'erro') setMsg(body.message || body.error || 'Erro no cálculo.', true);
+        else if (body.status === 'inapto') setMsg(body.message || 'Caso inapto.', true);
+        else setMsg(body.message || 'Cálculo concluído.', false);
+      } else {
+        progress.hidden = false;
+        finalBox.hidden = true;
+      }
+    }
+
+    function pollJob(jobId) {
+      stopPoll();
+      currentJob = jobId;
+      function tick() {
+        fetch('{{ url_for("api_atualizacao_imposto_status", job_id="__ID__") }}'.replace('__ID__', encodeURIComponent(jobId)), {
+          credentials: 'same-origin',
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (body) {
+            if (!body || !body.ok) {
+              setMsg((body && body.error) || 'Não foi possível obter o estado do job.', true);
+              return;
+            }
+            applyStatus(body);
+          })
+          .catch(function () {
+            setMsg('Erro de rede ao consultar o estado.', true);
+          });
+      }
+      tick();
+      pollTimer = setInterval(tick, 2500);
+    }
+
+    function clearForm() {
+      stopPoll();
+      currentJob = null;
+      form.reset();
+      document.querySelectorAll('.ai-upload-box').forEach(updateSlot);
+      result.hidden = true;
+      progress.hidden = true;
+      finalBox.hidden = true;
+      setMsg('');
+      btnEnviar.disabled = !configured;
+      btnEnviar.textContent = 'Calcular atualização';
+    }
+
+    btnLimpar.addEventListener('click', clearForm);
+
+    document.getElementById('ai-btn-print').addEventListener('click', function () {
+      window.print();
+    });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!configured) {
+        setMsg('Pacote de cálculo não configurado.', true);
+        return;
+      }
+      setMsg('');
+      finalBox.hidden = true;
+      var f1 = form.demonstrativo.files && form.demonstrativo.files[0];
+      var f2 = form.comprovante.files && form.comprovante.files[0];
+      if (!f1 || !f2) {
+        setMsg('Anexe o demonstrativo e o comprovante antes de calcular.', true);
+        return;
+      }
+      var fd = new FormData();
+      fd.append('demonstrativo', f1);
+      fd.append('comprovante', f2);
+      btnEnviar.disabled = true;
+      btnEnviar.textContent = 'A enviar…';
+      fetch('{{ url_for("api_atualizacao_imposto_enviar") }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+      })
+        .then(function (r) {
+          return r.json().then(function (j) {
+            return { http: r.status, body: j };
+          });
+        })
+        .then(function (res) {
+          var body = res.body || {};
+          if (!body.ok) {
+            setMsg(body.error || ('Falha no envio (HTTP ' + res.http + ').'), true);
+            btnEnviar.disabled = false;
+            btnEnviar.textContent = 'Calcular atualização';
+            return;
+          }
+          setMsg('PDFs recebidos. A acompanhar o cálculo…', false);
+          btnEnviar.textContent = 'A calcular…';
+          applyStatus(body);
+          pollJob(body.job_id);
+        })
+        .catch(function () {
+          setMsg('Erro de rede ao enviar os PDFs.', true);
+          btnEnviar.disabled = false;
+          btnEnviar.textContent = 'Calcular atualização';
+        });
+    });
+
+    function switchTab(tab) {
+      var isHist = tab === 'historico';
+      document.getElementById('ai-tab-novo').classList.toggle('active', !isHist);
+      document.getElementById('ai-tab-historico').classList.toggle('active', isHist);
+      document.getElementById('ai-tab-novo').setAttribute('aria-selected', String(!isHist));
+      document.getElementById('ai-tab-historico').setAttribute('aria-selected', String(isHist));
+      document.getElementById('ai-panel-novo').hidden = isHist;
+      document.getElementById('ai-panel-historico').hidden = !isHist;
+      if (isHist) loadHistorico(false);
+    }
+
+    document.getElementById('ai-tab-novo').addEventListener('click', function () { switchTab('novo'); });
+    document.getElementById('ai-tab-historico').addEventListener('click', function () { switchTab('historico'); });
+    document.getElementById('ai-btn-refresh-hist').addEventListener('click', function () { loadHistorico(true); });
+
+    function loadHistorico(force) {
+      if (histLoaded && !force) return;
+      var body = document.getElementById('ai-hist-body');
+      var histMsg = document.getElementById('ai-hist-msg');
+      body.innerHTML = '<tr><td colspan="7">A carregar…</td></tr>';
+      histMsg.textContent = '';
+      histMsg.className = 'ai-msg';
+      fetch('{{ url_for("api_atualizacao_imposto_historico") }}?limit=100', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) {
+            body.innerHTML = '<tr><td colspan="7">Não foi possível carregar o histórico.</td></tr>';
+            return;
+          }
+          var items = data.items || [];
+          histLoaded = true;
+          if (!items.length) {
+            body.innerHTML = '<tr><td colspan="7">Ainda não há casos no histórico.</td></tr>';
+            return;
+          }
+          body.innerHTML = '';
+          items.forEach(function (item) {
+            var tr = document.createElement('tr');
+            var jobId = item.job_id || '';
+            tr.innerHTML =
+              '<td>' + formatDate(item.updated_at || item.created_at) + '</td>' +
+              '<td>' + plainOrDash(item.nome) + '</td>' +
+              '<td>' + plainOrDash(item.cpf_cnpj) + '</td>' +
+              '<td>' + plainOrDash(item.processo) + '</td>' +
+              '<td class="num">' + moneyBR(item.ir_retido_comprovante) + '</td>' +
+              '<td class="num"><strong>' + moneyBR(item.imposto_retido_indevidamente_atualizado) + '</strong></td>' +
+              '<td class="ai-hist-actions"><div class="ai-hist-actions-inner">' +
+                '<button type="button" class="camp-btn camp-btn-ghost camp-btn-xs" data-open-job="' + jobId + '">Abrir</button>' +
+                '<button type="button" class="camp-btn camp-btn-ghost camp-btn-xs" data-del-job="' + jobId + '">Remover</button>' +
+              '</div></td>';
+            body.appendChild(tr);
+          });
+          body.querySelectorAll('[data-open-job]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var id = btn.getAttribute('data-open-job');
+              switchTab('novo');
+              fetch('{{ url_for("api_atualizacao_imposto_status", job_id="__ID__") }}'.replace('__ID__', encodeURIComponent(id)), {
+                credentials: 'same-origin',
+              })
+                .then(function (r) { return r.json(); })
+                .then(function (bodyResp) {
+                  if (!bodyResp || !bodyResp.ok) {
+                    setMsg((bodyResp && bodyResp.error) || 'Job não encontrado.', true);
+                    return;
+                  }
+                  applyStatus(bodyResp);
+                  if (bodyResp.resultado) {
+                    finalBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                });
+            });
+          });
+          body.querySelectorAll('[data-del-job]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var id = btn.getAttribute('data-del-job');
+              if (!id) return;
+              if (!window.confirm('Remover este cálculo do histórico?')) return;
+              btn.disabled = true;
+              fetch('{{ url_for("api_atualizacao_imposto_delete", job_id="__ID__") }}'.replace('__ID__', encodeURIComponent(id)), {
+                method: 'DELETE',
+                credentials: 'same-origin',
+              })
+                .then(function (r) { return r.json().then(function (j) { return { okHttp: r.ok, body: j }; }); })
+                .then(function (out) {
+                  if (!out.okHttp || !out.body || !out.body.ok) {
+                    histMsg.textContent = (out.body && out.body.error) || 'Não foi possível remover.';
+                    histMsg.className = 'ai-msg ai-msg--err';
+                    btn.disabled = false;
+                    return;
+                  }
+                  histMsg.textContent = 'Cálculo removido do histórico.';
+                  histMsg.className = 'ai-msg ai-msg--ok';
+                  histLoaded = false;
+                  loadHistorico(true);
+                })
+                .catch(function () {
+                  histMsg.textContent = 'Erro de rede ao remover.';
+                  histMsg.className = 'ai-msg ai-msg--err';
+                  btn.disabled = false;
+                });
+            });
+          });
+        })
+        .catch(function () {
+          body.innerHTML = '<tr><td colspan="7">Erro de rede ao carregar o histórico.</td></tr>';
+        });
+    }
+  })();
+  </script>
+</body>
+</html>
