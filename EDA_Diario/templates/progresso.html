@@ -21,8 +21,8 @@
       </div>
 
       <div>
-        <p class="eda-prog-title" x-text="rodando ? 'Executando Etapa ' + etapa + '…' : (erro ? 'Erro na execução' : 'Concluído com sucesso!')"></p>
-        <p class="eda-prog-sub" x-text="rodando ? 'Não feche esta janela.' : (erro ? 'Veja o log abaixo.' : 'Resultado disponível para download.')"></p>
+        <p class="eda-prog-title" x-text="titulo()"></p>
+        <p class="eda-prog-sub" x-text="subtitulo()"></p>
       </div>
     </div>
 
@@ -41,10 +41,23 @@
   </div>
 
   <div x-show="!rodando" x-cloak class="eda-toolbar" style="margin-top:4px;">
-    <a href="{{ url_for('index') }}" class="eda-btn eda-btn-secondary">Voltar ao Painel</a>
-    <a x-show="!erro" href="{{ url_for('download', arquivo='final') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
+    <a x-show="etapa == 'cpf'" href="{{ url_for('enriquecer_cpf') }}" class="eda-btn eda-btn-secondary">Voltar ao enriquecimento</a>
+    <a x-show="etapa != 'cpf'" href="{{ url_for('index') }}" class="eda-btn eda-btn-secondary">Voltar ao Painel</a>
+    <a x-show="!erro && (etapa == 0 || etapa === '0' || etapa == 1)" href="{{ url_for('download', arquivo='intermediaria') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+      Baixar intermediária
+    </a>
+    <a x-show="!erro && (etapa == 0 || etapa === '0' || etapa == 1)" href="{{ url_for('download', arquivo='nao_encontrados') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+      CPFs não encontrados
+    </a>
+    <a x-show="!erro && etapa == 2" href="{{ url_for('download', arquivo='final') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
       Baixar FINAL
+    </a>
+    <a x-show="!erro && etapa == 'cpf'" href="{{ url_for('enriquecer_cpf_ultimo') }}" class="eda-link-download" style="flex-direction:row;align-items:center;gap:8px;">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+      Baixar Excel enriquecido
     </a>
   </div>
 
@@ -61,6 +74,26 @@ function progresso() {
 
     iniciar() {
       this.buscar();
+    },
+
+    titulo() {
+      if (this.rodando) {
+        if (this.etapa === 'cpf') return 'Enriquecendo CPFs…';
+        if (this.etapa === 0 || this.etapa === '0') return 'Executando Etapa 0 (base)…';
+        return 'Executando Etapa ' + this.etapa + '…';
+      }
+      return this.erro ? 'Erro na execução' : 'Concluído com sucesso!';
+    },
+
+    subtitulo() {
+      if (this.rodando) return 'Não feche esta janela.';
+      if (this.erro) return 'Veja o log abaixo.';
+      if (this.etapa == 0 || this.etapa === '0') {
+        return 'Etapa 0 concluída. Baixe os CPFs não encontrados, consulte a Lemitti e rode a Etapa 1.';
+      }
+      if (this.etapa == 1) return 'Etapa 1 concluída. Volte ao painel, envie a Assertiva e rode a Etapa 2.';
+      if (this.etapa === 'cpf') return 'O Excel está pronto para download.';
+      return 'Resultado disponível para download.';
     },
 
     async buscar() {

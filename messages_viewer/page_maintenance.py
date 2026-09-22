@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from messages_viewer.plataforma_auth import TAB_PANELS, init_db
+from messages_viewer.plataforma_auth import TAB_PANELS, ensure_auth_ready
 from messages_viewer.plataforma_auth_store import auth_connection, auth_cursor
 
 MAINTAINABLE_TAB_IDS = {p[0] for p in TAB_PANELS}
@@ -26,7 +26,7 @@ _DEFAULT_MESSAGE = (
 
 
 def _ensure_table() -> None:
-    init_db()
+    ensure_auth_ready()
 
 
 def _env_enabled_tabs() -> set[str]:

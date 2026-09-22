@@ -1,0 +1,3818 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solicitação de Inclusão — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+  <style>
+    .si-solicitante {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      gap: 0.75rem 1.25rem;
+      margin-bottom: 1rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-muted, #f8fafc);
+    }
+    .si-solicitante dt {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .si-solicitante dd { margin: 0.2rem 0 0; font-weight: 600; }
+    .si-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .si-badge--open { background: #eef2ff; color: #3730a3; }
+    .si-badge--ok { background: var(--accent-soft, #d1fae5); color: #065f46; }
+    .si-badge--warn { background: #fef3c7; color: #92400e; }
+    .si-badge--err { background: #fee2e2; color: #991b1b; }
+    .si-badge--apto { background: #dbeafe; color: #1e40af; }
+    .si-badge--muted { background: var(--bg-chat, #f1f5f9); color: var(--muted); }
+    .si-tipo {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.12rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .si-tipo--inc { background: #e2e8f0; color: #334155; }
+    .si-tipo--cump { background: #ccfbf1; color: #0f766e; }
+    .si-caso-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.5rem;
+    }
+    .si-filters { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.35rem 0 0.75rem; }
+    #si-tipo-filters { margin-bottom: 0.15rem; }
+    .si-filter {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.28rem 0.75rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    .si-filter.is-on { background: #ecfeff; border-color: #67e8f9; font-weight: 650; }
+    #si-modal .audit-modal-panel {
+      width: min(1080px, calc(100vw - 1.5rem));
+    }
+    .si-detail {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+    .si-detail-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.55rem;
+    }
+    .si-detail-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(16.5rem, 1fr);
+      gap: 0.9rem;
+      align-items: stretch;
+    }
+    .si-detail-grid.si-detail-grid--solo {
+      grid-template-columns: 1fr;
+    }
+    .si-detail-card {
+      padding: 0.85rem 0.95rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      min-width: 0;
+    }
+    .si-detail-card h3,
+    .si-detail-block h3 {
+      margin: 0 0 0.65rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .si-detail-kv {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.7rem 1rem;
+    }
+    .si-detail-kv dt {
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .si-detail-kv dd { margin: 0.18rem 0 0; word-break: break-word; font-weight: 600; font-size: 0.9rem; }
+    .si-detail-block { margin: 0; }
+    .si-detail-note {
+      margin: 0;
+      padding: 0.7rem 0.85rem;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--border);
+      font-size: 0.88rem;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    @media (max-width: 760px) {
+      .si-detail-grid,
+      .si-detail-kv { grid-template-columns: 1fr; }
+      .si-mov-card-value { text-align: left; }
+    }
+    .si-detail-note--err {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #7f1d1d;
+    }
+    .si-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      justify-content: flex-end;
+    }
+    .si-detail-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .si-cases { display: flex; flex-direction: column; gap: 0.7rem; }
+    .si-case {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      background: #f8fafc;
+    }
+    .si-case-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem 0.7rem;
+    }
+    .si-case-proc { font-size: 0.92rem; font-weight: 650; word-break: break-word; }
+    .si-case-kv {
+      display: grid;
+      grid-template-columns: 7.2rem 1fr;
+      gap: 0.28rem 0.7rem;
+      margin: 0.55rem 0 0;
+    }
+    .si-case-kv dt {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      padding-top: 0.12rem;
+    }
+    .si-case-kv dd { margin: 0; word-break: break-word; font-weight: 550; font-size: 0.88rem; }
+    .si-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0 0 0.75rem;
+      padding-bottom: 0.45rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .si-tab {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.32rem 0.85rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .si-tab.is-on {
+      background: #ecfeff;
+      border-color: #67e8f9;
+      color: inherit;
+      font-weight: 700;
+    }
+    .si-tab-count { font-weight: 650; }
+    .si-user-filters-wrap {
+      margin: 0.15rem 0 0.65rem;
+    }
+    .si-user-filters-label {
+      margin: 0 0 0.35rem;
+      font-size: 0.78rem;
+      font-weight: 650;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .si-list-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      margin: 0.35rem 0 0.65rem;
+    }
+    .si-list-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.32rem 0.7rem 0.32rem 0.85rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 600;
+      max-width: 100%;
+    }
+    .si-list-tab.is-on {
+      background: #ecfeff;
+      border-color: #67e8f9;
+      color: inherit;
+      font-weight: 700;
+    }
+    .si-list-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 14rem;
+    }
+    .si-list-tab-close {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0 0.1rem;
+      font-weight: 700;
+    }
+    .si-list-tab-close:hover { color: inherit; }
+    .si-case--inapto {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+    .si-case--inapto .si-case-motivo {
+      color: #7f1d1d;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .si-empty-tab {
+      margin: 0;
+      padding: 0.85rem 0.2rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .si-caso-resumo {
+      display: block;
+      margin-top: 0.22rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .si-fila {
+      display: flex;
+      flex-direction: column;
+      gap: 0.12rem;
+      margin-top: 0.32rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-weight: 500;
+      line-height: 1.35;
+      white-space: normal;
+    }
+    .si-fila-eta { font-weight: 650; color: #3730a3; }
+    .si-detail-fila {
+      margin-top: 1rem;
+      padding: 0.75rem 0.9rem;
+      border-radius: 8px;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+    }
+    .si-avaliacao {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .si-avaliacao h3 { margin: 0 0 0.45rem; font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.02em; }
+    .si-avaliacao p { margin: 0.35rem 0 0; font-size: 0.88rem; line-height: 1.4; }
+    .si-avaliacao-kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.28rem 0.9rem;
+      margin: 0;
+      font-size: 0.86rem;
+    }
+    .si-avaliacao-kv dt { color: var(--muted); font-weight: 600; }
+    .si-avaliacao-kv dd { margin: 0; font-weight: 650; text-align: right; }
+    .si-mov-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.35rem 0.75rem;
+      margin-bottom: 0.65rem;
+    }
+    .si-mov-head h3 { margin: 0; }
+    .si-mov-meta { margin: 0; font-size: 0.72rem; color: var(--muted); font-weight: 550; }
+    .si-mov-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .si-mov-card {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem 0.85rem;
+      padding: 0.65rem 0.8rem;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--border);
+      min-width: 0;
+    }
+    .si-mov-card.is-ok {
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+    }
+    .si-mov-card-label {
+      display: block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+    }
+    .si-mov-card-value {
+      margin: 0;
+      font-size: 0.86rem;
+      font-weight: 650;
+      line-height: 1.35;
+      word-break: break-word;
+      text-align: right;
+    }
+    .si-mov-dot {
+      display: inline-block;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      margin-right: 0.35rem;
+      vertical-align: 0.05rem;
+    }
+    .si-mov-dot--ok { background: #059669; }
+    .si-mov-dot--no { background: #cbd5e1; }
+    .si-mov-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.28rem;
+      margin-top: 0.32rem;
+    }
+    .si-mov-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .si-mov-pill--ok { background: #d1fae5; color: #065f46; }
+    .si-mov-pill--no { background: #f1f5f9; color: #64748b; }
+    .si-mov-pill--doc {
+      background: #475569;
+      color: #f8fafc;
+      border: 1px solid #334155;
+    }
+    .si-mov-pill--gemini {
+      background: #ede9fe;
+      color: #5b21b6;
+      border: 1px solid #c4b5fd;
+    }
+    .si-autos {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+    .si-autos-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.45rem 0.75rem;
+    }
+    .si-autos-head h3 { margin: 0; }
+    .si-autos-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.45rem 0.7rem;
+      padding: 0.6rem 0.7rem;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--border);
+    }
+    .si-autos-row.is-off { opacity: 0.65; }
+    .si-autos-copy { min-width: 0; flex: 1 1 12rem; }
+    .si-autos-title { display: block; font-weight: 650; font-size: 0.88rem; line-height: 1.35; word-break: break-word; }
+    .si-autos-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-left: auto; }
+    .si-autos-meta { margin: 0; font-size: 0.75rem; color: var(--muted); font-weight: 550; }
+    .si-autos-warn {
+      margin: 0;
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+    .si-autos-empty { margin: 0; font-size: 0.86rem; color: var(--muted); }
+    .si-credor-banner {
+      margin: 0 0 0.15rem;
+      padding: 0.7rem 0.85rem;
+      border-radius: 8px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .si-credor-banner strong { font-weight: 700; }
+    .si-gemini {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+    .si-gemini-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.65rem;
+    }
+    .si-gemini-head h3 { margin: 0; margin-right: auto; }
+    .si-gemini-status {
+      margin: 0;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #065f46;
+    }
+    .si-gemini-status.is-problem {
+      color: #9a3412;
+      font-weight: 650;
+    }
+    .si-gemini-status.is-pending {
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .si-gemini-details[hidden] { display: none !important; }
+    .si-gemini-details {
+      margin-top: 0.55rem;
+      padding-top: 0.55rem;
+      border-top: 1px solid var(--border);
+    }
+    .si-gemini-note {
+      margin: 0;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      color: var(--text, #0f172a);
+    }
+    .si-gemini-note--muted { color: var(--muted); }
+    .si-gemini-note--warn {
+      padding: 0.65rem 0.8rem;
+      border-radius: 8px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+    }
+    .si-gemini-kv {
+      display: grid;
+      grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+      gap: 0.35rem 0.85rem;
+      margin: 0;
+      font-size: 0.86rem;
+    }
+    .si-gemini-kv dt {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .si-gemini-kv dd {
+      margin: 0;
+      font-weight: 650;
+      word-break: break-word;
+    }
+    @media (max-width: 560px) {
+      .si-gemini-kv { grid-template-columns: 1fr; }
+    }
+    #si-pdf-modal { z-index: 2200; }
+    #si-pdf-modal .audit-modal-panel {
+      width: min(1100px, calc(100vw - 1.25rem));
+      height: min(92vh, 920px);
+      max-height: min(92vh, 920px);
+    }
+    #si-pdf-frame {
+      width: 100%;
+      height: min(72vh, 760px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f1f5f9;
+    }
+    #si-pdf-err { margin: 0.5rem 0 0; }
+    #si-pdf-modal .audit-modal-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .si-txt-find {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.5rem;
+      margin: 0 0 0.55rem;
+    }
+    .si-txt-find[hidden] { display: none !important; }
+    .si-txt-find-sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
+    #si-txt-q {
+      flex: 1 1 14rem;
+      min-width: 10rem;
+      height: 2.1rem;
+      padding: 0 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 0.88rem;
+    }
+    #si-txt-q:focus {
+      outline: 2px solid #99f6e4;
+      border-color: #0f766e;
+    }
+    .si-txt-find-count {
+      font-size: 0.78rem;
+      font-weight: 650;
+      color: var(--muted);
+      min-width: 6.5rem;
+    }
+    .si-txt-pre {
+      flex: 1 1 auto;
+      margin: 0;
+      min-height: 12rem;
+      height: min(64vh, 680px);
+      overflow: auto;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.86rem;
+      line-height: 1.5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .si-txt-pre[hidden] { display: none !important; }
+    .si-txt-pre mark {
+      background: #fde68a;
+      color: inherit;
+      padding: 0 0.05em;
+      border-radius: 2px;
+    }
+    .si-txt-pre mark.is-on {
+      background: #f59e0b;
+      color: #111;
+      box-shadow: 0 0 0 1px #b45309;
+    }
+    .si-detail-fila p { margin: 0.15rem 0 0; font-size: 0.88rem; line-height: 1.4; }
+    #si-form .prop-form-grid {
+      align-items: end;
+      grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
+    }
+    #si-form .prop-form-grid[hidden] {
+      display: none !important;
+    }
+    #si-form.is-cumprimento .si-only-incidente,
+    #si-form:not(.is-cumprimento) .si-only-cumprimento {
+      display: none !important;
+    }
+    #si-modo-copy,
+    #si-case-hint,
+    #si-campos {
+      transition: opacity 0.2s ease;
+    }
+    #si-modo-copy.is-fade-out,
+    #si-case-hint.is-fade-out,
+    #si-campos.is-fade-out {
+      opacity: 0;
+    }
+    #si-submit:disabled,
+    #si-submit:disabled:hover,
+    #si-submit:disabled:focus,
+    #si-submit:disabled:active {
+      background: #94a3b8;
+      border-color: #94a3b8;
+      color: #f8fafc;
+      opacity: 0.9;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+    #si-form-msg {
+      min-height: 1.35rem;
+      opacity: 1;
+      transition: opacity 0.45s ease;
+    }
+    #si-form-msg.is-fade { opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      #si-modo-copy,
+      #si-case-hint,
+      #si-campos,
+      #si-form-msg {
+        transition: none;
+      }
+    }
+    #si-form .prop-field {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    #si-form .prop-field label {
+      min-height: 1.35rem;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #si-form .prop-field .auth-input {
+      height: 2.5rem;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    #si-form .si-req {
+      color: #8f1d2f;
+      font-weight: 700;
+    }
+    .si-switch-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      margin: 0 0 1rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface-muted, #f8fafc);
+    }
+    .si-switch {
+      position: relative;
+      flex-shrink: 0;
+      margin-top: 0.12rem;
+    }
+    .si-switch input {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .si-switch-ui {
+      display: block;
+      width: 2.65rem;
+      height: 1.5rem;
+      background: #cbd5e1;
+      border-radius: 999px;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s ease;
+    }
+    .si-switch-ui::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 1.2rem;
+      height: 1.2rem;
+      background: #fff;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+      transition: transform 0.15s ease;
+    }
+    .si-switch input:checked + .si-switch-ui { background: #0f766e; }
+    .si-switch input:checked + .si-switch-ui::after { transform: translateX(1.15rem); }
+    .si-switch input:focus-visible + .si-switch-ui {
+      outline: 2px solid #67e8f9;
+      outline-offset: 2px;
+    }
+    .si-switch input:disabled + .si-switch-ui { opacity: 0.55; cursor: not-allowed; }
+    .si-switch-copy { min-width: 0; }
+    .si-switch-title {
+      display: block;
+      font-weight: 650;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .si-switch-hint {
+      margin: 0.22rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    #si-alert-modal { z-index: 2100; }
+    #si-alert-modal .audit-modal-panel {
+      width: min(28rem, 100%);
+      max-height: none;
+    }
+    .si-alert-copy { margin: 0; font-size: 0.95rem; line-height: 1.5; }
+    .si-alert-time {
+      margin: 0.9rem 0 0;
+      font-size: 1.45rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #0f766e;
+      letter-spacing: 0.02em;
+    }
+    .si-alert-hint {
+      margin: 0.45rem 0 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    #si-confirm-modal,
+    #si-purge-modal { z-index: 2100; }
+    #si-confirm-modal .audit-modal-panel,
+    #si-purge-modal .audit-modal-panel {
+      width: min(30rem, 100%);
+      max-height: none;
+    }
+    #si-modal .audit-modal-backdrop,
+    #si-alert-modal .audit-modal-backdrop,
+    #si-confirm-modal .audit-modal-backdrop,
+    #si-purge-modal .audit-modal-backdrop,
+    #si-pdf-modal .audit-modal-backdrop {
+      opacity: 0;
+      transition: opacity 0.22s ease;
+    }
+    #si-modal.is-open .audit-modal-backdrop,
+    #si-alert-modal.is-open .audit-modal-backdrop,
+    #si-confirm-modal.is-open .audit-modal-backdrop,
+    #si-purge-modal.is-open .audit-modal-backdrop,
+    #si-pdf-modal.is-open .audit-modal-backdrop {
+      opacity: 1;
+    }
+    #si-modal .audit-modal-panel,
+    #si-alert-modal .audit-modal-panel,
+    #si-confirm-modal .audit-modal-panel,
+    #si-purge-modal .audit-modal-panel,
+    #si-pdf-modal .audit-modal-panel {
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+    #si-modal.is-open .audit-modal-panel,
+    #si-alert-modal.is-open .audit-modal-panel,
+    #si-confirm-modal.is-open .audit-modal-panel,
+    #si-purge-modal.is-open .audit-modal-panel,
+    #si-pdf-modal.is-open .audit-modal-panel {
+      opacity: 1;
+      transform: none;
+    }
+    #si-modal:not(.is-open),
+    #si-alert-modal:not(.is-open),
+    #si-confirm-modal:not(.is-open),
+    #si-purge-modal:not(.is-open),
+    #si-pdf-modal:not(.is-open) {
+      pointer-events: none;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #si-modal .audit-modal-backdrop,
+      #si-alert-modal .audit-modal-backdrop,
+      #si-confirm-modal .audit-modal-backdrop,
+      #si-purge-modal .audit-modal-backdrop,
+      #si-pdf-modal .audit-modal-backdrop,
+      #si-modal .audit-modal-panel,
+      #si-alert-modal .audit-modal-panel,
+      #si-confirm-modal .audit-modal-panel,
+      #si-purge-modal .audit-modal-panel,
+      #si-pdf-modal .audit-modal-panel {
+        transition: none;
+      }
+    }
+    .si-confirm-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .si-confirm-meta {
+      margin: 0.75rem 0 0;
+      padding: 0.7rem 0.85rem;
+      border-radius: 8px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+    .si-confirm-meta strong { font-weight: 650; }
+    .si-top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .si-purge-btn {
+      border: 1px solid #b91c1c;
+      background: #dc2626;
+      color: #fff;
+      font-weight: 700;
+      border-radius: 8px;
+      padding: 0.48rem 0.95rem;
+      cursor: pointer;
+      font-size: 0.88rem;
+      box-shadow: 0 1px 2px rgba(185, 28, 28, 0.25);
+    }
+    .si-purge-btn:hover:not(:disabled) { background: #b91c1c; }
+    .si-purge-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .si-confirm-meta--danger {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #7f1d1d;
+    }
+  </style>
+</head>
+  <body class="dashboard-body" data-poll-ms="{{ poll_interval_ms|int }}" data-create-cooldown-ms="{{ create_cooldown_ms|default(60000)|int }}">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Solicitação de Inclusão</h1>
+        <p class="dash-sub">Envie o caso para processamento TJSP/Monday e acompanhe o estado até o resultado.</p>
+      </div>
+      <div class="si-top-actions">
+        {% if is_plataforma_admin and monday_requests_configured %}
+        <button type="button" class="si-purge-btn" id="si-purge">Limpar fila</button>
+        {% endif %}
+        <button type="button" class="refresh-btn" id="si-refresh" title="Atualizar lista">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+          </svg>
+          Atualizar
+        </button>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      {% if not monday_requests_configured %}
+      <div class="prop-card prop-msg prop-msg--err" role="alert">
+        API de solicitações não configurada. Defina <code>MONDAY_REQUESTS_API_URL</code> no <code>.env</code> (a chave <code>API_KEY_MONDAY_REQUESTS</code> já é lida no servidor) e reinicie a aplicação.
+      </div>
+      {% endif %}
+
+      {% if not solicitante %}
+      <div class="prop-card prop-msg prop-msg--err" role="alert">
+        Perfil incompleto: um administrador precisa preencher <strong>nome, sobrenome e e-mail</strong> em Utilizadores. O solicitante não pode ser digitado neste formulário.
+      </div>
+      {% endif %}
+
+      <form class="prop-card prop-form" id="si-form" novalidate>
+        <p class="prop-hint">Solicitante</p>
+        {% if solicitante %}
+        <dl class="si-solicitante">
+          <div>
+            <dt>Nome</dt>
+            <dd>{{ solicitante.nome_solicitante|e }}</dd>
+          </div>
+          <div>
+            <dt>E-mail</dt>
+            <dd>{{ solicitante.email_solicitante|e }}</dd>
+          </div>
+        </dl>
+        {% else %}
+        <p class="camp-hint">Sem nome/e-mail na sessão.</p>
+        {% endif %}
+
+        <div class="si-switch-row">
+          <label class="si-switch">
+            <input type="checkbox" id="si-modo-cumprimento" role="switch" aria-checked="false"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+            <span class="si-switch-ui" aria-hidden="true"></span>
+          </label>
+          <div class="si-switch-copy" id="si-modo-copy">
+            <label class="si-switch-title" for="si-modo-cumprimento" id="si-modo-title">Incidente</label>
+            <p class="si-switch-hint" id="si-modo-hint">Formulário de incidente: processo, incidente e nome ou CPF do credor.</p>
+          </div>
+        </div>
+        <p class="prop-hint" id="si-case-hint">Identificação do caso — processo, incidente e nome ou CPF do credor são obrigatórios</p>
+        <div class="prop-form-grid" id="si-campos">
+          <div class="prop-field si-only-incidente">
+            <label for="si-processo">Processo (CNJ) <span class="si-req" title="Obrigatório">*</span></label>
+            <input type="text" id="si-processo" class="auth-input" name="processo" inputmode="numeric" maxlength="25" placeholder="0000000-00.0000.0.00.0000" autocomplete="off"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+          </div>
+          <div class="prop-field si-only-incidente">
+            <label for="si-incidente">Incidente <span class="si-req" title="Obrigatório">*</span></label>
+            <input type="text" id="si-incidente" class="auth-input" name="incidente" inputmode="numeric" maxlength="10" placeholder="Somente números" autocomplete="off"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+          </div>
+          <div class="prop-field si-only-cumprimento">
+            <label for="si-n-cumprimento">Nº de processo de cumprimento <span class="si-req" title="Obrigatório">*</span></label>
+            <input type="text" id="si-n-cumprimento" class="auth-input" name="numero_cumprimento" inputmode="numeric" maxlength="25" placeholder="0000000-00.0000.0.00.0000" autocomplete="off"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+          </div>
+          <div class="prop-field">
+            <label for="si-cpf">CPF do credor</label>
+            <input type="text" id="si-cpf" class="auth-input" name="cpf_credor" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+          </div>
+          <div class="prop-field">
+            <label for="si-requerente">Requerente</label>
+            <input type="text" id="si-requerente" class="auth-input" name="requerente" placeholder="JOSE DA SILVA" autocomplete="off"{% if not monday_requests_configured or not solicitante %} disabled{% endif %} />
+          </div>
+        </div>
+        <div class="prop-actions" style="margin-top:0.85rem">
+          <button type="submit" class="camp-btn camp-btn-primary" id="si-submit"{% if not monday_requests_configured or not solicitante %} disabled{% endif %}>Enviar solicitação</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="si-limpar"{% if not monday_requests_configured or not solicitante %} disabled{% endif %}>Limpar caso</button>
+        </div>
+        <p class="prop-msg" id="si-form-msg" role="status" aria-live="polite"></p>
+      </form>
+
+      <div class="camp-form-card" style="margin-top:1.25rem">
+        <div class="camp-section-header" style="margin-bottom:0.5rem">
+          <h2 class="dash-section-title" style="margin:0">Solicitações</h2>
+        </div>
+        <div class="si-filters" id="si-tipo-filters" role="tablist" aria-label="Filtro de tipo">
+          <button type="button" class="si-filter" data-tipo="">Todos os tipos</button>
+          <button type="button" class="si-filter" data-tipo="incidente">Incidente</button>
+          <button type="button" class="si-filter" data-tipo="cumprimento">Cumprimento</button>
+        </div>
+        <div class="si-filters" id="si-filters" role="tablist" aria-label="Filtro de estado"></div>
+        <div class="si-user-filters-wrap" id="si-user-filters-wrap" hidden>
+          <p class="si-user-filters-label">Solicitantes</p>
+          <div class="si-filters" id="si-user-filters" role="list" aria-label="Solicitantes"></div>
+        </div>
+        <div class="prop-form-grid">
+          <div class="prop-field">
+            <label for="si-filtro-q">Pesquisar</label>
+            <input type="search" id="si-filtro-q" class="auth-input" placeholder="Processo, incidente, credor, CPF…" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+
+      <div class="si-list-tabs" id="si-list-tabs" hidden></div>
+      <p id="si-summary" class="camp-hint" style="margin:0.75rem 0"></p>
+      <div id="si-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> Carregando...</div>
+      <div style="overflow-x:auto">
+        <table class="camp-table" id="si-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Caso</th>
+              <th>Estado</th>
+              <th>Comprador(es)</th>
+              <th>Criado</th>
+              <th>Atualizado</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="si-tbody"></tbody>
+        </table>
+      </div>
+      <p id="si-empty" class="camp-empty" style="display:none">Nenhuma solicitação encontrada.</p>
+      <div class="audit-pager" id="si-pager" style="display:none">
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="si-prev">Anterior</button>
+        <span id="si-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="si-next">Seguinte</button>
+      </div>
+      <div id="si-err" class="camp-msg camp-msg-err" style="display:none"></div>
+    </main>
+  </div>
+
+  <div id="si-modal" class="audit-modal" hidden aria-modal="true" role="dialog" aria-labelledby="si-modal-title">
+    <div class="audit-modal-backdrop" id="si-modal-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="si-modal-title">Detalhe</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-modal-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <div id="si-modal-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="si-pdf-modal" class="audit-modal" hidden aria-modal="true" role="dialog" aria-labelledby="si-pdf-title">
+    <div class="audit-modal-backdrop" id="si-pdf-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="si-pdf-title">Auto</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-pdf-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <div id="si-pdf-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> Carregando documento...</div>
+        <div class="si-txt-find" id="si-txt-find" hidden>
+          <label class="si-txt-find-sr" for="si-txt-q">Buscar no texto</label>
+          <input type="search" id="si-txt-q" placeholder="Buscar no texto (Ctrl+F)" autocomplete="off" spellcheck="false">
+          <span class="si-txt-find-count" id="si-txt-find-count"></span>
+          <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-txt-find-prev">Anterior</button>
+          <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="si-txt-find-next">Próxima</button>
+        </div>
+        <pre id="si-txt-pre" class="si-txt-pre" hidden></pre>
+        <iframe id="si-pdf-frame" title="Visualização do documento" hidden></iframe>
+        <p id="si-pdf-err" class="camp-msg camp-msg-err" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="si-alert-modal" class="audit-modal" hidden aria-modal="true" role="alertdialog" aria-labelledby="si-alert-title" aria-describedby="si-alert-copy">
+    <div class="audit-modal-backdrop" id="si-alert-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="si-alert-title">Aguarde para enviar de novo</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-alert-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <p class="si-alert-copy" id="si-alert-copy">Para evitar envios duplicados, só é possível criar outra solicitação após o intervalo de segurança.</p>
+        <p class="si-alert-time" id="si-alert-countdown">0:00</p>
+        <p class="si-alert-hint">O botão de envio volta a ficar disponível quando o tempo acabar.</p>
+        <div class="si-detail-actions">
+          <button type="button" class="camp-btn camp-btn-primary" id="si-alert-ok">Entendi</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="si-confirm-modal" class="audit-modal" hidden aria-modal="true" role="alertdialog" aria-labelledby="si-confirm-title" aria-describedby="si-confirm-copy">
+    <div class="audit-modal-backdrop" id="si-confirm-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="si-confirm-title">Solicitação já em andamento</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-confirm-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <p class="si-alert-copy" id="si-confirm-copy">Já existe uma solicitação igual na fila, em processamento, em tratamento ou inapta há menos de 24h. Tem certeza de que deseja enviar outra requisição igual?</p>
+        <div class="si-confirm-meta" id="si-confirm-meta"></div>
+        <div class="si-confirm-actions">
+          <button type="button" class="camp-btn camp-btn-ghost" id="si-confirm-cancel">Cancelar</button>
+          <button type="button" class="camp-btn camp-btn-primary" id="si-confirm-send">Enviar mesmo assim</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if is_plataforma_admin %}
+  <div id="si-purge-modal" class="audit-modal" hidden aria-modal="true" role="alertdialog" aria-labelledby="si-purge-title" aria-describedby="si-purge-copy">
+    <div class="audit-modal-backdrop" id="si-purge-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="si-purge-title">Limpar fila de solicitações</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="si-purge-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body">
+        <p class="si-alert-copy" id="si-purge-copy">Esta ação interrompe o processamento, apaga todas as solicitações da fila e reinicia o serviço. Não dá para desfazer.</p>
+        <div class="si-confirm-meta si-confirm-meta--danger">Todas as solicitações em andamento serão removidas da fila.</div>
+        <div class="si-confirm-actions">
+          <button type="button" class="camp-btn camp-btn-ghost" id="si-purge-cancel">Cancelar</button>
+          <button type="button" class="camp-btn camp-btn-danger" id="si-purge-confirm">Limpar fila</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+<script type="application/json" id="si-status-catalog">{{ status_catalog|default([])|tojson }}</script>
+<script type="application/json" id="si-pt-display">{{ pt_display|default({})|tojson }}</script>
+<script>
+(function(){
+  const PAGE = 50;
+  const POLL_MS = Math.max(2000, parseInt(document.body.getAttribute('data-poll-ms') || '15000', 10) || 15000);
+  const COOLDOWN_MS = Math.max(5000, parseInt(document.body.getAttribute('data-create-cooldown-ms') || '60000', 10) || 60000);
+  const CAN_VIEW_AUTOS = {{ 'true' if can_view_autos else 'false' }};
+  const CAN_VIEW_GEMINI_DETAILS = {{ 'true' if can_view_gemini_details else 'false' }};
+  const CAN_VIEW_OTHER_SOLICITACOES = {{ 'true' if can_view_other_solicitacoes else 'false' }};
+  const SELF_EMAIL = {{ ((solicitante.email_solicitante if solicitante else '') or '')|tojson }};
+  const COOLDOWN_KEY = 'si-create-cooldown-until';
+  const OPEN = {
+    RECEBIDO: 1,
+    PROCESSANDO: 1,
+    ANALISE_IA: 1,
+    INCIDENTES_EM_PROCESSAMENTO: 1,
+    AGUARDANDO_IMPUGNACAO: 1,
+    AGUARDANDO_ANALISE_CALCULO: 1
+  };
+  const FILA = {
+    RECEBIDO: 1,
+    PROCESSANDO: 1,
+    ANALISE_IA: 1,
+    INCIDENTES_EM_PROCESSAMENTO: 1
+  };
+  let offset = 0;
+  let lastTotal = 0;
+  let statusFilter = '';
+  let tipoFilter = '';
+  let archivedView = false;
+  let pollTimer = null;
+  let detailPollTimer = null;
+  let detailOpenId = null;
+  let detailOpenEmail = '';
+  let detailTab = 'aptos';
+  let detailLoading = false;
+  let activeListEmail = '';
+  let openUserTabs = [];
+  let solicitantesCache = [];
+  let loading = false;
+  let hasRows = false;
+  let STATUS_LABEL = {};
+  let statusOptions = [];
+  var PT_DISPLAY = { status_labels: {}, phrases: {}, words: {} };
+  try {
+    var ptEl = document.getElementById('si-pt-display');
+    if (ptEl && ptEl.textContent) {
+      PT_DISPLAY = JSON.parse(ptEl.textContent) || PT_DISPLAY;
+    }
+  } catch (e) {}
+  PT_DISPLAY.status_labels = PT_DISPLAY.status_labels || {};
+  PT_DISPLAY.phrases = PT_DISPLAY.phrases || {};
+  PT_DISPLAY.words = PT_DISPLAY.words || {};
+  var casoHints = {};
+  try {
+    casoHints = JSON.parse(localStorage.getItem('si-caso-hints') || '{}') || {};
+  } catch (e) {
+    casoHints = {};
+  }
+
+  function readApiJson(res) {
+    return res.text().then(function (text) {
+      var raw = String(text || '').trim();
+      if (!raw) {
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error('Serviço indisponível no momento. Tente de novo em instantes.');
+        }
+        throw new Error('Falha ao carregar os dados.');
+      }
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        if (res.status === 401) throw new Error('Sessão expirada. Atualize a página e entre de novo.');
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error('Serviço indisponível no momento. Tente de novo em instantes.');
+        }
+        throw new Error('Falha ao carregar os dados.');
+      }
+    });
+  }
+  let submitting = false;
+  let pendingCreateBody = null;
+  let cooldownTimer = null;
+  const submitBtn = document.getElementById('si-submit');
+  const submitEnabled = submitBtn ? !submitBtn.disabled : false;
+  const submitLabel = submitBtn ? (submitBtn.textContent || 'Enviar solicitação') : 'Enviar solicitação';
+
+  function fmtCooldown(sec) {
+    sec = Math.max(0, Math.ceil(Number(sec) || 0));
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function cooldownRemainingMs() {
+    try {
+      var until = parseInt(localStorage.getItem(COOLDOWN_KEY) || '0', 10) || 0;
+      return Math.max(0, until - Date.now());
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function setCooldownFromSeconds(sec) {
+    var ms = Math.max(0, Math.ceil(Number(sec) || 0) * 1000);
+    if (!ms) ms = COOLDOWN_MS;
+    try { localStorage.setItem(COOLDOWN_KEY, String(Date.now() + ms)); } catch (e) {}
+    syncCooldownUi();
+  }
+
+  function closeCooldownAlert() {
+    closeSiModal(document.getElementById('si-alert-modal'));
+  }
+
+  function showCooldownAlert() {
+    var modal = document.getElementById('si-alert-modal');
+    if (!modal) return;
+    openSiModal(modal);
+    syncCooldownUi();
+  }
+
+  function closeConfirmModal() {
+    pendingCreateBody = null;
+    if (confirmArmTimer) {
+      clearTimeout(confirmArmTimer);
+      confirmArmTimer = null;
+    }
+    var modal = document.getElementById('si-confirm-modal');
+    if (modal) modal.classList.remove('is-armed');
+    var sendBtn = document.getElementById('si-confirm-send');
+    if (sendBtn) sendBtn.disabled = false;
+    closeSiModal(modal);
+    syncCooldownUi();
+  }
+
+  function duplicateMetaHtml(match) {
+    match = match || {};
+    var lines = [];
+    var st = match.status_label || statusLabel(match.status) || match.status || '';
+    if (st) lines.push('<div><strong>Estado:</strong> ' + esc(st) + '</div>');
+    if (match.is_cumprimento) {
+      if (match.numero_cumprimento) {
+        lines.push('<div><strong>Cumprimento:</strong> ' + esc(match.numero_cumprimento) + '</div>');
+      }
+    } else {
+      if (match.processo) lines.push('<div><strong>Processo:</strong> ' + esc(match.processo) + '</div>');
+      if (match.incidente) lines.push('<div><strong>Incidente:</strong> ' + esc(match.incidente) + '</div>');
+    }
+    if (match.requerente) lines.push('<div><strong>Requerente:</strong> ' + esc(match.requerente) + '</div>');
+    if (match.cpf_credor) lines.push('<div><strong>CPF:</strong> ' + esc(fmtCpf(match.cpf_credor)) + '</div>');
+    if (match.updated_at) lines.push('<div><strong>Atualizado:</strong> ' + esc(fmtDt(match.updated_at) || match.updated_at) + '</div>');
+    return lines.join('');
+  }
+
+  function showDuplicateConfirm(resJ, body) {
+    pendingCreateBody = body;
+    var copy = document.getElementById('si-confirm-copy');
+    if (copy) {
+      copy.textContent = (resJ && resJ.error)
+        ? String(resJ.error)
+        : 'Já existe uma solicitação igual na fila, em processamento, em tratamento ou inapta há menos de 24h. Tem certeza de que deseja enviar outra requisição igual?';
+    }
+    var meta = document.getElementById('si-confirm-meta');
+    if (meta) {
+      var html = duplicateMetaHtml(resJ && resJ.match);
+      meta.innerHTML = html || 'Os dados do formulário coincidem com uma solicitação aberta.';
+    }
+    var modal = document.getElementById('si-confirm-modal');
+    var sendBtn = document.getElementById('si-confirm-send');
+    var cancelBtn = document.getElementById('si-confirm-cancel');
+    var closeBtn = document.getElementById('si-confirm-close');
+    function setConfirmLocked(locked) {
+      if (sendBtn) sendBtn.disabled = !!locked;
+      if (cancelBtn) cancelBtn.disabled = !!locked;
+      if (closeBtn) closeBtn.disabled = !!locked;
+    }
+    if (modal) {
+      modal.classList.remove('is-armed');
+      setConfirmLocked(true);
+      openSiModal(modal);
+      if (confirmArmTimer) clearTimeout(confirmArmTimer);
+      confirmArmTimer = setTimeout(function () {
+        modal.classList.add('is-armed');
+        setConfirmLocked(false);
+        confirmArmTimer = null;
+      }, prefersReducedMotion() ? 0 : 450);
+    }
+  }
+
+  function applyCooldownFromPayload(j) {
+    var wait = Number(j && (j.retry_after_seconds != null ? j.retry_after_seconds : j.cooldown_seconds));
+    if (!isFinite(wait) || wait <= 0) wait = COOLDOWN_MS / 1000;
+    setCooldownFromSeconds(wait);
+  }
+
+  function syncCooldownUi() {
+    var leftMs = cooldownRemainingMs();
+    var leftSec = Math.ceil(leftMs / 1000);
+    var cdEl = document.getElementById('si-alert-countdown');
+    if (cdEl) cdEl.textContent = fmtCooldown(leftSec);
+    var alertOpen = document.getElementById('si-alert-modal') && !document.getElementById('si-alert-modal').hidden;
+    if (alertOpen && leftMs <= 0) closeCooldownAlert();
+    if (!submitBtn) return;
+    if (submitting) return;
+    if (confirmModalIsOpen()) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = submitLabel;
+      return;
+    }
+    if (!submitEnabled) {
+      submitBtn.disabled = true;
+      return;
+    }
+    if (leftMs > 0) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Aguarde ' + fmtCooldown(leftSec);
+    } else {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitLabel;
+    }
+    if (leftMs > 0 && !cooldownTimer) {
+      cooldownTimer = setInterval(syncCooldownUi, 250);
+    } else if (leftMs <= 0 && cooldownTimer) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+    }
+  }
+
+  function saveCasoHint(id, hint) {
+    id = String(id || '').trim();
+    if (!id || !hint) return;
+    var prev = casoHints[id] || {};
+    var next = {
+      processo: hint.processo || prev.processo || '',
+      incidente: hint.incidente || prev.incidente || '',
+      cpf: hint.cpf || prev.cpf || '',
+      nome: hint.nome || prev.nome || '',
+      depre: hint.depre || prev.depre || '',
+      cumprimento: hint.cumprimento || prev.cumprimento || ''
+    };
+    casoHints[id] = next;
+    var keys = Object.keys(casoHints);
+    if (keys.length > 200) {
+      keys.slice(0, keys.length - 200).forEach(function (k) { delete casoHints[k]; });
+    }
+    try { localStorage.setItem('si-caso-hints', JSON.stringify(casoHints)); } catch (e) {}
+  }
+
+  function esc(s) {
+    if (s == null || s === '') return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function parseCatalog(raw) {
+    if (!Array.isArray(raw)) return [];
+    var seen = {};
+    var out = [];
+    raw.forEach(function (item) {
+      var code = String((item && (item.code || item.status)) || '').trim().toUpperCase();
+      if (!code || seen[code]) return;
+      seen[code] = 1;
+      out.push({ code: code, label: prettyPtText((item && item.label) || code, true) || String((item && item.label) || code) });
+    });
+    return out;
+  }
+
+  function catalogKey(opts) {
+    return (opts || []).map(function (o) { return o.code; }).join('|');
+  }
+
+  function applyLabels(opts) {
+    parseCatalog(opts).forEach(function (o) {
+      STATUS_LABEL[o.code] = prettyPtText(o.label || o.code, true) || o.label || o.code;
+    });
+  }
+
+  function applyFilterOptions(opts) {
+    var next = parseCatalog(opts);
+    if (statusFilter && !archivedView && !next.some(function (o) { return o.code === statusFilter; })) {
+      next.push({
+        code: statusFilter,
+        label: STATUS_LABEL[statusFilter] || prettyPtText(statusFilter, true) || statusFilter.replace(/_/g, ' ')
+      });
+    }
+    var changed = catalogKey(next) !== catalogKey(statusOptions);
+    statusOptions = next;
+    next.forEach(function (o) {
+      STATUS_LABEL[o.code] = prettyPtText(o.label || STATUS_LABEL[o.code] || o.code, true) || o.label || o.code;
+    });
+    if (changed) renderFilters();
+    else markActiveFilters();
+  }
+
+  function markActiveFilters() {
+    document.querySelectorAll('#si-filters .si-filter').forEach(function (btn) {
+      var isArchivedBtn = btn.getAttribute('data-archived') === '1';
+      var st = btn.getAttribute('data-status') || '';
+      var on = isArchivedBtn ? archivedView : (!archivedView && st === statusFilter);
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('#si-tipo-filters .si-filter').forEach(function (btn) {
+      var on = (btn.getAttribute('data-tipo') || '') === tipoFilter;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function renderFilters() {
+    var box = document.getElementById('si-filters');
+    if (!box) return;
+    var html = '<button type="button" class="si-filter" data-status="" data-archived="0">Todos</button>';
+    statusOptions.forEach(function (o) {
+      html += '<button type="button" class="si-filter" data-status="' + esc(o.code) + '" data-archived="0">' +
+        esc(o.label || o.code) + '</button>';
+    });
+    box.innerHTML = html;
+    markActiveFilters();
+  }
+
+  function fmtDt(s) {
+    if (!s) return '';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return String(s);
+    return d.toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function fmtCpf(s) {
+    var d = String(s || '').replace(/\D/g, '');
+    if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+    return s ? String(s) : '';
+  }
+
+  function maskCpfInput(value) {
+    var d = String(value || '').replace(/\D/g, '').slice(0, 11);
+    if (d.length > 9) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+    if (d.length > 6) return d.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+    if (d.length > 3) return d.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+    return d;
+  }
+
+  function maskCnj(value) {
+    var d = String(value || '').replace(/\D/g, '').slice(0, 20);
+    var parts = [];
+    var sizes = [7, 2, 4, 1, 2, 4];
+    var seps = ['-', '.', '.', '.', '.'];
+    var i = 0;
+    for (var g = 0; g < sizes.length && i < d.length; g++) {
+      var take = Math.min(sizes[g], d.length - i);
+      if (g > 0) parts.push(seps[g - 1]);
+      parts.push(d.slice(i, i + take));
+      i += take;
+    }
+    return parts.join('');
+  }
+
+  function maskCnjDepre(value) {
+    var d = String(value || '').replace(/\D/g, '').slice(0, 20);
+    if (!d) return '';
+    if (d.length >= 16) d = d.slice(0, 16) + '0500';
+    return maskCnj(d);
+  }
+
+  function maskDigits(maxLen) {
+    return function (value) {
+      return String(value || '').replace(/\D/g, '').slice(0, maxLen);
+    };
+  }
+
+  function caretFromDigitCount(masked, digitCount) {
+    if (digitCount <= 0) return 0;
+    var seen = 0;
+    var i = 0;
+    for (; i < masked.length; i++) {
+      if (/\d/.test(masked.charAt(i))) {
+        seen++;
+        if (seen >= digitCount) return i + 1;
+      }
+    }
+    return masked.length;
+  }
+
+  function bindDigitMask(el, maskFn) {
+    if (!el) return;
+    el.addEventListener('input', function () {
+      var digitsBefore = el.value.slice(0, el.selectionStart || 0).replace(/\D/g, '').length;
+      var masked = maskFn(el.value);
+      el.value = masked;
+      var pos = caretFromDigitCount(masked, digitsBefore);
+      try { el.setSelectionRange(pos, pos); } catch (e) {}
+    });
+    el.addEventListener('blur', function () {
+      el.value = maskFn(el.value);
+    });
+  }
+
+  function normCredorNome(s, keepTrailingSpace) {
+    var t = String(s || '');
+    try { t = t.normalize('NFD'); } catch (e) {}
+    t = t.replace(/[\u0300-\u036f]/g, '').replace(/[^\x00-\x7F]/g, '');
+    t = t.replace(/\s+/g, ' ').toUpperCase();
+    if (!keepTrailingSpace) t = t.trim();
+    else t = t.replace(/^\s+/, '');
+    return t;
+  }
+
+  function cumprimentoOn() {
+    var el = document.getElementById('si-modo-cumprimento');
+    return !!(el && el.checked);
+  }
+
+  let modeFadeTimer = null;
+
+  function prefersReducedMotion() {
+    try {
+      return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  var confirmArmTimer = null;
+  var modalFadeTimers = {};
+  var MODAL_FADE_MS = 220;
+
+  function confirmModalIsOpen() {
+    var modal = document.getElementById('si-confirm-modal');
+    return !!(modal && !modal.hidden);
+  }
+
+  function confirmModalIsArmed() {
+    var modal = document.getElementById('si-confirm-modal');
+    return !!(modal && modal.classList.contains('is-armed'));
+  }
+
+  function openSiModal(el) {
+    if (!el) return;
+    var id = el.id || '_modal';
+    if (modalFadeTimers[id]) {
+      clearTimeout(modalFadeTimers[id]);
+      modalFadeTimers[id] = null;
+    }
+    el.hidden = false;
+    if (prefersReducedMotion()) {
+      el.classList.add('is-open');
+      return;
+    }
+    if (el.classList.contains('is-open')) return;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        el.classList.add('is-open');
+      });
+    });
+  }
+
+  function closeSiModal(el) {
+    if (!el) return;
+    var id = el.id || '_modal';
+    if (modalFadeTimers[id]) {
+      clearTimeout(modalFadeTimers[id]);
+      modalFadeTimers[id] = null;
+    }
+    if (el.hidden) {
+      el.classList.remove('is-open');
+      return;
+    }
+    el.classList.remove('is-open');
+    if (prefersReducedMotion()) {
+      el.hidden = true;
+      return;
+    }
+    modalFadeTimers[id] = setTimeout(function () {
+      el.hidden = true;
+      modalFadeTimers[id] = null;
+    }, MODAL_FADE_MS);
+  }
+
+  function modeFadeEls() {
+    return [
+      document.getElementById('si-modo-copy'),
+      document.getElementById('si-case-hint'),
+      document.getElementById('si-campos')
+    ].filter(Boolean);
+  }
+
+  function setModeFadeOut(on) {
+    modeFadeEls().forEach(function (el) {
+      el.classList.toggle('is-fade-out', !!on);
+    });
+  }
+
+  function applyCumprimentoMode() {
+    var on = cumprimentoOn();
+    var sw = document.getElementById('si-modo-cumprimento');
+    var form = document.getElementById('si-form');
+    var hint = document.getElementById('si-case-hint');
+    var modoHint = document.getElementById('si-modo-hint');
+    var modoTitle = document.getElementById('si-modo-title');
+    if (sw) sw.setAttribute('aria-checked', on ? 'true' : 'false');
+    if (form) form.classList.toggle('is-cumprimento', on);
+    var canEdit = !(document.getElementById('si-submit') || {}).disabled;
+    document.querySelectorAll('#si-form .si-only-incidente input').forEach(function (el) {
+      el.disabled = !canEdit || on;
+    });
+    document.querySelectorAll('#si-form .si-only-cumprimento input').forEach(function (el) {
+      el.disabled = !canEdit || !on;
+    });
+    if (modoTitle) modoTitle.textContent = on ? 'Cumprimento' : 'Incidente';
+    if (hint) {
+      hint.textContent = on
+        ? 'Identificação do cumprimento — nº do processo de cumprimento e nome ou CPF do credor'
+        : 'Identificação do caso — processo, incidente e nome ou CPF do credor são obrigatórios';
+    }
+    if (modoHint) {
+      modoHint.textContent = on
+        ? 'Formulário de cumprimento: nº do processo e nome ou CPF do credor.'
+        : 'Formulário de incidente: processo, incidente e nome ou CPF do credor.';
+    }
+    formMsg('');
+  }
+
+  function syncCumprimentoMode(opts) {
+    opts = opts || {};
+    var instant = !!opts.instant || prefersReducedMotion();
+    if (modeFadeTimer) {
+      clearTimeout(modeFadeTimer);
+      modeFadeTimer = null;
+    }
+    if (instant) {
+      applyCumprimentoMode();
+      setModeFadeOut(false);
+      return;
+    }
+    setModeFadeOut(true);
+    modeFadeTimer = setTimeout(function () {
+      applyCumprimentoMode();
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          setModeFadeOut(false);
+          modeFadeTimer = null;
+        });
+      });
+    }, 200);
+  }
+
+  function bindNomeCredor(el) {
+    if (!el) return;
+    el.addEventListener('input', function () {
+      var start = el.selectionStart || 0;
+      var before = el.value.slice(0, start);
+      var next = normCredorNome(el.value, true);
+      el.value = next;
+      var pos = Math.min(normCredorNome(before, true).length, next.length);
+      try { el.setSelectionRange(pos, pos); } catch (e) {}
+    });
+    el.addEventListener('blur', function () {
+      el.value = normCredorNome(el.value, false);
+    });
+  }
+
+  function foldPt(s) {
+    var text = String(s || '');
+    try { text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+    return text.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function prettyPtText(value, asLabel) {
+    var text = String(value == null ? '' : value).trim();
+    if (!text) return '';
+    if (text.charAt(0) === '{' || text.charAt(0) === '[') return text;
+    var spaced = text.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    var folded = foldPt(spaced);
+    if (PT_DISPLAY.phrases[folded]) return PT_DISPLAY.phrases[folded];
+    var code = String(text).replace(/[\s-]+/g, '_').toUpperCase();
+    if (/^[A-Z0-9_]+$/.test(code) && PT_DISPLAY.status_labels[code]) {
+      return PT_DISPLAY.status_labels[code];
+    }
+    var pretty = spaced.replace(/[A-Za-zÀ-ÿ]+/g, function (word) {
+      var mapped = PT_DISPLAY.words[foldPt(word)];
+      if (!mapped) return word;
+      if (word.charAt(0) !== word.charAt(0).toLowerCase()) {
+        return mapped.charAt(0).toUpperCase() + mapped.slice(1);
+      }
+      return mapped;
+    });
+    pretty = pretty.replace(/\s+/g, ' ').trim();
+    if (asLabel && pretty) pretty = pretty.charAt(0).toUpperCase() + pretty.slice(1);
+    return pretty;
+  }
+
+  function statusKey(st) {
+    return String(st || '').toUpperCase();
+  }
+
+  function statusLabel(st) {
+    var k = statusKey(st);
+    return STATUS_LABEL[k] || prettyPtText(st, true) || (st ? String(st).replace(/_/g, ' ') : '—');
+  }
+
+  function badgeClass(st) {
+    var k = statusKey(st);
+    if (k === 'RECEBIDO' || k === 'PROCESSANDO' || k === 'ANALISE_IA' || k === 'INCIDENTES_EM_PROCESSAMENTO') return 'si-badge si-badge--open';
+    /* Verde só para sucesso final (Criado) e atribuído */
+    if (k === 'CRIADO' || k === 'ATRIBUIDO') return 'si-badge si-badge--ok';
+    /* Etapas intermediárias de cálculo — azul, para não parecer Criado */
+    if (k === 'ATUALIZACAO_CALCULO_CONCLUIDA' || k === 'ANALISE_CALCULO_CONCLUIDA' || k === 'CALCULO_CONCLUIDO') return 'si-badge si-badge--apto';
+    if (k === 'APTO') return 'si-badge si-badge--apto';
+    if (k === 'EM_TRATAMENTO' || k === 'SEM_COMPRADOR' || k === 'SEM_PRECATORIO' || k === 'AGUARDAR_CONCLUSAO_JURIDICA' || k === 'AGUARDANDO_IMPUGNACAO' || k === 'AGUARDANDO_ANALISE_CALCULO') return 'si-badge si-badge--warn';
+    if (k === 'INAPTO' || k === 'ERRO' || k === 'NAO_ENCONTRADO_MONDAY' || k === 'ATUALIZACAO_CALCULO_ERRO') return 'si-badge si-badge--err';
+    if (!k) return 'si-badge si-badge--muted';
+    return 'si-badge si-badge--muted';
+  }
+
+  function statusBadge(st) {
+    return '<span class="' + badgeClass(st) + '">' + esc(statusLabel(st)) + '</span>';
+  }
+
+  function isOpenRow(r) {
+    return !!(OPEN[statusKey(r && r.status)] || OPEN[statusKey(r && r.status_api)]);
+  }
+
+  function isTruthyFlag(v) {
+    return v === true || v === 1 || v === '1' || v === 'true' || v === 'True';
+  }
+
+  function simNaoLabel(v) {
+    if (v === true || v === 1 || v === '1' || v === 'true' || v === 'True' || v === 'sim') return 'Sim';
+    if (v === false || v === 0 || v === '0' || v === 'false' || v === 'False' || v === 'nao' || v === 'não') return 'Não';
+    return '—';
+  }
+
+  function avaliacaoCumprimentoHtml(r) {
+    if (pickMovimentacoes(r)) return '';
+    if (!isCumprimento(r)) return '';
+    var av = r.avaliacao_cumprimento;
+    if (!av || typeof av !== 'object') return '';
+    var flags = av.flags || {};
+    var hasFlag = ['houve_homologacao','houve_impugnacao','houve_intimacao_impugnacao','houve_concordancia_calculo']
+      .some(function (k) { return flags[k] === true || flags[k] === false; });
+    if (!hasFlag && !av.status && !av.motivo) return '';
+    var html = '<div class="si-avaliacao"><h3>Avaliação do cumprimento</h3><dl class="si-avaliacao-kv">';
+    html += '<dt>Houve homologação?</dt><dd>' + esc(simNaoLabel(flags.houve_homologacao)) + '</dd>';
+    html += '<dt>Houve impugnação?</dt><dd>' + esc(simNaoLabel(flags.houve_impugnacao)) + '</dd>';
+    html += '<dt>Houve intimação para impugnação?</dt><dd>' + esc(simNaoLabel(flags.houve_intimacao_impugnacao)) + '</dd>';
+    html += '<dt>Houve concordância com os cálculos?</dt><dd>' + esc(simNaoLabel(flags.houve_concordancia_calculo)) + '</dd>';
+    html += '</dl>';
+    if (av.status) html += '<p>' + statusBadge(av.status) + '</p>';
+    if (av.motivo) html += '<p>' + esc(av.motivo) + '</p>';
+    return html + '</div>';
+  }
+
+  function pickMovimentacoes(r) {
+    if (!isCumprimento(r)) return null;
+    var mov = r && r.movimentacoes;
+    if (!mov || typeof mov !== 'object' || Array.isArray(mov)) {
+      var det = detalheBlock(r);
+      mov = det.movimentacoes;
+    }
+    if (!mov || typeof mov !== 'object' || Array.isArray(mov)) return null;
+    return mov;
+  }
+
+  function pickMovimentacoesResumo(r) {
+    var list = r && r.movimentacoes_resumo;
+    if (!Array.isArray(list) || !list.length) {
+      var det = detalheBlock(r);
+      list = det.movimentacoes_resumo;
+    }
+    return Array.isArray(list) && list.length ? list : null;
+  }
+
+  function movItemIdentificado(item) {
+    if (!item || typeof item !== 'object') return false;
+    return item.identificado === true || item.identificado === 1 || item.identificado === '1' ||
+      item.identificado === 'true' || item.identificado === 'True';
+  }
+
+  function formatMovItem(item) {
+    if (!item || typeof item !== 'object') return 'Não identificado';
+    if (!movItemIdentificado(item)) return 'Não identificado';
+    var parts = [];
+    if (item.data) parts.push(String(item.data));
+    if (item.relacao) parts.push('rel. ' + String(item.relacao));
+    if (parts.length) return parts.join(' · ');
+    return String(item.resumo || 'Identificado');
+  }
+
+  function mensagemSemResumoMov(raw, r) {
+    var text = String(raw || '').trim();
+    if (!text) return '';
+    var resumo = pickMovimentacoesResumo(r) || [];
+    var first = String(resumo[0] || '').trim();
+    if (first) {
+      var idx = text.indexOf(first);
+      if (idx > 0) text = text.slice(0, idx);
+      else if (idx === 0) return '';
+    }
+    return text.replace(/[;\s.]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  function movimentacoesEsajHtml(r) {
+    var mov = pickMovimentacoes(r);
+    if (!mov) return '';
+    var rows = [
+      ['intimacao', 'Intimação'],
+      ['impugnacao', 'Impugnação'],
+      ['calculo_homologado', 'Cálculo homologado']
+    ];
+    var html = '<div class="si-mov"><div class="si-mov-head"><h3>Movimentações e-SAJ</h3></div><div class="si-mov-cards">';
+    rows.forEach(function (pair) {
+      var item = mov[pair[0]];
+      if (!item || typeof item !== 'object') item = {};
+      var ok = movItemIdentificado(item);
+      html += '<div class="si-mov-card' + (ok ? ' is-ok' : '') + '">' +
+        '<span class="si-mov-card-label">' + esc(pair[1]) + '</span>' +
+        '<div class="si-mov-card-value"><span class="si-mov-dot ' +
+        (ok ? 'si-mov-dot--ok' : 'si-mov-dot--no') + '"></span>' +
+        esc(formatMovItem(item)) + '</div></div>';
+    });
+    return html + '</div></div>';
+  }
+
+  function teveAnaliseGemini(r) {
+    if (!r || typeof r !== 'object') return false;
+    if (isTruthyFlag(r.analise_gemini)) return true;
+    var det = detalheBlock(r);
+    if (isTruthyFlag(det.analise_gemini)) return true;
+    var casos = collectCasos(r);
+    for (var i = 0; i < casos.length; i++) {
+      if (casos[i] && isTruthyFlag(casos[i].analise_gemini)) return true;
+    }
+    return false;
+  }
+
+  function pickAutosTextoMeta(r) {
+    if (!isCumprimento(r)) return null;
+    var texto = r && r.autos_texto;
+    if (!texto || typeof texto !== 'object' || Array.isArray(texto)) {
+      var det = detalheBlock(r);
+      texto = det.autos_texto;
+    }
+    if (!texto || typeof texto !== 'object' || Array.isArray(texto)) return null;
+    return texto;
+  }
+
+  function isFalsyFlag(v) {
+    return v === false || v === 0 || v === '0' || v === 'false' || v === 'False';
+  }
+
+  function credorNaoEncontrado(r) {
+    var texto = pickAutosTextoMeta(r);
+    return !!(texto && isFalsyFlag(texto.credor_encontrado));
+  }
+
+  function credorBannerHtml(r) {
+    if (!credorNaoEncontrado(r)) return '';
+    var texto = pickAutosTextoMeta(r) || {};
+    var aviso = limparMensagemApi(String(texto.aviso || '').trim());
+    var html = '<div class="si-credor-banner" role="status">';
+    html += '<strong>Credor não encontrado no OCR.</strong> ';
+    html += esc(aviso || 'O texto filtrado pelo credor não foi gerado; a análise Gemini não será executada. O fluxo segue normalmente e o texto completo dos autos pode continuar disponível.');
+    html += '</div>';
+    return html;
+  }
+
+  function pickGeminiResultado(r) {
+    var val = r && r.analise_gemini_resultado;
+    if (val == null) {
+      var det = detalheBlock(r);
+      val = det.analise_gemini_resultado;
+    }
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+    return val;
+  }
+
+  function pickGeminiAviso(r) {
+    var val = r && r.analise_gemini_aviso;
+    if (val == null || val === '') {
+      var det = detalheBlock(r);
+      val = det.analise_gemini_aviso;
+    }
+    var text = limparMensagemApi(String(val || '').trim());
+    return text || '';
+  }
+
+  function pickCalculoAtualizado(r) {
+    function fromObj(obj) {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+      var raw = obj.calculo_atualizado;
+      if (raw != null && String(raw).trim() !== '' && String(raw).toLowerCase() !== 'null') {
+        return raw;
+      }
+      var fmt = obj.calculo_atualizado_formatado;
+      if (fmt != null && String(fmt).trim() !== '' && String(fmt).toLowerCase() !== 'null') {
+        return fmt;
+      }
+      return null;
+    }
+    var hit = fromObj(r);
+    if (hit != null) return hit;
+    hit = fromObj(detalheBlock(r));
+    if (hit != null) return hit;
+    hit = fromObj(pickGeminiResultado(r));
+    if (hit != null) return hit;
+    var casos = collectCasos(r);
+    for (var i = 0; i < casos.length; i++) {
+      hit = fromObj(casos[i]);
+      if (hit != null) return hit;
+      hit = fromObj(casos[i] && casos[i].analise_gemini_resultado);
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
+  function fmtCalculoAtualizado(val) {
+    if (val == null || val === '') return '';
+    if (typeof val === 'number' && isFinite(val)) {
+      return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    var text = String(val).trim();
+    if (!text || text.toLowerCase() === 'null') return '';
+    if (/^-?\d+(\.\d+)?$/.test(text)) {
+      var num = parseFloat(text);
+      if (isFinite(num)) {
+        return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    }
+    return text;
+  }
+
+  function geminiDetailsForDisplay(r) {
+    var resultado = pickGeminiResultado(r);
+    var out = resultado ? Object.assign({}, resultado) : {};
+    var calc = pickCalculoAtualizado(r);
+    if (calc != null && calc !== '') {
+      out.calculo_atualizado = calc;
+      delete out.calculo_atualizado_formatado;
+    }
+    if (!Object.keys(out).length) return null;
+    return out;
+  }
+
+  function geminiResultLabel(key) {
+    var map = {
+      nome: 'Nome',
+      cpf: 'CPF',
+      transito_julgado: 'Trânsito em julgado',
+      Homologacao_Calculo: 'Homologação do cálculo',
+      principal_liquido: 'Principal líquido',
+      juros: 'Juros',
+      desconto_previdenciario: 'Desconto previdenciário',
+      desconto_assistencia_medica: 'Desconto assistência médica',
+      honorarios: 'Honorários',
+      valor_total: 'Valor total',
+      primeiro_mes: 'Primeiro mês',
+      ultimo_mes: 'Último mês',
+      data_base: 'Data-base',
+      check_impugnacao: 'Check impugnação',
+      calculo_atualizado: 'Cálculo atualizado'
+    };
+    if (map[key]) return map[key];
+    return String(key || '').replace(/_/g, ' ');
+  }
+
+  function geminiResultValue(key, val) {
+    if (val == null || val === '') return '';
+    var text = String(val).trim();
+    if (!text || text.toLowerCase() === 'null') return '';
+    if (key === 'cpf') return fmtCpf(text) || text;
+    if (key === 'check_impugnacao') {
+      if (text === '1') return 'Sim';
+      if (text === '0') return 'Não';
+    }
+    if (key === 'calculo_atualizado') return fmtCalculoAtualizado(val) || text;
+    if (/_/.test(text) || PT_DISPLAY.phrases[foldPt(text.replace(/_/g, ' '))]) {
+      return prettyPtText(text, true) || text;
+    }
+    return prettyPtText(text) || text;
+  }
+
+  function shouldShowGeminiBlock(r) {
+    if (!isCumprimento(r)) return false;
+    if (teveAnaliseGemini(r)) return true;
+    if (pickGeminiResultado(r)) return true;
+    if (pickCalculoAtualizado(r) != null) return true;
+    if (pickGeminiAviso(r)) return true;
+    if (pickAutosTextoMeta(r)) return true;
+    var st = statusKey(r && r.status);
+    return st === 'AGUARDANDO_ANALISE_CALCULO' || st === 'AGUARDANDO_IMPUGNACAO' || st === 'APTO' || st === 'INAPTO';
+  }
+
+  function geminiProblemText(r) {
+    var aviso = pickGeminiAviso(r);
+    if (aviso) return aviso;
+    var texto = pickAutosTextoMeta(r) || {};
+    var motivo = limparMensagemApi(String(texto.aviso || '').trim());
+    if (credorNaoEncontrado(r)) {
+      return motivo || 'Credor informado não encontrado no texto OCR; sem texto filtrado a análise Gemini não roda.';
+    }
+    return motivo || '';
+  }
+
+  function geminiResultRowsHtml(resultado) {
+    if (!resultado) return '';
+    var keys = [
+      'nome', 'cpf', 'transito_julgado', 'Homologacao_Calculo',
+      'principal_liquido', 'juros', 'desconto_previdenciario', 'desconto_assistencia_medica',
+      'honorarios', 'valor_total', 'primeiro_mes', 'ultimo_mes', 'data_base', 'check_impugnacao',
+      'calculo_atualizado'
+    ];
+    var rows = '';
+    keys.forEach(function (key) {
+      if (!(key in resultado)) return;
+      var shown = geminiResultValue(key, resultado[key]);
+      if (!shown) return;
+      rows += '<dt>' + esc(geminiResultLabel(key)) + '</dt><dd>' + esc(shown) + '</dd>';
+    });
+    Object.keys(resultado).forEach(function (key) {
+      if (keys.indexOf(key) >= 0) return;
+      if (key === 'calculo_atualizado_formatado') return;
+      var shown = geminiResultValue(key, resultado[key]);
+      if (!shown) return;
+      rows += '<dt>' + esc(geminiResultLabel(key)) + '</dt><dd>' + esc(shown) + '</dd>';
+    });
+    if (!rows) return '<p class="si-gemini-note si-gemini-note--muted">Resultado recebido sem campos exibíveis.</p>';
+    return '<dl class="si-gemini-kv">' + rows + '</dl>';
+  }
+
+  function geminiFoiConcluida(r) {
+    if (pickGeminiResultado(r)) return true;
+    if (pickCalculoAtualizado(r) != null) return true;
+    if (!r || typeof r !== 'object') return false;
+    if (r.analise_gemini_concluida === true) return true;
+    var det = r.detalhe;
+    return !!(det && typeof det === 'object' && det.analise_gemini_concluida === true);
+  }
+
+  function analiseGeminiHtml(r) {
+    if (!shouldShowGeminiBlock(r)) return '';
+    var ran = teveAnaliseGemini(r);
+    var resultado = geminiDetailsForDisplay(r);
+    var aviso = pickGeminiAviso(r);
+    var problem = geminiProblemText(r);
+    var concluida = geminiFoiConcluida(r);
+    var html = '<section class="si-detail-card si-gemini"><div class="si-gemini-head"><h3>Análise de cálculo</h3>';
+    if (ran) html += geminiTagHtml();
+    if (CAN_VIEW_GEMINI_DETAILS && resultado) {
+      html += '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm si-gemini-toggle" aria-expanded="false">Detalhes</button>';
+    }
+    html += '</div>';
+    if (!ran) {
+      html += '<p class="si-gemini-status is-pending">Análise Gemini não executada</p>';
+      if (problem) html += '<p class="si-gemini-note--warn">' + esc(problem) + '</p>';
+      return html + '</section>';
+    }
+    if (concluida) {
+      html += '<p class="si-gemini-status">Concluída</p>';
+    } else {
+      html += '<p class="si-gemini-status is-problem">' + esc(aviso || problem || 'A análise do Gemini não obteve resultados.') + '</p>';
+    }
+    if (CAN_VIEW_GEMINI_DETAILS && resultado) {
+      html += '<div class="si-gemini-details" hidden>';
+      html += geminiResultRowsHtml(resultado);
+      if (aviso) html += '<p class="si-gemini-note si-gemini-note--muted">' + esc(aviso) + '</p>';
+      html += '</div>';
+    }
+    return html + '</section>';
+  }
+
+  function geminiTagHtml() {
+    return '<span class="si-mov-pill si-mov-pill--gemini">Análise Gemini</span>';
+  }
+
+  function movPillsHtml(r) {
+    var pills = [];
+    if (teveAnaliseGemini(r)) pills.push(['Análise Gemini', 'gemini']);
+    var mov = pickMovimentacoes(r);
+    if (mov) {
+      if (movItemIdentificado(mov.intimacao)) pills.push(['Intimação', 'ok']);
+      if (movItemIdentificado(mov.impugnacao)) pills.push(['Impugnação', 'ok']);
+      if (movItemIdentificado(mov.calculo_homologado)) pills.push(['Cálculo homologado', 'ok']);
+    }
+    if (CAN_VIEW_AUTOS && autosDisponiveis(r)) pills.push(['Autos', 'doc']);
+    if (CAN_VIEW_AUTOS && autosTextoDisponiveis(r)) pills.push(['Textos', 'doc']);
+    if (!pills.length) return '';
+    return '<div class="si-mov-pills">' + pills.map(function (p) {
+      return '<span class="si-mov-pill si-mov-pill--' + p[1] + '">' + esc(p[0]) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function pickAutos(r) {
+    if (!CAN_VIEW_AUTOS || !isCumprimento(r)) return null;
+    var autos = r && r.autos;
+    if (!autos || typeof autos !== 'object' || Array.isArray(autos)) {
+      var det = detalheBlock(r);
+      autos = det.autos;
+    }
+    if (!autos || typeof autos !== 'object' || Array.isArray(autos)) return null;
+    return autos;
+  }
+
+  function autosDisponiveis(r) {
+    if (!CAN_VIEW_AUTOS) return false;
+    var autos = pickAutos(r);
+    return !!(autos && (autos.disponivel === true || autos.disponivel === 1 || autos.disponivel === 'true'));
+  }
+
+  function pickAutosTexto(r) {
+    if (!CAN_VIEW_AUTOS || !isCumprimento(r)) return null;
+    var texto = r && r.autos_texto;
+    if (!texto || typeof texto !== 'object' || Array.isArray(texto)) {
+      var det = detalheBlock(r);
+      texto = det.autos_texto;
+    }
+    if (!texto || typeof texto !== 'object' || Array.isArray(texto)) return null;
+    return texto;
+  }
+
+  function autosTextoDisponiveis(r) {
+    if (!CAN_VIEW_AUTOS) return false;
+    var texto = pickAutosTexto(r);
+    return !!(texto && (texto.disponivel === true || texto.disponivel === 1 || texto.disponivel === 'true'));
+  }
+
+  function tipoAutoLabel(tipo) {
+    var t = String(tipo || '').trim();
+    var map = {
+      Impugnacao: 'Impugnação',
+      Decisao: 'Decisão',
+      Peticao: 'Petição',
+      'Planilha de Calculo': 'Planilha',
+      Documento: 'Documento'
+    };
+    return map[t] || t.replace(/_/g, ' ') || 'Documento';
+  }
+
+  function autosTextoRowsHtml(r) {
+    var texto = pickAutosTexto(r);
+    if (!texto) return '';
+    var docs = Array.isArray(texto.documentos) ? texto.documentos.slice() : [];
+    if (!docs.length) return '';
+    var rootOk = autosTextoDisponiveis(r);
+    var html = '';
+    docs.forEach(function (doc) {
+      if (!doc || typeof doc !== 'object') return;
+      var tipo = String(doc.tipo || '').trim().toLowerCase();
+      if (tipo !== 'completo' && tipo !== 'filtrado') return;
+      var ok = rootOk && (doc.disponivel === true || doc.disponivel === 1 || doc.disponivel === 'true' || doc.disponivel == null);
+      var titulo = String(doc.titulo || (tipo === 'filtrado' ? 'Texto filtrado pelo credor' : 'Documentos completos (OCR)')).trim();
+      html += '<div class="si-autos-row' + (ok ? '' : ' is-off') + '"><div class="si-autos-copy">';
+      html += '<span class="si-autos-title">' + esc(titulo) + '</span>';
+      html += ' <span class="si-badge si-badge--muted">TXT</span>';
+      html += '</div><div class="si-autos-actions">';
+      html += '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm si-txt-view" data-id="' + esc(r.id) + '" data-tipo="' + esc(tipo) + '" data-title="' + esc(titulo) + '"' + (ok ? '' : ' disabled') + '>Visualizar</button>';
+      html += '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm si-txt-dl" data-id="' + esc(r.id) + '" data-tipo="' + esc(tipo) + '" data-title="' + esc(titulo) + '"' + (ok ? '' : ' disabled') + '>Baixar</button>';
+      html += '</div></div>';
+    });
+    return html;
+  }
+
+  function autosCumprimentoHtml(r) {
+    if (!CAN_VIEW_AUTOS || !isCumprimento(r)) return '';
+    var autos = pickAutos(r);
+    var textosHtml = autosTextoRowsHtml(r);
+    var st = statusKey(r && r.status);
+    if (!autos && !textosHtml) {
+      if (FILA[st] || st === 'RECEBIDO' || st === 'PROCESSANDO') return '';
+      return '<section class="si-detail-card si-autos"><div class="si-autos-head"><h3>Autos do cumprimento</h3></div><p class="si-autos-empty">Autos ainda não coletados.</p></section>';
+    }
+    var docs = autos && Array.isArray(autos.documentos) ? autos.documentos.slice() : [];
+    var rootOk = autosDisponiveis(r);
+    var motivo = autos ? limparMensagemApi(String(autos.motivo_indisponivel || '').trim()) : '';
+    var html = '<section class="si-detail-card si-autos"><div class="si-autos-head"><h3>Autos do cumprimento</h3>';
+    if (rootOk && autos && autos.url) {
+      html += '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm si-auto-all" data-id="' + esc(r.id) + '">Ver todos</button>';
+    }
+    html += '</div>';
+    if (!rootOk && motivo) {
+      html += '<p class="si-autos-warn">' + esc(motivo) + '</p>';
+    }
+    if (docs.length) {
+      docs.forEach(function (doc) {
+        if (!doc || typeof doc !== 'object') return;
+        var ok = rootOk && (doc.disponivel === true || doc.disponivel === 1 || doc.disponivel === 'true' || doc.disponivel == null);
+        var titulo = String(doc.titulo || 'Documento').trim() || 'Documento';
+        var tipo = tipoAutoLabel(doc.tipo);
+        html += '<div class="si-autos-row' + (ok ? '' : ' is-off') + '"><div class="si-autos-copy">';
+        html += '<span class="si-autos-title">' + esc(titulo) + '</span>';
+        if (tipo && tipo !== titulo) html += ' ' + '<span class="si-badge si-badge--muted">' + esc(tipo) + '</span>';
+        html += '</div><div class="si-autos-actions">';
+        html += '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm si-auto-view" data-id="' + esc(r.id) + '" data-indice="' + esc(doc.indice) + '" data-title="' + esc(titulo) + '"' + (ok ? '' : ' disabled') + '>Visualizar</button>';
+        html += '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm si-auto-dl" data-id="' + esc(r.id) + '" data-indice="' + esc(doc.indice) + '" data-title="' + esc(titulo) + '"' + (ok ? '' : ' disabled') + '>Baixar</button>';
+        html += '</div></div>';
+      });
+    } else if (rootOk && autos && autos.url) {
+      html += '<p class="si-autos-empty">PDF concatenado disponível.</p>';
+    } else if (!motivo && !textosHtml) {
+      html += '<p class="si-autos-empty">Autos ainda não coletados.</p>';
+    }
+    html += textosHtml;
+    var meta = [];
+    if (autos && (autos.planilha_encontrada === true || autos.planilha_encontrada === 1)) meta.push('Planilha identificada');
+    var horas = Number(autos && autos.expira_em_horas);
+    if (rootOk && isFinite(horas) && horas > 0) {
+      meta.push(horas < 2 ? 'Disponível por cerca de 1 hora' : ('Disponível por ~' + Math.round(horas) + ' h'));
+    }
+    if (meta.length) html += '<p class="si-autos-meta">' + esc(meta.join(' · ')) + '</p>';
+    return html + '</section>';
+  }
+
+  function filaCampo(r, key) {
+    if (r && r[key] != null && r[key] !== '') return r[key];
+    var det = detalheBlock(r);
+    if (det[key] != null && det[key] !== '') return det[key];
+    return null;
+  }
+
+  function fmtEtaSeconds(sec) {
+    var n = Number(sec);
+    if (!isFinite(n) || n <= 0) return '';
+    n = Math.round(n);
+    if (n < 60) return '~' + n + ' s';
+    var min = Math.round(n / 60);
+    if (min < 60) return '~' + min + ' min';
+    var h = Math.floor(min / 60);
+    var m = min % 60;
+    return m ? ('~' + h + ' h ' + m + ' min') : ('~' + h + ' h');
+  }
+
+  function filaProgressoParts(r) {
+    if (!FILA[statusKey(r && r.status)]) return [];
+    var parts = [];
+    var ahead = filaCampo(r, 'fila_casos_a_frente');
+    if (ahead != null) {
+      var n = Number(ahead);
+      if (isFinite(n) && n > 0) {
+        parts.push(n === 1 ? '1 caso na fila à sua frente' : n + ' casos na fila à sua frente');
+      }
+    }
+    if (isTruthyFlag(filaCampo(r, 'fila_em_processamento'))) {
+      parts.push('Aguardando caso em processamento');
+    }
+    var eta = fmtEtaSeconds(filaCampo(r, 'eta_seconds_estimado'));
+    if (eta) {
+      var conf = String(filaCampo(r, 'eta_confianca') || '').toLowerCase();
+      if (conf === 'baixa') eta += ' · estimativa aproximada';
+      parts.push(eta);
+    }
+    return parts;
+  }
+
+  function filaProgressoHtml(r, opts) {
+    var parts = filaProgressoParts(r);
+    if (!parts.length) return '';
+    opts = opts || {};
+    if (opts.detail) {
+      var html = '<div class="si-detail-fila"><h3>Fila</h3>';
+      parts.forEach(function (p, i) {
+        var cls = i === parts.length - 1 && /~/.test(p) ? ' si-fila-eta' : '';
+        html += '<p class="' + cls.trim() + '">' + esc(p) + '</p>';
+      });
+      return html + '</div>';
+    }
+    return '<div class="si-fila">' + parts.map(function (p, i) {
+      var cls = i === parts.length - 1 && /~/.test(p) ? ' si-fila-eta' : '';
+      return '<span class="' + cls.trim() + '">' + esc(p) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function compradores(item) {
+    var c = item && item.compradores;
+    if (Array.isArray(c)) return c.filter(Boolean).join(', ');
+    return c ? String(c) : '';
+  }
+
+  function showErr(msg) {
+    showBanner(msg, true);
+  }
+
+  function showBanner(msg, isErr) {
+    var el = document.getElementById('si-err');
+    if (!el) return;
+    if (!msg) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.className = 'camp-msg ' + (isErr ? 'camp-msg-err' : 'camp-msg-ok');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  var purgeArmTimer = null;
+  var purging = false;
+
+  function purgeModalIsArmed() {
+    var modal = document.getElementById('si-purge-modal');
+    return !!(modal && modal.classList.contains('is-armed'));
+  }
+
+  function setPurgeLocked(locked) {
+    ['si-purge-confirm', 'si-purge-cancel', 'si-purge-close'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.disabled = !!locked;
+    });
+  }
+
+  function closePurgeModal() {
+    if (purgeArmTimer) {
+      clearTimeout(purgeArmTimer);
+      purgeArmTimer = null;
+    }
+    var modal = document.getElementById('si-purge-modal');
+    if (modal) modal.classList.remove('is-armed');
+    setPurgeLocked(false);
+    closeSiModal(modal);
+  }
+
+  function showPurgeConfirm() {
+    var modal = document.getElementById('si-purge-modal');
+    if (!modal) return;
+    modal.classList.remove('is-armed');
+    setPurgeLocked(true);
+    openSiModal(modal);
+    if (purgeArmTimer) clearTimeout(purgeArmTimer);
+    purgeArmTimer = setTimeout(function () {
+      modal.classList.add('is-armed');
+      setPurgeLocked(false);
+      purgeArmTimer = null;
+    }, prefersReducedMotion() ? 0 : 450);
+  }
+
+  function limparFilaRemota() {
+    if (purging) return;
+    var btn = document.getElementById('si-purge');
+    var confirmBtn = document.getElementById('si-purge-confirm');
+    purging = true;
+    if (btn) btn.disabled = true;
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Limpando…';
+    }
+    fetch('/api/solicitacao-inclusao/admin/fila/limpar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: '{}'
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        purging = false;
+        if (btn) btn.disabled = false;
+        if (confirmBtn) confirmBtn.textContent = 'Limpar fila';
+        closePurgeModal();
+        if (!res.ok || !(res.j && res.j.ok)) throw new Error((res.j && res.j.error) || 'Falha ao limpar a fila.');
+        offset = 0;
+        load({ notice: (res.j && res.j.mensagem) || 'Fila limpa.' });
+      })
+      .catch(function (e) {
+        purging = false;
+        if (btn) btn.disabled = false;
+        if (confirmBtn) {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Limpar fila';
+        }
+        closePurgeModal();
+        showBanner(e.message || String(e), true);
+      });
+  }
+
+  var formMsgTimer = null;
+
+  function formMsg(text, isErr) {
+    var el = document.getElementById('si-form-msg');
+    if (!el) return;
+    if (formMsgTimer) {
+      clearTimeout(formMsgTimer);
+      formMsgTimer = null;
+    }
+    el.textContent = text || '';
+    el.className = 'prop-msg' + (isErr ? ' prop-msg--err' : '');
+    if (!text) {
+      el.classList.add('is-fade');
+      return;
+    }
+    if (isErr || prefersReducedMotion()) {
+      el.classList.remove('is-fade');
+      if (isErr) return;
+      formMsgTimer = setTimeout(function () {
+        el.textContent = '';
+        formMsgTimer = null;
+      }, 2800);
+      return;
+    }
+    el.classList.add('is-fade');
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        el.classList.remove('is-fade');
+      });
+    });
+    formMsgTimer = setTimeout(function () {
+      el.classList.add('is-fade');
+      formMsgTimer = setTimeout(function () {
+        if (el.classList.contains('is-fade')) el.textContent = '';
+        formMsgTimer = null;
+      }, 450);
+    }, 4000);
+  }
+
+  function stopPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function startPoll(hasOpen) {
+    stopPoll();
+    if (!hasOpen) return;
+    pollTimer = setInterval(function () { load({ silent: true }); }, POLL_MS);
+  }
+
+  function isCumprimento(r) {
+    r = r || {};
+    if (r.is_cumprimento != null && r.is_cumprimento !== '') {
+      return r.is_cumprimento === true || r.is_cumprimento === 1 || r.is_cumprimento === '1' ||
+        r.is_cumprimento === 'true' || r.is_cumprimento === 'True';
+    }
+    if (String(r.tipo || '').toLowerCase() === 'cumprimento') return true;
+    var det = detalheBlock(r);
+    if (det.is_cumprimento != null && det.is_cumprimento !== '') {
+      return det.is_cumprimento === true || det.is_cumprimento === 1 || det.is_cumprimento === '1' ||
+        det.is_cumprimento === 'true';
+    }
+    return !!(String(r.numero_cumprimento || det.numero_cumprimento || '').trim());
+  }
+
+  function tipoTagHtml(r) {
+    if (isCumprimento(r)) return '<span class="si-tipo si-tipo--cump">Cumprimento</span>';
+    return '<span class="si-tipo si-tipo--inc">Incidente</span>';
+  }
+
+  function casoIdentificacao(r) {
+    r = r || {};
+    var h = casoHints[String(r.id || '')] || {};
+    if (isCumprimento(r)) {
+      var cumpNum = String(
+        r.numero_cumprimento || r.processo_label || r.processo || r.cumprimento || h.cumprimento || h.processo || ''
+      ).trim();
+      if (cumpNum) return cumpNum;
+    }
+    var proc = r.processo_label || [r.processo || h.processo, r.incidente || h.incidente].filter(Boolean).join(' / ');
+    if (proc) return proc;
+    var nome = String(r.nome_credor || r.requerente || h.nome || '').trim();
+    var cpf = fmtCpf(r.cpf_credor || r.cpf || h.cpf);
+    if (nome && cpf) return nome + ' · CPF ' + cpf;
+    if (cpf) return 'CPF ' + cpf;
+    if (nome) return nome;
+    var depre = String(r.depre || r.numero_depre || h.depre || '').trim();
+    if (depre) return 'DEPRE ' + depre;
+    var cump = String(r.cumprimento || r.numero_cumprimento || h.cumprimento || '').trim();
+    if (cump) return cump;
+    return 'Solicitação';
+  }
+
+  function renderRows(items) {
+    var tb = document.getElementById('si-tbody');
+    tb.innerHTML = items.map(function (r) {
+      var label = casoIdentificacao(r);
+      var id = r.id;
+      return '<tr>' +
+        '<td><div class="si-caso-head">' + tipoTagHtml(r) + '<div>' + esc(label) + '</div></div>' + casosResumoHtml(r) + '</td>' +
+        '<td>' + statusBadge(r.status) + filaProgressoHtml(r) + movPillsHtml(r) + '</td>' +
+        '<td>' + esc(compradores(r) || '—') + '</td>' +
+        '<td>' + esc(fmtDt(r.created_at) || '—') + '</td>' +
+        '<td>' + esc(fmtDt(r.updated_at) || '—') + '</td>' +
+        '<td><div class="si-actions">' +
+          '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm si-detalhe" data-id="' + esc(id) + '">Detalhe</button>' +
+        '</div></td>' +
+        '</tr>';
+    }).join('');
+    tb.querySelectorAll('.si-detalhe').forEach(function (btn) {
+      btn.addEventListener('click', function () { openDetail(btn.getAttribute('data-id')); });
+    });
+    tb.querySelectorAll('.si-arquivar').forEach(function (btn) {
+      if (activeListEmail) return;
+      btn.addEventListener('click', function () { setArchived(btn.getAttribute('data-id'), true, btn); });
+    });
+    tb.querySelectorAll('.si-desarquivar').forEach(function (btn) {
+      if (activeListEmail) return;
+      btn.addEventListener('click', function () { setArchived(btn.getAttribute('data-id'), false, btn); });
+    });
+  }
+
+  function renderListTabs() {
+    var box = document.getElementById('si-list-tabs');
+    if (!box) return;
+    if (!CAN_VIEW_OTHER_SOLICITACOES) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    var html = '<button type="button" class="si-list-tab' + (!activeListEmail ? ' is-on' : '') +
+      '" data-email="" aria-selected="' + (!activeListEmail ? 'true' : 'false') + '">' +
+      '<span class="si-list-tab-label">Minhas</span></button>';
+    openUserTabs.forEach(function (tab) {
+      var on = activeListEmail === tab.email;
+      html += '<button type="button" class="si-list-tab' + (on ? ' is-on' : '') +
+        '" data-email="' + esc(tab.email) + '" aria-selected="' + (on ? 'true' : 'false') + '">' +
+        '<span class="si-list-tab-label" title="' + esc(tab.email) + '">' + esc(tab.nome || tab.email) + '</span>' +
+        '<span class="si-list-tab-close" data-close="' + esc(tab.email) + '" title="Fechar" aria-label="Fechar">×</span>' +
+        '</button>';
+    });
+    box.innerHTML = html;
+    box.hidden = false;
+  }
+
+  function openUserTab(email, nome) {
+    email = String(email || '').trim().toLowerCase();
+    if (!email || !CAN_VIEW_OTHER_SOLICITACOES) return;
+    var found = null;
+    openUserTabs.forEach(function (t) { if (t.email === email) found = t; });
+    if (!found) {
+      openUserTabs.push({ email: email, nome: nome || email });
+    } else if (nome) {
+      found.nome = nome;
+    }
+    activeListEmail = email;
+    archivedView = false;
+    offset = 0;
+    renderListTabs();
+    markActiveSolicitantePills();
+    load();
+  }
+
+  function closeUserTab(email) {
+    email = String(email || '').trim().toLowerCase();
+    openUserTabs = openUserTabs.filter(function (t) { return t.email !== email; });
+    if (activeListEmail === email) {
+      activeListEmail = '';
+      offset = 0;
+    }
+    renderListTabs();
+    markActiveSolicitantePills();
+    load();
+  }
+
+  function activateOwnTab() {
+    activeListEmail = '';
+    offset = 0;
+    renderListTabs();
+    markActiveSolicitantePills();
+    load();
+  }
+
+  function markActiveSolicitantePills() {
+    document.querySelectorAll('#si-user-filters .si-filter').forEach(function (btn) {
+      var on = (btn.getAttribute('data-email') || '') === activeListEmail && !!activeListEmail;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function renderSolicitantePills(items) {
+    var wrap = document.getElementById('si-user-filters-wrap');
+    var box = document.getElementById('si-user-filters');
+    if (!wrap || !box) return;
+    if (!CAN_VIEW_OTHER_SOLICITACOES) {
+      wrap.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    solicitantesCache = Array.isArray(items) ? items : [];
+    var selfEmail = String(SELF_EMAIL || '').trim().toLowerCase();
+    solicitantesCache = solicitantesCache.filter(function (it) {
+      var email = String(it.email_solicitante || '').trim().toLowerCase();
+      return email && email !== selfEmail;
+    });
+    if (!solicitantesCache.length) {
+      wrap.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = solicitantesCache.map(function (it) {
+      var email = String(it.email_solicitante || '').trim().toLowerCase();
+      var nome = String(it.nome_solicitante || email).trim();
+      var total = it.total != null ? ' (' + it.total + ')' : '';
+      return '<button type="button" class="si-filter" data-email="' + esc(email) +
+        '" data-nome="' + esc(nome) + '" title="' + esc(email) + '">' + esc(nome + total) + '</button>';
+    }).join('');
+    wrap.hidden = false;
+    markActiveSolicitantePills();
+  }
+
+  function loadSolicitantes() {
+    if (!CAN_VIEW_OTHER_SOLICITACOES) return;
+    fetch('/api/solicitacao-inclusao/solicitantes', { credentials: 'same-origin' })
+      .then(function (r) { return readApiJson(r).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.j.ok) return;
+        renderSolicitantePills(res.j.items || []);
+      })
+      .catch(function () {});
+  }
+
+  function load(opts) {
+    opts = opts || {};
+    if (loading) return;
+    var q = document.getElementById('si-filtro-q').value.trim();
+    var params = new URLSearchParams({
+      limit: String(PAGE),
+      offset: String(offset)
+    });
+    if (q) params.set('q', q);
+    if (statusFilter && !archivedView) params.set('status', statusFilter);
+    if (tipoFilter) params.set('tipo', tipoFilter);
+    if (archivedView && !activeListEmail) params.set('arquivado', '1');
+    if (activeListEmail) params.set('email_solicitante', activeListEmail);
+    loading = true;
+    if (!opts.silent) {
+      document.getElementById('si-loading').style.display = 'flex';
+      if (!hasRows) {
+        document.getElementById('si-table').style.display = 'none';
+        document.getElementById('si-empty').style.display = 'none';
+      }
+    }
+    fetch('/api/solicitacao-inclusao?' + params.toString(), { credentials: 'same-origin' })
+      .then(function (r) { return readApiJson(r).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        loading = false;
+        document.getElementById('si-loading').style.display = 'none';
+        if (!res.ok || !res.j.ok) throw new Error((res.j && res.j.error) || 'Falha ao carregar.');
+        if (opts.notice) showBanner(opts.notice, false);
+        else if (!opts.silent) showErr('');
+        applyFilterOptions(res.j.status_options);
+        var items = res.j.items || [];
+        lastTotal = res.j.total || 0;
+        hasRows = items.length > 0;
+        var whoLabel = '';
+        if (activeListEmail) {
+          var tabInfo = openUserTabs.filter(function (t) { return t.email === activeListEmail; })[0];
+          whoLabel = ' de ' + ((tabInfo && tabInfo.nome) || activeListEmail);
+        }
+        document.getElementById('si-summary').textContent =
+          lastTotal
+            ? (lastTotal + (archivedView
+              ? (lastTotal === 1 ? ' arquivada' : ' arquivadas')
+              : (lastTotal === 1 ? ' solicitação' : ' solicitações')) + whoLabel)
+            : '';
+        document.getElementById('si-empty').textContent = (function () {
+          if (activeListEmail) return 'Nenhuma solicitação deste usuário com os filtros atuais.';
+          if (archivedView && tipoFilter === 'cumprimento') return 'Nenhuma solicitação de cumprimento arquivada.';
+          if (archivedView && tipoFilter === 'incidente') return 'Nenhuma solicitação de incidente arquivada.';
+          if (archivedView) return 'Nenhuma solicitação arquivada.';
+          if (statusFilter && tipoFilter === 'cumprimento') return 'Nenhuma solicitação de cumprimento com este estado.';
+          if (statusFilter && tipoFilter === 'incidente') return 'Nenhuma solicitação de incidente com este estado.';
+          if (statusFilter) return 'Nenhuma solicitação com este estado.';
+          if (tipoFilter === 'cumprimento') return 'Nenhuma solicitação de cumprimento.';
+          if (tipoFilter === 'incidente') return 'Nenhuma solicitação de incidente.';
+          return 'Nenhuma solicitação encontrada.';
+        })();
+        if (!items.length) {
+          document.getElementById('si-table').style.display = 'none';
+          document.getElementById('si-empty').style.display = 'block';
+          document.getElementById('si-pager').style.display = 'none';
+          startPoll(!archivedView && !!res.j.has_open);
+          return;
+        }
+        renderRows(items);
+        document.getElementById('si-table').style.display = 'table';
+        document.getElementById('si-empty').style.display = 'none';
+        var from = offset + 1;
+        var to = Math.min(offset + PAGE, lastTotal);
+        document.getElementById('si-pager-label').textContent = from + '–' + to + ' de ' + lastTotal;
+        document.getElementById('si-pager').style.display = lastTotal > PAGE ? 'flex' : 'none';
+        document.getElementById('si-prev').disabled = offset <= 0;
+        document.getElementById('si-next').disabled = offset + PAGE >= lastTotal;
+        var hasOpen = !archivedView && (!!res.j.has_open || items.some(function (it) { return isOpenRow(it); }));
+        startPoll(hasOpen);
+      })
+      .catch(function (e) {
+        loading = false;
+        document.getElementById('si-loading').style.display = 'none';
+        if (!opts.silent || !hasRows) showErr(e.message || String(e));
+      });
+  }
+
+  function kv(label, value) {
+    if (value == null || value === '') return '';
+    return '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>';
+  }
+
+  function kvHtml(label, html) {
+    if (!html) return '';
+    return '<div><dt>' + esc(label) + '</dt><dd>' + html + '</dd></div>';
+  }
+
+  function parseJsonMaybe(s) {
+    if (s && typeof s === 'object' && !Array.isArray(s)) return s;
+    if (typeof s !== 'string') return null;
+    var t = s.trim();
+    if (!t || (t.charAt(0) !== '{' && t.charAt(0) !== '[')) return null;
+    try { return JSON.parse(t); } catch (e) { return null; }
+  }
+
+  function numOrNull(v) {
+    if (v == null || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function detalheBlock(r) {
+    return (r && r.detalhe && typeof r.detalhe === 'object' && !Array.isArray(r.detalhe)) ? r.detalhe : {};
+  }
+
+  function collectCasos(r) {
+    r = r || {};
+    var det = detalheBlock(r);
+    var list = null;
+    if (Array.isArray(det.casos)) list = det.casos;
+    else if (Array.isArray(r.casos)) list = r.casos;
+    else if (Array.isArray(det.desfechos)) list = det.desfechos;
+    else if (Array.isArray(r.desfechos)) list = r.desfechos;
+    else if (r.resultado_monday && Array.isArray(r.resultado_monday.desfechos)) {
+      list = r.resultado_monday.desfechos;
+    }
+    if (!list) {
+      var parsed = parseJsonMaybe(r.mensagem) || parseJsonMaybe(r.detalhe) || parseJsonMaybe(r.motivo);
+      if (Array.isArray(parsed)) list = parsed;
+      else if (parsed && Array.isArray(parsed.casos)) list = parsed.casos;
+      else if (parsed && Array.isArray(parsed.desfechos)) list = parsed.desfechos;
+      else list = [];
+    }
+    return list.filter(function (d) { return d && typeof d === 'object'; });
+  }
+
+  function collectDesfechos(r) {
+    r = r || {};
+    var det = detalheBlock(r);
+    if (Array.isArray(det.desfechos)) return det.desfechos;
+    if (Array.isArray(r.desfechos)) return r.desfechos;
+    if (r.resultado_monday && Array.isArray(r.resultado_monday.desfechos)) {
+      return r.resultado_monday.desfechos;
+    }
+    return [];
+  }
+
+  function normTexto(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function textosSemelhantes(a, b) {
+    var na = normTexto(a);
+    var nb = normTexto(b);
+    if (!na || !nb) return false;
+    if (na === nb) return true;
+    if (na.indexOf(nb) !== -1 || nb.indexOf(na) !== -1) return true;
+    var ta = na.split(' ').filter(function (w) { return w.length > 3; });
+    var tb = nb.split(' ').filter(function (w) { return w.length > 3; });
+    if (!ta.length || !tb.length) return false;
+    var setB = {};
+    tb.forEach(function (w) { setB[w] = 1; });
+    var hit = 0;
+    ta.forEach(function (w) { if (setB[w]) hit += 1; });
+    return hit / Math.min(ta.length, tb.length) >= 0.5;
+  }
+
+  function textoCobertoPorCasos(s, casos) {
+    if (!s || !casos || !casos.length) return false;
+    return casos.some(function (d) {
+      return textosSemelhantes(s, d.motivo) ||
+        textosSemelhantes(s, d.mensagem) ||
+        textosSemelhantes(s, [d.status, statusLabel(d.status), atribuidoDe(d), d.motivo].join(' '));
+    });
+  }
+
+  function mensagemEhJsonCasos(s) {
+    var parsed = parseJsonMaybe(s);
+    if (!parsed) return false;
+    if (Array.isArray(parsed)) return true;
+    return Array.isArray(parsed.casos) || Array.isArray(parsed.desfechos);
+  }
+
+  function limparMensagemApi(s) {
+    var raw = String(s || '').trim();
+    if (!raw) return '';
+    var m = raw.match(/^status\s+html\s+bloqueado\s*:\s*(.+)$/i);
+    if (m) {
+      var val = String(m[1] || '').trim().replace(/[.\s]+$/, '');
+      var key = val.toLowerCase();
+      try { key = key.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+      if (/^extint/.test(key)) return 'O processo está extinto.';
+      if (!val) return 'O processo está bloqueado.';
+      raw = val.charAt(0).toUpperCase() + val.slice(1);
+    }
+    var cleaned = raw
+      .replace(/tabela\s+n[aã]o\s+encontrada\s+no\s+(html|sql|e-?saj)[^.|;]*/gi, '')
+      .replace(/\d+\s+movimenta[cç][oõ]es\s+lidas/gi, '')
+      .replace(/tabela_encontrada|movimentacoes_count/gi, '');
+    if (cleaned === raw) return prettyPtText(raw);
+    return prettyPtText(cleaned.replace(/[;·|]\s*[;·|]*/g, '; ').replace(/[;\s.]+$/g, '').replace(/\s{2,}/g, ' ').trim());
+  }
+
+  function casoEhApto(c) {
+    if (!c) return false;
+    if (c.apto === true || c.apto === 'true' || c.apto === 1) return true;
+    if (c.apto === false || c.apto === 'false' || c.apto === 0) return false;
+    return statusKey(c.status) !== 'INAPTO';
+  }
+
+  function separarCasos(casos) {
+    var aptos = [];
+    var inaptos = [];
+    (casos || []).forEach(function (c) {
+      if (casoEhApto(c)) aptos.push(c);
+      else inaptos.push(c);
+    });
+    return { aptos: aptos, inaptos: inaptos };
+  }
+
+  function casosCounts(r, split) {
+    r = r || {};
+    var det = detalheBlock(r);
+    split = split || separarCasos(collectCasos(r));
+    var aptos = numOrNull(det.casos_aptos_count);
+    if (aptos == null) aptos = numOrNull(r.casos_aptos_count);
+    if (aptos == null) aptos = split.aptos.length;
+    var inaptos = numOrNull(det.casos_inaptos_count);
+    if (inaptos == null) inaptos = numOrNull(r.casos_inaptos_count);
+    if (inaptos == null) inaptos = split.inaptos.length;
+    var total = numOrNull(det.casos_count);
+    if (total == null) total = numOrNull(r.casos_count);
+    if (total == null) total = aptos + inaptos;
+    return { aptos: aptos, inaptos: inaptos, total: total };
+  }
+
+  function casosResumoHtml(r) {
+    var c = casosCounts(r);
+    if (!c.total && !c.aptos && !c.inaptos) return '';
+    return '<span class="si-caso-resumo">' + c.aptos + ' aptos · ' + c.inaptos + ' inaptos</span>';
+  }
+
+  function processoIncidente(d) {
+    var label = String(d.processo_label || '').trim();
+    if (label) return label;
+    var p = String(d.processo || '').trim();
+    var i = String(d.incidente || '').trim();
+    if (p && i && p.indexOf('/') === -1) return p + '/' + i;
+    return p || i || '';
+  }
+
+  function escapeRe(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function cleanMotivo(d, procLabel) {
+    var raw = String(d.motivo || d.mensagem || d.detalhe || '').trim();
+    if (!raw) return '';
+    if (raw.charAt(0) === '{' || raw.charAt(0) === '[') return '';
+    [procLabel, d.processo, String(d.processo || '') + '/' + String(d.incidente || '')].forEach(function (pre) {
+      pre = String(pre || '').trim();
+      if (!pre) return;
+      raw = raw.replace(new RegExp('^' + escapeRe(pre) + '\\s*:\\s*', 'i'), '');
+    });
+    raw = raw.replace(/\s*\(item_id=\d+\)/gi, '');
+    raw = raw.replace(/^\s*Elemento\s+\S+\s+criado;?\s*/i, '');
+    return limparMensagemApi(raw.replace(/^;\s*/, '').trim());
+  }
+
+  function atribuidoDe(d) {
+    if (d.comprador) return String(d.comprador).trim();
+    if (d.atribuido) return String(d.atribuido).trim();
+    if (Array.isArray(d.compradores) && d.compradores.length) {
+      return d.compradores.filter(Boolean).join(', ');
+    }
+    var list = d.compradores_existentes;
+    if (Array.isArray(list) && list.length) {
+      return list.filter(Boolean).join(', ');
+    }
+    return '';
+  }
+
+  function mondayIdFrom(d) {
+    var names = [];
+    function add(v) {
+      v = String(v || '').trim();
+      if (!v || names.indexOf(v) >= 0) return;
+      names.push(v);
+    }
+    if (!d || typeof d !== 'object') return '';
+    add(d.item_name);
+    add(d.monday_item_name);
+    add(d.elemento);
+    var matches = d.matches;
+    if (Array.isArray(matches)) {
+      matches.forEach(function (m) {
+        if (m && typeof m === 'object') add(m.item_name);
+      });
+    }
+    if (!names.length) {
+      var raw = String(d.detalhe || d.mensagem || d.motivo || '');
+      var m = raw.match(/Elemento\s+(\S+)\s+criado/i);
+      if (m) add(m[1]);
+    }
+    return names.join(', ');
+  }
+
+  function mondayIdDe(d, desfechoMap) {
+    var fromSelf = mondayIdFrom(d);
+    if (fromSelf) return fromSelf;
+    var key = processoIncidente(d);
+    var other = key && desfechoMap ? desfechoMap[key] : null;
+    if (other && other !== d) return mondayIdFrom(other);
+    return '';
+  }
+
+  function renderCasos(list, opts) {
+    opts = opts || {};
+    var inapto = !!opts.inapto;
+    var desfechoMap = opts.desfechoMap || {};
+    return '<div class="si-cases">' + list.map(function (d) {
+      var proc = processoIncidente(d);
+      var st = inapto ? (d.status || 'INAPTO') : d.status;
+      var who = inapto ? '' : atribuidoDe(d);
+      var mondayId = inapto ? '' : mondayIdDe(d, desfechoMap);
+      var motivo = cleanMotivo(d, proc);
+      if (inapto && !motivo) {
+        var rawMotivo = String(d.motivo || '').trim();
+        if (rawMotivo && rawMotivo.charAt(0) !== '{' && rawMotivo.charAt(0) !== '[') motivo = rawMotivo;
+      }
+      var html = '<article class="si-case' + (inapto ? ' si-case--inapto' : '') + '"><div class="si-case-head">';
+      html += '<strong class="si-case-proc">' + esc(proc || '—') + '</strong>';
+      if (st) html += statusBadge(st);
+      if (isTruthyFlag(d.analise_gemini)) html += geminiTagHtml();
+      html += '</div><dl class="si-case-kv">';
+      if (!inapto && mondayId) {
+        html += '<dt>ID na Monday</dt><dd>' + esc(mondayId) + '</dd>';
+      }
+      if (!inapto) {
+        if (who) {
+          html += '<dt>Atribuído</dt><dd>' + esc(who) + '</dd>';
+        } else if (/não vinculado|nao vinculado|sem comprador|não é label/i.test(motivo) || statusKey(st) === 'SEM_COMPRADOR') {
+          html += '<dt>Atribuído</dt><dd>Não vinculado</dd>';
+        }
+      }
+      if (motivo && (inapto || (motivo !== proc && motivo !== statusLabel(st)))) {
+        html += '<dt>Motivo</dt><dd class="' + (inapto ? 'si-case-motivo' : '') + '">' + esc(motivo) + '</dd>';
+      }
+      html += '</dl></article>';
+      return html;
+    }).join('') + '</div>';
+  }
+
+  function tabBtn(id, label, n) {
+    var on = detailTab === id;
+    return '<button type="button" class="si-tab' + (on ? ' is-on' : '') + '" role="tab" data-tab="' + id +
+      '" aria-selected="' + (on ? 'true' : 'false') + '">' +
+      esc(label) + ' <span class="si-tab-count">(' + n + ')</span></button>';
+  }
+
+  function renderCasosTabs(r) {
+    var casos = collectCasos(r);
+    var split = separarCasos(casos);
+    var counts = casosCounts(r, split);
+    if (!casos.length && !counts.total && !counts.aptos && !counts.inaptos) return '';
+    var desfechoMap = {};
+    collectDesfechos(r).forEach(function (d) {
+      if (!d || typeof d !== 'object') return;
+      var key = processoIncidente(d);
+      if (key) desfechoMap[key] = d;
+    });
+    var html = '<div class="si-detail-block">';
+    html += '<div class="si-tabs" role="tablist" aria-label="Casos da solicitação">';
+    html += tabBtn('aptos', 'APTOS', counts.aptos);
+    html += tabBtn('inaptos', 'INAPTOS', counts.inaptos);
+    html += '</div>';
+    html += '<div class="si-tab-panel" data-panel="aptos"' + (detailTab === 'aptos' ? '' : ' hidden') + '>';
+    html += split.aptos.length
+      ? renderCasos(split.aptos, { inapto: false, desfechoMap: desfechoMap })
+      : '<p class="si-empty-tab">Nenhum caso apto nesta solicitação.</p>';
+    html += '</div>';
+    html += '<div class="si-tab-panel" data-panel="inaptos"' + (detailTab === 'inaptos' ? '' : ' hidden') + '>';
+    html += split.inaptos.length
+      ? renderCasos(split.inaptos, { inapto: true })
+      : '<p class="si-empty-tab">Nenhum caso inapto nesta solicitação.</p>';
+    html += '</div></div>';
+    return html;
+  }
+
+  function bindDetailUi(content, r) {
+    content.querySelectorAll('.si-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        detailTab = btn.getAttribute('data-tab') || 'aptos';
+        content.querySelectorAll('.si-tab').forEach(function (b) {
+          var on = b.getAttribute('data-tab') === detailTab;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        content.querySelectorAll('.si-tab-panel').forEach(function (p) {
+          p.hidden = p.getAttribute('data-panel') !== detailTab;
+        });
+      });
+    });
+    content.querySelectorAll('.si-arquivar').forEach(function (btn) {
+      if (detailOpenEmail) {
+        btn.hidden = true;
+        return;
+      }
+      btn.addEventListener('click', function () { setArchived(btn.getAttribute('data-id'), true, btn); });
+    });
+    content.querySelectorAll('.si-desarquivar').forEach(function (btn) {
+      if (detailOpenEmail) {
+        btn.hidden = true;
+        return;
+      }
+      btn.addEventListener('click', function () { setArchived(btn.getAttribute('data-id'), false, btn); });
+    });
+    content.querySelectorAll('.si-auto-view').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        abrirAutoPdf(btn.getAttribute('data-id'), btn.getAttribute('data-indice'), btn.getAttribute('data-title'), false);
+      });
+    });
+    content.querySelectorAll('.si-auto-dl').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        abrirAutoPdf(btn.getAttribute('data-id'), btn.getAttribute('data-indice'), btn.getAttribute('data-title'), true);
+      });
+    });
+    content.querySelectorAll('.si-auto-all').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        abrirAutoPdf(btn.getAttribute('data-id'), null, 'Autos do cumprimento', false);
+      });
+    });
+    content.querySelectorAll('.si-txt-view').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        abrirAutoTexto(btn.getAttribute('data-id'), btn.getAttribute('data-tipo'), btn.getAttribute('data-title'), false);
+      });
+    });
+    content.querySelectorAll('.si-txt-dl').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        abrirAutoTexto(btn.getAttribute('data-id'), btn.getAttribute('data-tipo'), btn.getAttribute('data-title'), true);
+      });
+    });
+    content.querySelectorAll('.si-gemini-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var section = btn.closest('.si-gemini');
+        var panel = section && section.querySelector('.si-gemini-details');
+        if (!panel) return;
+        var open = panel.hasAttribute('hidden');
+        if (open) panel.removeAttribute('hidden');
+        else panel.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.textContent = open ? 'Ocultar' : 'Detalhes';
+      });
+    });
+  }
+
+  var pdfObjectUrl = null;
+  var pdfLoading = false;
+  var txtSource = '';
+  var txtMatchIndex = 0;
+  var txtMatchCount = 0;
+  var txtFindTimer = null;
+
+  function autosPdfPath(solId, indice, download) {
+    var path = '/api/solicitacao-inclusao/' + encodeURIComponent(solId) + '/autos';
+    if (indice != null && indice !== '') path += '/' + encodeURIComponent(String(indice));
+    var qs = [];
+    if (download) qs.push('download=1');
+    if (detailOpenEmail) qs.push('email_solicitante=' + encodeURIComponent(detailOpenEmail));
+    if (qs.length) path += '?' + qs.join('&');
+    return path;
+  }
+
+  function autosTextoPath(solId, tipo, download) {
+    var path = '/api/solicitacao-inclusao/' + encodeURIComponent(solId) + '/autos/texto/' + encodeURIComponent(String(tipo || ''));
+    var qs = [];
+    if (download) qs.push('download=1');
+    if (detailOpenEmail) qs.push('email_solicitante=' + encodeURIComponent(detailOpenEmail));
+    if (qs.length) path += '?' + qs.join('&');
+    return path;
+  }
+
+  function filenameFromHeader(header, fallback) {
+    var h = String(header || '');
+    var m = h.match(/filename\*?=(?:UTF-8''|")?([^\";]+)/i);
+    if (m) {
+      try { return decodeURIComponent(m[1].replace(/"/g, '').trim()); } catch (e) {
+        return m[1].replace(/"/g, '').trim();
+      }
+    }
+    return fallback || 'autos.pdf';
+  }
+
+  function resetTxtView() {
+    txtSource = '';
+    txtMatchIndex = 0;
+    txtMatchCount = 0;
+    if (txtFindTimer) { clearTimeout(txtFindTimer); txtFindTimer = null; }
+    var pre = document.getElementById('si-txt-pre');
+    var find = document.getElementById('si-txt-find');
+    var q = document.getElementById('si-txt-q');
+    var count = document.getElementById('si-txt-find-count');
+    if (pre) { pre.hidden = true; pre.textContent = ''; }
+    if (find) find.hidden = true;
+    if (q) q.value = '';
+    if (count) count.textContent = '';
+  }
+
+  function setTxtCountLabel() {
+    var count = document.getElementById('si-txt-find-count');
+    if (!count) return;
+    var q = (document.getElementById('si-txt-q') || {}).value || '';
+    if (!String(q).trim()) {
+      count.textContent = '';
+      return;
+    }
+    if (!txtMatchCount) {
+      count.textContent = 'Nenhuma ocorrência';
+      return;
+    }
+    count.textContent = (txtMatchIndex + 1) + ' de ' + txtMatchCount;
+  }
+
+  function collectTxtMatchStarts(needle) {
+    var starts = [];
+    if (!needle) return starts;
+    var src = txtSource;
+    var lower = src.toLowerCase();
+    var q = needle.toLowerCase();
+    var from = 0;
+    while (from < src.length) {
+      var at = lower.indexOf(q, from);
+      if (at < 0) break;
+      starts.push(at);
+      from = at + Math.max(q.length, 1);
+    }
+    return starts;
+  }
+
+  function renderTxtHighlights(currentIdx) {
+    var pre = document.getElementById('si-txt-pre');
+    if (!pre) return;
+    var qEl = document.getElementById('si-txt-q');
+    var needle = String((qEl && qEl.value) || '');
+    if (!needle) {
+      pre.textContent = txtSource;
+      txtMatchCount = 0;
+      txtMatchIndex = 0;
+      setTxtCountLabel();
+      return;
+    }
+    var starts = collectTxtMatchStarts(needle);
+    txtMatchCount = starts.length;
+    if (!txtMatchCount) {
+      txtMatchIndex = 0;
+      pre.textContent = txtSource;
+      setTxtCountLabel();
+      return;
+    }
+    if (currentIdx == null || currentIdx < 0) currentIdx = 0;
+    txtMatchIndex = currentIdx % txtMatchCount;
+    var qLen = needle.length;
+    var maxMarks = 400;
+    var first = 0;
+    var last = txtMatchCount;
+    if (txtMatchCount > maxMarks) {
+      first = Math.max(0, txtMatchIndex - Math.floor(maxMarks / 2));
+      last = Math.min(txtMatchCount, first + maxMarks);
+      first = Math.max(0, last - maxMarks);
+    }
+    var parts = [];
+    var from = 0;
+    if (first > 0) {
+      parts.push(esc(txtSource.slice(0, starts[first])));
+      from = starts[first];
+    }
+    for (var n = first; n < last; n++) {
+      var at = starts[n];
+      if (from < at) parts.push(esc(txtSource.slice(from, at)));
+      var cls = n === txtMatchIndex ? ' class="is-on"' : '';
+      parts.push('<mark' + cls + '>' + esc(txtSource.slice(at, at + qLen)) + '</mark>');
+      from = at + qLen;
+    }
+    if (from < txtSource.length) parts.push(esc(txtSource.slice(from)));
+    pre.innerHTML = parts.join('');
+    setTxtCountLabel();
+    var on = pre.querySelector('mark.is-on');
+    if (on && typeof on.scrollIntoView === 'function') {
+      on.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
+  }
+
+  function applyTxtFind(resetIndex) {
+    var qEl = document.getElementById('si-txt-q');
+    var needle = String((qEl && qEl.value) || '');
+    if (!needle) {
+      renderTxtHighlights(0);
+      return;
+    }
+    var starts = collectTxtMatchStarts(needle);
+    txtMatchCount = starts.length;
+    var next = resetIndex ? 0 : txtMatchIndex;
+    if (!txtMatchCount) next = 0;
+    else if (next >= txtMatchCount) next = 0;
+    renderTxtHighlights(next);
+  }
+
+  function stepTxtFind(dir) {
+    if (!txtMatchCount) {
+      applyTxtFind(true);
+      return;
+    }
+    var next = (txtMatchIndex + dir + txtMatchCount) % txtMatchCount;
+    renderTxtHighlights(next);
+  }
+
+  function scheduleTxtFind() {
+    if (txtFindTimer) clearTimeout(txtFindTimer);
+    txtFindTimer = setTimeout(function () {
+      txtFindTimer = null;
+      applyTxtFind(true);
+    }, 80);
+  }
+
+  function revokePdfUrl() {
+    if (pdfObjectUrl) {
+      try { URL.revokeObjectURL(pdfObjectUrl); } catch (e) {}
+      pdfObjectUrl = null;
+    }
+    var frame = document.getElementById('si-pdf-frame');
+    if (frame) {
+      frame.src = 'about:blank';
+      frame.hidden = true;
+    }
+  }
+
+  function closePdfModal() {
+    revokePdfUrl();
+    resetTxtView();
+    var err = document.getElementById('si-pdf-err');
+    if (err) { err.hidden = true; err.textContent = ''; }
+    var loading = document.getElementById('si-pdf-loading');
+    if (loading) loading.style.display = 'none';
+    closeSiModal(document.getElementById('si-pdf-modal'));
+  }
+
+  function abrirAnexo(path, titulo, download, fallbackName, missingLabel, asText) {
+    if (!CAN_VIEW_AUTOS || !path || pdfLoading) return;
+    var missing = missingLabel || 'Documento ainda não disponível.';
+    if (download) {
+      pdfLoading = true;
+      fetch(path, { credentials: 'same-origin' })
+        .then(function (res) {
+          if (res.status === 410) throw new Error('Documentos expirados. Solicite reprocessamento se necessário.');
+          if (!res.ok) {
+            var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+            if (ct.indexOf('json') >= 0) {
+              return res.json().then(function (j) {
+                throw new Error((j && j.error) || 'Falha ao baixar o documento.');
+              });
+            }
+            throw new Error(res.status === 404 ? missing : (res.status === 403 ? 'Você não tem permissão para acessar os autos.' : 'Falha ao baixar o documento.'));
+          }
+          var name = filenameFromHeader(res.headers.get('Content-Disposition'), fallbackName);
+          return res.blob().then(function (blob) { return { blob: blob, name: name }; });
+        })
+        .then(function (o) {
+          var url = URL.createObjectURL(o.blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = o.name || fallbackName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        })
+        .catch(function (e) {
+          showBanner(e.message || String(e), true);
+        })
+        .then(function () { pdfLoading = false; });
+      return;
+    }
+    var modal = document.getElementById('si-pdf-modal');
+    var titleEl = document.getElementById('si-pdf-title');
+    var frame = document.getElementById('si-pdf-frame');
+    var err = document.getElementById('si-pdf-err');
+    var loading = document.getElementById('si-pdf-loading');
+    if (titleEl) titleEl.textContent = titulo || 'Documento';
+    if (err) { err.hidden = true; err.textContent = ''; }
+    revokePdfUrl();
+    resetTxtView();
+    if (loading) loading.style.display = 'flex';
+    if (frame) frame.hidden = true;
+    openSiModal(modal);
+    pdfLoading = true;
+    fetch(path, { credentials: 'same-origin' })
+      .then(function (res) {
+        if (res.status === 410) throw new Error('Documentos expirados. Solicite reprocessamento se necessário.');
+        if (!res.ok) {
+          var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+          if (ct.indexOf('json') >= 0) {
+            return res.json().then(function (j) {
+              throw new Error((j && j.error) || 'Falha ao abrir o documento.');
+            });
+          }
+          throw new Error(res.status === 404 ? missing : (res.status === 403 ? 'Você não tem permissão para acessar os autos.' : 'Falha ao abrir o documento.'));
+        }
+        if (asText) return res.text();
+        return res.blob();
+      })
+      .then(function (payload) {
+        if (loading) loading.style.display = 'none';
+        if (asText) {
+          txtSource = String(payload || '').replace(/^\uFEFF/, '');
+          var find = document.getElementById('si-txt-find');
+          var pre = document.getElementById('si-txt-pre');
+          if (find) find.hidden = false;
+          if (pre) {
+            pre.hidden = false;
+            pre.textContent = txtSource;
+          }
+          var q = document.getElementById('si-txt-q');
+          if (q) {
+            q.value = '';
+            setTimeout(function () { try { q.focus(); } catch (e) {} }, 40);
+          }
+          setTxtCountLabel();
+          return;
+        }
+        pdfObjectUrl = URL.createObjectURL(payload);
+        if (frame) {
+          frame.hidden = false;
+          frame.src = pdfObjectUrl;
+        }
+      })
+      .catch(function (e) {
+        if (loading) loading.style.display = 'none';
+        if (err) {
+          err.hidden = false;
+          err.textContent = e.message || String(e);
+        }
+      })
+      .then(function () { pdfLoading = false; });
+  }
+
+  function abrirAutoPdf(solId, indice, titulo, download) {
+    if (!CAN_VIEW_AUTOS || !solId || pdfLoading) return;
+    var fallbackName = (titulo ? String(titulo).replace(/[^\w\-]+/g, '_').slice(0, 80) : 'autos') + '.pdf';
+    abrirAnexo(autosPdfPath(solId, indice, !!download), titulo || 'Auto', !!download, fallbackName, 'Autos ainda não disponíveis.');
+  }
+
+  function abrirAutoTexto(solId, tipo, titulo, download) {
+    var kind = String(tipo || '').trim().toLowerCase();
+    if (!CAN_VIEW_AUTOS || !solId || pdfLoading || (kind !== 'completo' && kind !== 'filtrado')) return;
+    var fallbackName = (titulo ? String(titulo).replace(/[^\w\-]+/g, '_').slice(0, 80) : 'autos') + '.txt';
+    abrirAnexo(autosTextoPath(solId, kind, !!download), titulo || 'Texto', !!download, fallbackName, 'Textos ainda não disponíveis.', true);
+  }
+
+  function stopDetailPoll() {
+    if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
+  }
+
+  function startDetailPoll(id) {
+    stopDetailPoll();
+    detailPollTimer = setInterval(function () {
+      fetchAndRenderDetail(id, { silent: true });
+    }, POLL_MS);
+  }
+
+  function renderDetail(r) {
+    var content = document.getElementById('si-modal-content');
+    saveCasoHint(r.id, {
+      processo: r.processo || r.processo_label,
+      incidente: r.incidente,
+      cpf: r.cpf_credor || r.cpf,
+      nome: r.nome_credor || r.requerente,
+      depre: r.depre || r.numero_depre,
+      cumprimento: r.cumprimento
+    });
+    var casos = collectCasos(r);
+    var casosTemAtribuido = casos.some(function (d) { return !!atribuidoDe(d); });
+    var comps = casosTemAtribuido ? '' : compradores(r);
+    var credor = r.nome_credor || r.requerente || '';
+    var processo = r.processo_label || r.processo || '';
+    var titulo = casoIdentificacao(r) || processo || credor || 'Solicitação de Inclusão';
+    var movHtml = movimentacoesEsajHtml(r);
+    var avHtml = avaliacaoCumprimentoHtml(r);
+    var html = '<div class="si-detail">';
+    html += '<div class="si-detail-head">' + tipoTagHtml(r) + statusBadge(r.status);
+    if (teveAnaliseGemini(r)) html += geminiTagHtml();
+    if (r.arquivado) html += '<span class="si-badge si-badge--muted">Arquivado</span>';
+    html += '</div>';
+    html += '<div class="si-detail-grid' + (movHtml || avHtml ? '' : ' si-detail-grid--solo') + '">';
+    html += '<section class="si-detail-card"><h3>Identificação</h3><dl class="si-detail-kv">' +
+      kv('Processo', isCumprimento(r) ? '' : processo) +
+      kv('Incidente', isCumprimento(r) ? '' : r.incidente) +
+      kv('Nº cumprimento', isCumprimento(r) ? (r.numero_cumprimento || processo) : '') +
+      kv('Credor', credor) +
+      kv('CPF', fmtCpf(r.cpf_credor || r.cpf)) +
+      kv('Solicitante', r.nome_solicitante) +
+      kv('E-mail', r.email_solicitante) +
+      kv('Comprador(es)', comps) +
+      kv('Criado', fmtDt(r.created_at)) +
+      kv('Atualizado', fmtDt(r.updated_at));
+    if (r.arquivado) {
+      html += kv('Arquivado em', fmtDt(r.arquivado_em)) + kv('Arquivado por', r.arquivado_por);
+    }
+    html += '</dl></section>';
+    if (movHtml || avHtml) {
+      html += '<section class="si-detail-card">' + (movHtml || avHtml) + '</section>';
+    }
+    html += '</div>';
+    html += credorBannerHtml(r);
+    html += analiseGeminiHtml(r);
+    html += autosCumprimentoHtml(r);
+    var rawMsg = mensagemSemResumoMov(
+      limparMensagemApi(typeof r.mensagem === 'string' ? r.mensagem.trim() : ''),
+      r
+    );
+    var motivo = limparMensagemApi(typeof r.motivo === 'string' ? r.motivo.trim() : '');
+    if (casos.length && mensagemEhJsonCasos(rawMsg)) rawMsg = '';
+    if (casos.length && mensagemEhJsonCasos(motivo)) motivo = '';
+    if (casos.length) {
+      if (textoCobertoPorCasos(rawMsg, casos)) rawMsg = '';
+      if (textoCobertoPorCasos(motivo, casos)) motivo = '';
+    }
+    if (motivo && (motivo === rawMsg || textosSemelhantes(motivo, rawMsg))) motivo = '';
+    var isErr = statusKey(r.status) === 'ERRO' || /error|erro|401|403|500/i.test(rawMsg + ' ' + motivo);
+    if (rawMsg && rawMsg !== JSON.stringify(casos)) {
+      html += '<div class="si-detail-block"><h3>Mensagem</h3><p class="si-detail-note' + (isErr ? ' si-detail-note--err' : '') + '">' + esc(rawMsg) + '</p></div>';
+    }
+    if (motivo) {
+      html += '<div class="si-detail-block"><h3>Motivo</h3><p class="si-detail-note' + (isErr ? ' si-detail-note--err' : '') + '">' + esc(motivo) + '</p></div>';
+    }
+    html += renderCasosTabs(r);
+    html += '</div>';
+    document.getElementById('si-modal-title').textContent = titulo;
+    content.innerHTML = html;
+    bindDetailUi(content, r);
+  }
+
+  function fetchAndRenderDetail(id, opts) {
+    opts = opts || {};
+    if (detailLoading && opts.silent) return;
+    var modal = document.getElementById('si-modal');
+    var content = document.getElementById('si-modal-content');
+    if (opts.initial) {
+      content.innerHTML = '<div class="camp-loading"><div class="camp-spin"></div> Carregando detalhe...</div>';
+      openSiModal(modal);
+    }
+    detailLoading = true;
+    var detailUrl = '/api/solicitacao-inclusao/' + encodeURIComponent(id);
+    if (detailOpenEmail) {
+      detailUrl += '?email_solicitante=' + encodeURIComponent(detailOpenEmail);
+    }
+    fetch(detailUrl, { credentials: 'same-origin' })
+      .then(function (r) { return readApiJson(r).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        detailLoading = false;
+        if (detailOpenId !== id) return;
+        if (!res.ok || !res.j.ok) throw new Error((res.j && res.j.error) || 'Falha ao carregar detalhe.');
+        renderDetail(res.j);
+        if (isOpenRow(res.j)) startDetailPoll(id);
+        else stopDetailPoll();
+      })
+      .catch(function (e) {
+        detailLoading = false;
+        if (detailOpenId !== id) return;
+        if (opts.silent) return;
+        content.innerHTML = '<p class="camp-msg camp-msg-err">' + esc(e.message || String(e)) + '</p>';
+        stopDetailPoll();
+      });
+  }
+
+  function openDetail(id) {
+    detailOpenId = id;
+    detailOpenEmail = activeListEmail || '';
+    detailTab = 'aptos';
+    stopDetailPoll();
+    fetchAndRenderDetail(id, { initial: true });
+  }
+
+  function closeModal() {
+    detailOpenId = null;
+    detailOpenEmail = '';
+    stopDetailPoll();
+    closePdfModal();
+    closeSiModal(document.getElementById('si-modal'));
+  }
+
+  function setArchived(id, archive, btn) {
+    if (!id) return;
+    if (btn) btn.disabled = true;
+    fetch('/api/solicitacao-inclusao/' + encodeURIComponent(id) + '/arquivo', {
+      method: archive ? 'POST' : 'DELETE',
+      credentials: 'same-origin'
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (btn) btn.disabled = false;
+        if (!res.ok || !res.j.ok) throw new Error((res.j && res.j.error) || 'Falha ao atualizar arquivo.');
+        closeModal();
+        load();
+      })
+      .catch(function (e) {
+        if (btn) btn.disabled = false;
+        showErr(e.message || String(e));
+      });
+  }
+
+  function enviarSolicitacao(body, confirmDup) {
+    var btn = document.getElementById('si-submit');
+    var payload = {};
+    Object.keys(body || {}).forEach(function (k) { payload[k] = body[k]; });
+    if (confirmDup) payload.confirmar_duplicado = true;
+    else delete payload.confirmar_duplicado;
+    submitting = true;
+    if (btn) btn.disabled = true;
+    formMsg('');
+    fetch('/api/solicitacao-inclusao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+      .then(function (res) {
+        submitting = false;
+        if (res.status === 409 || (res.j && res.j.code === 'duplicate_open')) {
+          showDuplicateConfirm(res.j, body);
+          syncCooldownUi();
+          return;
+        }
+        if (res.status === 429 || (res.j && res.j.code === 'cooldown')) {
+          applyCooldownFromPayload(res.j);
+          showCooldownAlert();
+          formMsg((res.j && res.j.error) || 'Aguarde para enviar outra solicitação.', true);
+          return;
+        }
+        if (!res.ok || !res.j.ok) throw new Error((res.j && res.j.error) || 'Falha ao enviar.');
+        closeConfirmModal();
+        applyCooldownFromPayload(res.j);
+        saveCasoHint(res.j.id, {
+          processo: body.processo,
+          incidente: body.incidente,
+          cpf: body.cpf_credor,
+          nome: body.requerente,
+          cumprimento: body.numero_cumprimento
+        });
+        ['si-processo','si-incidente','si-cpf','si-requerente','si-n-cumprimento'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        formMsg('Solicitação enviada' + (res.j.status ? ' (' + res.j.status + ')' : '') + '.');
+        offset = 0;
+        load();
+      })
+      .catch(function (e) {
+        submitting = false;
+        syncCooldownUi();
+        formMsg(e.message || String(e), true);
+      });
+  }
+
+  document.getElementById('si-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (cooldownRemainingMs() > 0) {
+      showCooldownAlert();
+      return;
+    }
+    var isCump = cumprimentoOn();
+    var body = {
+      is_cumprimento: isCump,
+      cpf_credor: document.getElementById('si-cpf').value.replace(/\D/g, ''),
+      requerente: normCredorNome(document.getElementById('si-requerente').value, false)
+    };
+    if (isCump) {
+      body.numero_cumprimento = document.getElementById('si-n-cumprimento').value;
+      if (!String(body.numero_cumprimento || '').replace(/\D/g, '')) {
+        formMsg('Informe o número do processo de cumprimento.', true);
+        return;
+      }
+    } else {
+      body.processo = document.getElementById('si-processo').value;
+      body.incidente = document.getElementById('si-incidente').value.replace(/\D/g, '');
+      if (!String(body.processo || '').replace(/\D/g, '')) {
+        formMsg('Informe o número do processo.', true);
+        return;
+      }
+      if (!String(body.incidente || '').replace(/\D/g, '')) {
+        formMsg('Informe o incidente.', true);
+        return;
+      }
+    }
+    if (!String(body.requerente || '').trim() && !String(body.cpf_credor || '').replace(/\D/g, '')) {
+      formMsg('Informe o nome do credor ou o CPF.', true);
+      return;
+    }
+    if (body.cpf_credor && body.cpf_credor.length !== 11 && body.cpf_credor.length !== 14) {
+      formMsg('CPF/CNPJ deve ter 11 ou 14 dígitos.', true);
+      return;
+    }
+    enviarSolicitacao(body, false);
+  });
+
+  document.getElementById('si-limpar').addEventListener('click', function () {
+    ['si-processo','si-incidente','si-cpf','si-requerente','si-n-cumprimento'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    formMsg('');
+  });
+
+  bindDigitMask(document.getElementById('si-cpf'), maskCpfInput);
+  bindDigitMask(document.getElementById('si-processo'), maskCnj);
+  bindDigitMask(document.getElementById('si-incidente'), maskDigits(10));
+  bindDigitMask(document.getElementById('si-n-cumprimento'), maskCnj);
+  bindNomeCredor(document.getElementById('si-requerente'));
+  var modoCump = document.getElementById('si-modo-cumprimento');
+  if (modoCump) {
+    modoCump.addEventListener('change', function () { syncCumprimentoMode(); });
+    syncCumprimentoMode({ instant: true });
+  }
+
+  document.getElementById('si-filters').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.si-filter');
+    if (!btn) return;
+    statusFilter = btn.getAttribute('data-status') || '';
+    archivedView = btn.getAttribute('data-archived') === '1';
+    if (activeListEmail) archivedView = false;
+    offset = 0;
+    markActiveFilters();
+    load();
+  });
+
+  document.getElementById('si-tipo-filters').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.si-filter');
+    if (!btn) return;
+    tipoFilter = btn.getAttribute('data-tipo') || '';
+    offset = 0;
+    markActiveFilters();
+    load();
+  });
+
+  var userFilters = document.getElementById('si-user-filters');
+  if (userFilters) {
+    userFilters.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('.si-filter');
+      if (!btn) return;
+      openUserTab(btn.getAttribute('data-email'), btn.getAttribute('data-nome'));
+    });
+  }
+
+  var listTabs = document.getElementById('si-list-tabs');
+  if (listTabs) {
+    listTabs.addEventListener('click', function (ev) {
+      var closer = ev.target.closest('[data-close]');
+      if (closer) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeUserTab(closer.getAttribute('data-close'));
+        return;
+      }
+      var tab = ev.target.closest('.si-list-tab');
+      if (!tab) return;
+      var email = tab.getAttribute('data-email') || '';
+      if (!email) activateOwnTab();
+      else openUserTab(email, (tab.querySelector('.si-list-tab-label') || {}).textContent || email);
+    });
+  }
+
+  document.getElementById('si-filtro-q').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); offset = 0; load(); }
+  });
+  document.getElementById('si-refresh').addEventListener('click', function () { load(); });
+  document.getElementById('si-prev').addEventListener('click', function () {
+    offset = Math.max(0, offset - PAGE);
+    load();
+  });
+  document.getElementById('si-next').addEventListener('click', function () {
+    offset += PAGE;
+    load();
+  });
+  document.getElementById('si-modal-close').addEventListener('click', closeModal);
+  document.getElementById('si-modal-backdrop').addEventListener('click', closeModal);
+  document.getElementById('si-pdf-close').addEventListener('click', closePdfModal);
+  document.getElementById('si-pdf-backdrop').addEventListener('click', closePdfModal);
+  var txtQ = document.getElementById('si-txt-q');
+  if (txtQ) {
+    txtQ.addEventListener('input', scheduleTxtFind);
+    txtQ.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        stepTxtFind(ev.shiftKey ? -1 : 1);
+      }
+    });
+  }
+  var txtPrev = document.getElementById('si-txt-find-prev');
+  var txtNext = document.getElementById('si-txt-find-next');
+  if (txtPrev) txtPrev.addEventListener('click', function () { stepTxtFind(-1); });
+  if (txtNext) txtNext.addEventListener('click', function () { stepTxtFind(1); });
+  document.getElementById('si-alert-close').addEventListener('click', closeCooldownAlert);
+  document.getElementById('si-alert-ok').addEventListener('click', closeCooldownAlert);
+  document.getElementById('si-alert-backdrop').addEventListener('click', closeCooldownAlert);
+  document.getElementById('si-confirm-close').addEventListener('click', function () {
+    if (!confirmModalIsArmed()) return;
+    closeConfirmModal();
+  });
+  document.getElementById('si-confirm-cancel').addEventListener('click', function () {
+    if (!confirmModalIsArmed()) return;
+    closeConfirmModal();
+  });
+  document.getElementById('si-confirm-backdrop').addEventListener('click', function () {
+    if (!confirmModalIsArmed()) return;
+    closeConfirmModal();
+  });
+  document.getElementById('si-confirm-send').addEventListener('click', function () {
+    if (submitting) return;
+    if (!confirmModalIsArmed()) return;
+    if (!pendingCreateBody) {
+      closeConfirmModal();
+      return;
+    }
+    if (cooldownRemainingMs() > 0) {
+      closeConfirmModal();
+      showCooldownAlert();
+      return;
+    }
+    var body = pendingCreateBody;
+    closeSiModal(document.getElementById('si-confirm-modal'));
+    enviarSolicitacao(body, true);
+  });
+  var purgeBtn = document.getElementById('si-purge');
+  if (purgeBtn) {
+    purgeBtn.addEventListener('click', showPurgeConfirm);
+    document.getElementById('si-purge-close').addEventListener('click', function () {
+      if (purging || !purgeModalIsArmed()) return;
+      closePurgeModal();
+    });
+    document.getElementById('si-purge-cancel').addEventListener('click', function () {
+      if (purging || !purgeModalIsArmed()) return;
+      closePurgeModal();
+    });
+    document.getElementById('si-purge-backdrop').addEventListener('click', function () {
+      if (purging || !purgeModalIsArmed()) return;
+      closePurgeModal();
+    });
+    document.getElementById('si-purge-confirm').addEventListener('click', function () {
+      if (purging || !purgeModalIsArmed()) return;
+      limparFilaRemota();
+    });
+  }
+  document.addEventListener('keydown', function (e) {
+    var pdfModal = document.getElementById('si-pdf-modal');
+    var txtFind = document.getElementById('si-txt-find');
+    var txtOpen = pdfModal && !pdfModal.hidden && txtFind && !txtFind.hidden;
+    if (txtOpen && (e.ctrlKey || e.metaKey) && String(e.key || '').toLowerCase() === 'f') {
+      e.preventDefault();
+      var input = document.getElementById('si-txt-q');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      return;
+    }
+    if (txtOpen && e.key === 'F3') {
+      e.preventDefault();
+      stepTxtFind(e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('si-pdf-modal') && !document.getElementById('si-pdf-modal').hidden) {
+      closePdfModal();
+      return;
+    }
+    if (document.getElementById('si-purge-modal') && !document.getElementById('si-purge-modal').hidden) {
+      if (!purging && purgeModalIsArmed()) closePurgeModal();
+      return;
+    }
+    if (document.getElementById('si-confirm-modal') && !document.getElementById('si-confirm-modal').hidden) {
+      if (confirmModalIsArmed()) closeConfirmModal();
+      return;
+    }
+    if (document.getElementById('si-alert-modal') && !document.getElementById('si-alert-modal').hidden) {
+      closeCooldownAlert();
+      return;
+    }
+    if (!document.getElementById('si-modal').hidden) closeModal();
+  });
+
+  try {
+    var catalogEl = document.getElementById('si-status-catalog');
+    applyLabels(JSON.parse((catalogEl && catalogEl.textContent) || '[]'));
+  } catch (e) {}
+  renderFilters();
+  renderListTabs();
+  loadSolicitantes();
+  syncCooldownUi();
+  load();
+})();
+</script>
+</body>
+</html>

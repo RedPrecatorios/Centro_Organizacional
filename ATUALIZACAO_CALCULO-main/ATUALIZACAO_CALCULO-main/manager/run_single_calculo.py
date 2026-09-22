@@ -15,9 +15,17 @@ from colorama import Fore, Style
 
 from calculation_automation.calculation_automation import CalculationAutomation
 from general_functions.general_functions import format_dict_values, normalize_db_date_str
+from manager.prioridade_detect import resolve_planilha_prioridade
 
 
-def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = None) -> dict[str, Any]:
+def execute_atualizacao_calculo(
+    mgr,
+    prec_id: int,
+    *,
+    feito_por: str | None = None,
+    prioridade: bool = False,
+    percentual_honorarios: float | None = None,
+) -> dict[str, Any]:
     """
     Executa a actualização de cálculo para **um** ``id`` de ``precainfosnew`` (o mesmo que
     ``id_precainfosnew`` em ``memoria_calculo``).
@@ -168,17 +176,28 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
                 f"UPDATE precainfosnew SET Calculo_Atualizado = 'Sem saldo' "
                 f"WHERE id = {rec_id};"
             )
-        elif valor_pago > 0:
-            update_query = (
-                f"UPDATE precainfosnew SET Calculo_Atualizado = 'Prioridade' "
-                f"WHERE id = {rec_id};"
-            )
         elif valor_pago == 0 and meses_validados == 0:
             verificar_meses = True
         elif valor_pago == 0 and meses_validados > 0:
             pass
+        elif valor_pago > 0:
+            # Pagamento de prioridade com saldo: gera planilha PRIORI (não só marca o cadastro).
+            pass
         else:
             print("não se encaixou em nenhuma regra")
+
+        prioridade_planilha = resolve_planilha_prioridade(
+            explicit=bool(prioridade),
+            valor_pago=valor_pago,
+            saldo=saldo,
+            processo=numero_de_processo,
+            incidente=numero_de_incidente,
+        )
+        if prioridade_planilha:
+            print(
+                f"\t{Fore.CYAN}[atualizacao] prioridade detectada: "
+                f"planilha com PRIORI no nome{Style.RESET_ALL}\n"
+            )
 
         if update_query:
             try:
@@ -196,7 +215,7 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
                 db_handler2.config.commit()
                 db_handler2.config.close()
                 db_handler2.cursor.close()
-                msg = "Sem saldo" if "Sem saldo" in update_query else "Prioridade"
+                msg = "Sem saldo"
                 mgr.txt_handler.save_last_checked_id(str(rec_id))
                 return {"ok": True, "message": f"Registo actualizado: {msg} (sem gerar planilha)."}
             except Exception as e:
@@ -244,6 +263,8 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
         }
         _fp = (feito_por or "").strip()[:200] if feito_por else ""
         main_dict["feito_por"] = _fp if _fp else "automação"
+        if percentual_honorarios is not None:
+            main_dict["Percentual_Honorarios"] = percentual_honorarios
 
         try:
             main_dict["SPPREV"] = float(format_dict_values(spprev))
@@ -314,7 +335,9 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
         except Exception:
             pass
 
-        calculation_automation = CalculationAutomation(main_dict, mgr.today)
+        calculation_automation = CalculationAutomation(
+            main_dict, mgr.today, prioridade=bool(prioridade_planilha)
+        )
         mgr.today = calculation_automation.check_day()
         try:
             planilha_ok = calculation_automation.edit_cells()
@@ -345,22 +368,122 @@ def execute_atualizacao_calculo(mgr, prec_id: int, *, feito_por: str | None = No
             return {"ok": False, "error": err}
         drive_link = getattr(calculation_automation, "google_drive_link", None)
 
-        if not verificar_meses:
+        if not verificar_meses or calculation_automation._meses_isencao_ir_aplicados:
             calculation_automation.get_calculo_atualizado(rec_id, None)
             mgr.txt_handler.save_last_checked_id(str(rec_id))
             return {
                 "ok": True,
-                "message": "Cálculo actualizado. Planilha gerada, precainfosnew e memória de cálculo actualizados.",
+                "message": "Cálculo atualizado. Planilha gerada e memória de cálculo atualizada.",
                 "google_drive": {"uploaded": bool(drive_link), "link": drive_link},
+                "prioridade": bool(prioridade_planilha),
             }
         print(
             f"[+] {main_dict['Processo']} - {main_dict['Incidente']}: "
             f"Verificar meses (planilha gerada; actualize o estado manualmente se necessário)"
         )
+        calculation_automation.clean()
         return {
             "ok": True,
-            "message": "Planilha gerada. Caso ‘Verificar meses’: “Calculo_Atualizado” pode não ter sido preenchido automaticamente.",
+            "message": "Planilha gerada. Caso «Verificar meses»: o cálculo atualizado pode não ter sido preenchido automaticamente.",
             "google_drive": {"uploaded": bool(drive_link), "link": drive_link},
+            "prioridade": bool(prioridade_planilha),
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
+
+
+def execute_atualizacao_from_form_dict(
+    mgr,
+    form_payload: dict[str, Any],
+    *,
+    feito_por: str | None = None,
+    prioridade: bool = False,
+) -> dict[str, Any]:
+    """
+    Gera a planilha e actualiza só ``memoria_calculo``.
+    Não lê nem grava ``precainfosnew``.
+    """
+    if not isinstance(form_payload, dict):
+        return {"ok": False, "error": "Payload do formulário inválido."}
+    try:
+        rec_id = int(form_payload.get("id") or 0)
+    except (TypeError, ValueError):
+        rec_id = 0
+    if rec_id == 0:
+        return {"ok": False, "error": "Identificador da memória inválido."}
+
+    main_dict = dict(form_payload)
+    main_dict["id"] = rec_id
+    _fp = (feito_por or str(main_dict.get("feito_por") or "")).strip()[:200]
+    main_dict["feito_por"] = _fp if _fp else "automação"
+    try:
+        n_meses = int(main_dict.get("Numero_de_Meses") or 0)
+    except (TypeError, ValueError):
+        n_meses = 0
+    main_dict["Numero_de_Meses"] = n_meses
+    for money_key in (
+        "Principal_Liquido",
+        "Juros_Moratorio",
+        "SPPREV",
+        "IAMSPE",
+        "IPESP",
+        "ASSIT_MED_HOSPITAL",
+        "INST_PREV_CAIXA_BENEF",
+        "ASSIST_MED_CAIXA_BENEF",
+        "INST_PREV",
+        "Despesas",
+    ):
+        raw = main_dict.get(money_key)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            continue
+        try:
+            main_dict[money_key] = float(format_dict_values(str(raw or "0")))
+        except Exception:
+            main_dict[money_key] = 0.0
+    inst_prev = float(main_dict.get("INST_PREV") or 0)
+    main_dict["IPESP/IAMSP"] = inst_prev if inst_prev else 0
+
+    try:
+        mgr.clean_temp()
+        print(
+            f"\n\t{Fore.CYAN}[atualizacao] memoria_only id={rec_id} "
+            f"processo={main_dict.get('Processo')!r}{Style.RESET_ALL}\n"
+        )
+        json_dict = json.dumps(main_dict, indent=4, default=str)
+        mgr.txt_handler.save_DICTS(json_dict)
+        prioridade_planilha = resolve_planilha_prioridade(
+            explicit=bool(prioridade),
+            processo=main_dict.get("Processo"),
+            incidente=main_dict.get("Incidente"),
+        )
+        calculation_automation = CalculationAutomation(
+            main_dict, mgr.today, prioridade=bool(prioridade_planilha)
+        )
+        mgr.today = calculation_automation.check_day()
+        try:
+            planilha_ok = calculation_automation.edit_cells()
+        except Exception as e:
+            traceback.print_exc()
+            return {
+                "ok": False,
+                "error": f"Falha ao gerar a planilha de cálculo: {e}.",
+            }
+        if not planilha_ok:
+            return {
+                "ok": False,
+                "error": "Não foi possível concluir a geração da planilha de cálculo.",
+            }
+        drive_link = getattr(calculation_automation, "google_drive_link", None)
+        try:
+            calculation_automation.clean()
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "message": "Planilha gerada e memória de cálculo atualizada (sem cadastro em precainfosnew).",
+            "google_drive": {"uploaded": bool(drive_link), "link": drive_link},
+            "prioridade": bool(prioridade_planilha),
         }
     except Exception as e:
         traceback.print_exc()

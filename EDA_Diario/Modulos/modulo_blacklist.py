@@ -72,6 +72,37 @@ def _normalizar_email_cmp(email) -> str:
     return s.upper() if s and s.lower() != "nan" else ""
 
 
+def _normalizar_motivo_bl(motivo: str) -> str:
+    """Maiúsculas, sem acento/_SysCall — para comparar tags de blacklist."""
+    import unicodedata
+
+    s = unicodedata.normalize("NFD", str(motivo or ""))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = re.sub(r"[\s_]+", " ", s.upper()).strip()
+    s = re.sub(r"\s*SYSCALL\s*$", "", s).strip()
+    return s
+
+
+# Tags que marcam só o contato (telefone/e-mail), não todas as linhas do CPF/caso.
+_MOTIVOS_SO_CONTATO = (
+    "TELEFONE INCORRETO",
+    "TELEFONES INCORRETOS",
+    "DEIXOU RECADO",
+    "ENGANO",
+)
+
+
+def motivo_marca_so_contato(motivo: str) -> bool:
+    """True para Telefone Incorreto / Deixou Recado / Engano (linha do contato)."""
+    n = _normalizar_motivo_bl(motivo)
+    if not n:
+        return False
+    for chave in _MOTIVOS_SO_CONTATO:
+        if n == chave or n.startswith(chave + " ") or chave in n:
+            return True
+    return False
+
+
 def _normalizar_processo_cmp(valor) -> str:
     """Número de processo/incidente: trim, maiúsculas, espaços colapsados."""
     if valor is None or (isinstance(valor, float) and pd.isna(valor)):
@@ -123,7 +154,15 @@ def _valor_coluna_row(row, candidatos: tuple[str, ...]):
     return ""
 
 
-_PROCESSO_COLS = ("Numero_de_Processo", "Processo", "numero_processo")
+_NOME_COLS = ("Requerente", "requerente", "NOME", "Nome", "nome")
+_PROCESSO_COLS = (
+    "Numero_de_Processo",
+    "numero_do_cumprimento",
+    "Numero_do_Cumprimento",
+    "processo_principal",
+    "Processo",
+    "numero_processo",
+)
 _INCIDENTE_COLS = ("Numero_do_Incidente", "Incidente", "numero_incidente")
 
 
@@ -311,16 +350,11 @@ def filtrar_registros_por_blacklist(
         return r.get("CPF")
 
     def _row_meta(r) -> dict:
-        proc = r.get("Numero_de_Processo")
-        if proc is not None and not (isinstance(proc, float) and pd.isna(proc)):
-            proc_str = str(proc).strip()
-        else:
-            proc_str = ""
+        proc_str = processo_incidente_from_row(r)[0]
         cpf = _cpf_para_regra(r)
         cpf_s = "" if cpf is None or (isinstance(cpf, float) and pd.isna(cpf)) else str(cpf).strip()
-        req = r.get("Requerente")
-        req_s = "" if req is None or (isinstance(req, float) and pd.isna(req)) else str(req).strip()
-        return {"cpf": cpf_s, "requerente": req_s, "numero_processo": proc_str}
+        req = _valor_coluna_row(r, _NOME_COLS)
+        return {"cpf": cpf_s, "requerente": req, "numero_processo": proc_str}
 
     n = len(df)
     if len(registros_tel) != n or len(registros_email) != n:
@@ -336,7 +370,7 @@ def filtrar_registros_por_blacklist(
 
         # ── Bloqueio total ────────────────────────────────────────────────────
         motivo_p = _motivo_bloqueio_pessoa(
-            _cpf_para_regra(row), row.get("Requerente"), bl
+            _cpf_para_regra(row), _valor_coluna_row(row, _NOME_COLS), bl
         )
         if motivo_p:
             n_t = len(registros_tel[pos])
@@ -441,7 +475,7 @@ def filtrar_hsm_por_blacklist(
     for pos in range(n):
         row = df.iloc[pos]
         motivo_p = _motivo_bloqueio_pessoa(
-            _cpf_para_regra(row), row.get("Requerente"), bl
+            _cpf_para_regra(row), _valor_coluna_row(row, _NOME_COLS), bl
         )
         if motivo_p:
             resultado.append([])

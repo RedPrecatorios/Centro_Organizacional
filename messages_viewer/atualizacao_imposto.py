@@ -26,7 +26,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
 _PDF_MAGIC = b"%PDF"
-_MAX_PDF_BYTES = 40 * 1024 * 1024
+_MAX_PDF_BYTES = 80 * 1024 * 1024
 _SLOT_KEYS = ("demonstrativo", "comprovante")
 _SLOT_ALIASES = {
     "demonstrativo": ("demonstrativo", "pdf_1"),
@@ -114,13 +114,40 @@ def _update_meta(job_path: Path, **patch: Any) -> dict[str, Any]:
         return meta
 
 
+def _cleanup_job_source_files(job_path: Path) -> list[str]:
+    """Remove PDFs e otimizações locais após persistência no MySQL."""
+    removed: list[str] = []
+    candidates = [
+        job_path / "demonstrativo.pdf",
+        job_path / "comprovante.pdf",
+        job_path / "pdf_1.pdf",
+        job_path / "pdf_2.pdf",
+    ]
+    for path in candidates:
+        try:
+            if path.is_file():
+                path.unlink()
+                removed.append(path.name)
+        except OSError:
+            pass
+
+    for opt_dir in job_path.glob("**/_arquivos_otimizados"):
+        try:
+            if opt_dir.is_dir():
+                shutil.rmtree(opt_dir, ignore_errors=True)
+                removed.append(str(opt_dir.relative_to(job_path)))
+        except OSError:
+            pass
+    return removed
+
+
 def _validate_pdf_file(fs: FileStorage | None, slot: str) -> tuple[bytes, str]:
     label = _SLOT_LABELS.get(slot, slot)
     if fs is None or not getattr(fs, "filename", None):
         raise ValueError(f"{label} é obrigatório.")
     filename = secure_filename(fs.filename or "") or f"{slot}.pdf"
     if not filename.lower().endswith(".pdf"):
-        raise ValueError(f"{label} deve ser um ficheiro PDF.")
+        raise ValueError(f"{label} deve ser um arquivo PDF.")
     raw = fs.read()
     if not raw:
         raise ValueError(f"{label} está vazio.")
@@ -614,6 +641,15 @@ def _run_job(job_id: str) -> None:
             output_json=str(out_path),
             mysql_persistido=mysql_ok,
         )
+        # PDFs já não são necessários depois de gravar o cálculo no MySQL.
+        if mysql_ok and status in {"concluido", "concluido_parcial"}:
+            removed = _cleanup_job_source_files(job_path)
+            if removed:
+                _update_meta(
+                    job_path,
+                    source_files_removed=removed,
+                    source_files_removed_at=_utc_now_iso(),
+                )
     except Exception as exc:  # noqa: BLE001
         try:
             _update_meta(

@@ -27,7 +27,7 @@
         </div>
         <h2 class="maint-title">Em manutenção</h2>
         <p class="maint-msg">{{ maintenance_message|e }}</p>
-        <p class="maint-hint">Não é possível utilizar este módulo enquanto a manutenção estiver activa. Os restantes módulos continuam disponíveis conforme as suas permissões.</p>
+        <p class="maint-hint">Não é possível utilizar este módulo enquanto a manutenção estiver ativa. Os restantes módulos continuam disponíveis conforme as suas permissões.</p>
         <p class="maint-actions">
           <a class="auth-link" href="{{ url_for('index') }}">Voltar ao início</a>
           {% if is_plataforma_admin %}

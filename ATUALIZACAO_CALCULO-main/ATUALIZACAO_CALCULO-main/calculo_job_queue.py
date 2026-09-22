@@ -12,7 +12,7 @@ from typing import Any, Callable
 _DEFAULT_AVG_SEC = 120.0
 _HISTORY_MAX = 50
 
-RunFn = Callable[[int, str | None], dict[str, Any]]
+RunFn = Callable[..., dict[str, Any]]
 
 _run_atualizacao: RunFn | None = None
 
@@ -21,6 +21,9 @@ _run_atualizacao: RunFn | None = None
 class _Job:
     prec_id: int
     feito_por: str | None
+    prioridade: bool = False
+    form_payload: dict[str, Any] | None = None
+    percentual_honorarios: float | None = None
     event: threading.Event = field(default_factory=threading.Event)
     result: dict[str, Any] | None = None
 
@@ -118,7 +121,13 @@ def _worker_loop() -> None:
             }
         t0 = time.monotonic()
         try:
-            job.result = runner(job.prec_id, feito_por=job.feito_por)
+            job.result = runner(
+                job.prec_id,
+                feito_por=job.feito_por,
+                prioridade=bool(job.prioridade),
+                form_payload=job.form_payload,
+                percentual_honorarios=job.percentual_honorarios,
+            )
         except Exception as e:
             job.result = {"ok": False, "error": str(e)}
         finally:
@@ -134,9 +143,18 @@ def enqueue(
     prec_id: int,
     *,
     feito_por: str | None,
+    prioridade: bool = False,
+    form_payload: dict[str, Any] | None = None,
+    percentual_honorarios: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Coloca na fila e responde de imediato (sem bloquear a ligação HTTP)."""
-    job = _Job(prec_id=prec_id, feito_por=feito_por)
+    job = _Job(
+        prec_id=prec_id,
+        feito_por=feito_por,
+        prioridade=bool(prioridade),
+        form_payload=form_payload,
+        percentual_honorarios=percentual_honorarios,
+    )
     fila_snapshot: dict[str, Any] | None = None
     with _guard:
         had_busy = bool(_queue) or _current_job is not None
@@ -202,13 +220,22 @@ def submit_and_wait(
     *,
     feito_por: str | None,
     timeout: float,
+    prioridade: bool = False,
+    form_payload: dict[str, Any] | None = None,
+    percentual_honorarios: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """
     Enfileira e bloqueia até concluir ou timeout.
 
     Returns (resultado, fila_ao_entrar) — ``fila_ao_entrar`` preenchido se havia fila/execução.
     """
-    job = _Job(prec_id=prec_id, feito_por=feito_por)
+    job = _Job(
+        prec_id=prec_id,
+        feito_por=feito_por,
+        prioridade=bool(prioridade),
+        form_payload=form_payload,
+        percentual_honorarios=percentual_honorarios,
+    )
     fila_snapshot: dict[str, Any] | None = None
     with _guard:
         had_busy = bool(_queue) or _current_job is not None

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -46,6 +47,66 @@ def _jobs_dir() -> Path:
 
 _lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _job_dir_for(job_id: str) -> Path | None:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", job_id or "")
+    if not safe or safe != job_id:
+        return None
+    path = _jobs_dir() / safe
+    return path if path.is_dir() else None
+
+
+def _persist_job_meta(job_dir: Path, **fields: Any) -> None:
+    meta = _read_json(job_dir / "meta.json") or {}
+    meta.update(fields)
+    _write_json(job_dir / "meta.json", meta)
+
+
+def _persist_job_failure(result_path: Path, error: str) -> None:
+    if not result_path.is_file():
+        _write_json(result_path, {"ok": False, "error": error, "outcome": None})
+    _persist_job_meta(result_path.parent, status="error", error=error)
+
+
+def _snapshot_from_disk(job_id: str) -> dict[str, Any] | None:
+    job_dir = _job_dir_for(job_id)
+    if job_dir is None:
+        return None
+    meta = _read_json(job_dir / "meta.json") or {}
+    progress_path = job_dir / "progress.json"
+    result_path = job_dir / "result.json"
+    progress = _read_json(progress_path) or {}
+    result = _read_json(result_path)
+    error = meta.get("error")
+    if result is not None:
+        done = True
+        if result.get("ok"):
+            status = "done"
+        else:
+            status = "error"
+            error = result.get("error") or error or "Análise falhou"
+    else:
+        done = False
+        status = "running"
+    return {
+        "job_id": job_id,
+        "status": status,
+        "done": done,
+        "processo": meta.get("processo"),
+        "incidente": meta.get("incidente"),
+        "progress_path": str(progress_path),
+        "result_path": str(result_path),
+        "message": progress.get("message") or "A processar…",
+        "percent": float(progress.get("percent") or 0.0),
+        "result": result,
+        "error": error,
+        "created_at": meta.get("created_at"),
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -115,39 +176,51 @@ def _run_subprocess(
         str(progress_path),
         "--result-file",
         str(result_path),
+        "--job-id",
+        job_id,
     ]
     try:
+        env = _refactor_subprocess_env()
+        env["TEMP_RUN_ID"] = job_id
+        env["ANALISE_PROCESSUAL_JOB_ID"] = job_id
         proc = subprocess.run(
             cmd,
             cwd=str(root),
             capture_output=True,
             text=True,
-            env=_refactor_subprocess_env(),
+            env=env,
+            start_new_session=True,
             timeout=int((os.getenv("REFACTOR_ANALISE_TIMEOUT") or "1800").strip() or "1800"),
         )
         with _lock:
             job = _jobs.get(job_id)
-            if job is None:
-                return
-            job["returncode"] = proc.returncode
-            if proc.returncode != 0 and not result_path.is_file():
-                job["error"] = (proc.stderr or proc.stdout or "Falha na análise")[:2000]
-                job["status"] = "error"
-                job["done"] = True
+            if job is not None:
+                job["returncode"] = proc.returncode
+                if proc.returncode != 0 and not result_path.is_file():
+                    job["error"] = (proc.stderr or proc.stdout or "Falha na análise")[:2000]
+                    job["status"] = "error"
+                    job["done"] = True
+        if proc.returncode != 0 and not result_path.is_file():
+            err = (proc.stderr or proc.stdout or "Falha na análise")[:2000]
+            _persist_job_failure(result_path, err)
     except subprocess.TimeoutExpired:
+        err = "Tempo máximo excedido na análise processual."
         with _lock:
             job = _jobs.get(job_id)
             if job:
                 job["status"] = "error"
                 job["done"] = True
-                job["error"] = "Tempo máximo excedido na análise processual."
+                job["error"] = err
+        _persist_job_failure(result_path, err)
     except Exception as exc:
+        err = str(exc)
         with _lock:
             job = _jobs.get(job_id)
             if job:
                 job["status"] = "error"
                 job["done"] = True
-                job["error"] = str(exc)
+                job["error"] = err
+        _persist_job_failure(result_path, err)
     finally:
         with _lock:
             job = _jobs.get(job_id)
@@ -159,10 +232,16 @@ def _run_subprocess(
                     job["status"] = "done" if result.get("ok") else "error"
                     if not result.get("ok"):
                         job["error"] = result.get("error") or "Análise falhou"
+                    _persist_job_meta(
+                        result_path.parent,
+                        status=job["status"],
+                        error=job.get("error"),
+                    )
             elif job and job.get("status") == "running":
                 job["done"] = True
                 job["status"] = "error"
                 job["error"] = job.get("error") or "Análise encerrada sem resultado."
+                _persist_job_failure(result_path, str(job["error"]))
 
 
 def start_job(*, processo: str, incidente: str) -> dict[str, Any]:
@@ -182,6 +261,17 @@ def start_job(*, processo: str, incidente: str) -> dict[str, Any]:
         json.dumps({"message": "A iniciar…", "percent": 0.0, "done": False}, ensure_ascii=False),
         encoding="utf-8",
     )
+    created_at = time.time()
+    _write_json(
+        job_dir / "meta.json",
+        {
+            "job_id": job_id,
+            "processo": processo,
+            "incidente": incidente,
+            "created_at": created_at,
+            "status": "running",
+        },
+    )
 
     job: dict[str, Any] = {
         "job_id": job_id,
@@ -191,7 +281,7 @@ def start_job(*, processo: str, incidente: str) -> dict[str, Any]:
         "incidente": incidente,
         "progress_path": str(progress_path),
         "result_path": str(result_path),
-        "created_at": time.time(),
+        "created_at": created_at,
         "error": None,
         "result": None,
     }
@@ -216,9 +306,9 @@ def start_job(*, processo: str, incidente: str) -> dict[str, Any]:
 def get_job_status(job_id: str) -> dict[str, Any] | None:
     with _lock:
         job = _jobs.get(job_id)
-        if job is None:
-            return None
-        snapshot = dict(job)
+        snapshot = dict(job) if job is not None else None
+    if snapshot is None:
+        return _snapshot_from_disk(job_id)
 
     progress_path = Path(snapshot.get("progress_path") or "")
     progress = _read_json(progress_path) if progress_path else None

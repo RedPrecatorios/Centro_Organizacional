@@ -7,25 +7,28 @@ import re
 COLUNA_NOME = "NOME"
 COLUNA_CPF  = "CPF"
 
-# Padroes elasticos: detecta qualquer coluna que comece com TELEFONE, CELULAR ou EMAIL
-# Exemplos cobertos: TELEFONE1, TELEFONE2MAE, CELULAR1IRMAO1, EMAIL1, EMAIL2, etc.
+# Export Assertiva real: TELEFONE1, CELULAR_WHATSAPP_1, CONJUGE_TELEFONE_1,
+# FILHO_1_CELULAR_1, IRMAO_1_TELEFONE_1, EMAIL1, etc.
+# O padrão antigo (`^TELEFONE\d+`) descartava WhatsApp e familiares.
 PADRAO_TELEFONE = re.compile(r"^TELEFONE\d+.*$", re.IGNORECASE)
 PADRAO_CELULAR  = re.compile(r"^CELULAR\d+.*$",  re.IGNORECASE)
 PADRAO_EMAIL    = re.compile(r"^EMAIL\d+.*$",     re.IGNORECASE)
+PADRAO_CONTATO_FLEX = re.compile(
+    r"(TELEFONE|CELULAR|EMAIL)", re.IGNORECASE
+)
 
 
 def _filtrar_colunas(colunas: list[str]) -> list[str]:
-    """Retorna apenas as colunas de interesse, mantendo a ordem original."""
+    """Retorna NOME/CPF e qualquer coluna de telefone, celular ou e-mail."""
     selecionadas = []
+    vistos: set[str] = set()
     for col in colunas:
-        if col in (COLUNA_NOME, COLUNA_CPF):
+        nome = str(col).strip()
+        if not nome or nome in vistos:
+            continue
+        if nome in (COLUNA_NOME, COLUNA_CPF) or PADRAO_CONTATO_FLEX.search(nome):
             selecionadas.append(col)
-        elif PADRAO_TELEFONE.match(col):
-            selecionadas.append(col)
-        elif PADRAO_CELULAR.match(col):
-            selecionadas.append(col)
-        elif PADRAO_EMAIL.match(col):
-            selecionadas.append(col)
+            vistos.add(nome)
     return selecionadas
 
 
@@ -57,9 +60,12 @@ def processar_enriquecimento_relacionados(caminho_entrada: str) -> pd.DataFrame:
         df.drop(columns=colunas_vazias, inplace=True)
         print(f"     [INFO] Colunas vazias removidas: {len(colunas_vazias)}")
 
-    telefones = [c for c in df.columns if PADRAO_TELEFONE.match(c)]
-    celulares = [c for c in df.columns if PADRAO_CELULAR.match(c)]
-    emails    = [c for c in df.columns if PADRAO_EMAIL.match(c)]
+    telefones = [c for c in df.columns if re.search(r"TELEFONE", str(c), re.I)]
+    celulares = [c for c in df.columns if re.search(r"CELULAR", str(c), re.I)]
+    emails    = [c for c in df.columns if re.search(r"EMAIL", str(c), re.I)]
 
-    print(f"     Linhas: {len(df)} | Telefones: {len(telefones)} | Celulares: {len(celulares)} | EMAILs: {len(emails)}")
+    print(
+        f"     Linhas: {len(df)} | Telefones: {len(telefones)} | "
+        f"Celulares: {len(celulares)} | EMAILs: {len(emails)}"
+    )
     return df

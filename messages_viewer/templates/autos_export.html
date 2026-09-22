@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autos e-SAJ — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+  <style>
+    .ae-grid { display:grid; grid-template-columns: 1fr 8rem; gap: 0.75rem; max-width: 42rem; }
+    .ae-progress { margin: 1rem 0 0; }
+    .ae-bar { height: 8px; background: var(--bg-chat); border-radius: 99px; overflow: hidden; }
+    .ae-bar > span { display:block; height:100%; width:0; background: var(--accent, #2563eb); transition: width .3s ease; }
+    .ae-alert { padding: 0.75rem 0.9rem; border-radius: 10px; margin: 0.65rem 0 0; font-size: 0.88rem; line-height: 1.45; }
+    .ae-alert--warn { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; }
+    .ae-alert--info { background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a; }
+    .ae-alert--ok { background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; }
+    .ae-alert--err { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; }
+    .ae-alert strong { display:block; margin-bottom: 0.2rem; }
+    .ae-kpis { display:grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0.65rem; margin-top: 1rem; }
+    .ae-kpi { border:1px solid var(--border); border-radius:10px; padding:0.75rem 0.9rem; background:#fff; }
+    .ae-kpi dt { font-size:0.72rem; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+    .ae-kpi dd { margin:0.2rem 0 0; font-weight:650; }
+    .ae-file { display:flex; justify-content:space-between; gap:0.75rem; align-items:center; padding:0.45rem 0; border-bottom:1px solid var(--border); font-size:0.86rem; }
+    .ae-file:last-child { border-bottom:0; }
+    .ae-bl { color:#9a3412; font-weight:650; font-size:0.72rem; text-transform:uppercase; }
+    .ae-section { margin-top: 1.1rem; }
+  </style>
+</head>
+<body class="dashboard-body"
+  data-ae-configured='{{ autos_export_configured | tojson }}'
+  data-ae-poll-ms='{{ autos_export_poll_interval_ms | tojson }}'>
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Autos e-SAJ</h1>
+        <p class="dash-sub">Informa o <strong>cumprimento</strong> e o <strong>incidente</strong>. O REFACTOR baixa a pasta digital inteira de cada um e, se houver DEPRE, também a pasta do requisitório. <strong>Não atualiza cálculo</strong>. Acesso restrito: só quem tiver esta aba liberada em Utilizadores.</p>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      {% if not autos_export_configured %}
+      <div class="camp-msg camp-msg-err" role="alert" style="display:block;margin-bottom:1rem">
+        REFACTOR_TJSP não está configurado para esta máquina. Defina <code>REFACTOR_TJSP_PATH</code> e o venv com <code>run_autos_export.py</code>.
+      </div>
+      {% endif %}
+
+      <div class="camp-form-card">
+        <div class="ae-grid">
+          <div class="camp-field">
+            <label for="ae-processo">Número do processo (cumprimento)</label>
+            <input type="text" id="ae-processo" class="auth-input" placeholder="0003938-38.2023.8.26.0053" autocomplete="off" />
+          </div>
+          <div class="camp-field">
+            <label for="ae-incidente">Incidente</label>
+            <input type="text" id="ae-incidente" class="auth-input" placeholder="4" autocomplete="off" />
+          </div>
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.75rem">
+          <button type="button" class="camp-btn camp-btn-primary" id="ae-enviar"{% if not autos_export_configured %} disabled{% endif %}>Baixar autos</button>
+        </div>
+        <div class="ae-progress" id="ae-progress" hidden>
+          <p class="camp-hint" id="ae-progress-label">A iniciar…</p>
+          <div class="ae-bar" aria-hidden="true"><span id="ae-bar"></span></div>
+        </div>
+      </div>
+
+      <div id="ae-result"></div>
+    </main>
+  </div>
+
+<script>
+(function () {
+  const configured = document.body.dataset.aeConfigured === 'true';
+  const pollMs = Math.max(800, parseInt(document.body.dataset.aePollMs || '1500', 10) || 1500);
+  const btn = document.getElementById('ae-enviar');
+  const progressWrap = document.getElementById('ae-progress');
+  const progressLabel = document.getElementById('ae-progress-label');
+  const bar = document.getElementById('ae-bar');
+  const resultEl = document.getElementById('ae-result');
+  let timer = null;
+  let jobId = null;
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function setProgress(msg, pct) {
+    progressWrap.hidden = false;
+    progressLabel.textContent = msg || 'A processar…';
+    bar.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%';
+  }
+
+  function stopPoll() {
+    if (timer) { clearInterval(timer); timer = null; }
+    btn.disabled = !configured;
+  }
+
+  function saldoLabel(v) {
+    if (v === 'encontrado') return 'Saldo remanescente localizado';
+    if (v === 'nao_encontrado') return 'Saldo remanescente não localizado';
+    return 'Não se aplica';
+  }
+
+  function renderOutcome(job) {
+    const out = job.outcome || {};
+    const err = job.error || out.error;
+    if (job.status === 'error' && !out.files) {
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(err || 'Exportação falhou.') + '</div>';
+      return;
+    }
+    const bl = out.blacklist || {};
+    const pr = out.prioridade || {};
+    const warnings = Array.isArray(out.warnings) ? out.warnings : [];
+    const files = Array.isArray(out.files) ? out.files : [];
+    let html = '';
+    if (bl.active) {
+      const items = (bl.items || []).map(function (it) {
+        return '<div>' + esc(it.mensagem || it.scope) + '</div>';
+      }).join('');
+      html += '<div class="ae-alert ae-alert--warn" role="status"><strong>Blacklist identificada — o download seguiu mesmo assim</strong>' + items + '</div>';
+    }
+    if (pr.identificada) {
+      html += '<div class="ae-alert ae-alert--info" role="status"><strong>Pagamento de prioridade identificado</strong>' +
+        esc(saldoLabel(pr.saldo_remanescente)) +
+        (pr.motivo ? '<div style="margin-top:0.35rem">' + esc(pr.motivo) + '</div>' : '') +
+        (pr.depre ? '<div style="margin-top:0.35rem">DEPRE: ' + esc(pr.depre) + '</div>' : '') +
+        '</div>';
+    } else if (out.depre && out.depre.found) {
+      html += '<div class="ae-alert ae-alert--ok" role="status"><strong>DEPRE localizado, sem autos de prioridade</strong>' +
+        esc(out.depre.numero || '') + '</div>';
+    }
+    warnings.filter(function (w) { return w.tipo !== 'blacklist'; }).forEach(function (w) {
+      html += '<div class="ae-alert ae-alert--info">' + esc(w.mensagem) + '</div>';
+    });
+    const cump = out.cumprimento || {};
+    const inc = out.incidente_scope || {};
+    const dep = out.depre || {};
+    html += '<dl class="ae-kpis">' +
+      '<div class="ae-kpi"><dt>Cumprimento</dt><dd>' + (cump.found ? (cump.files || 0) + ' PDF(s)' : 'não aberto') + '</dd></div>' +
+      '<div class="ae-kpi"><dt>Incidente</dt><dd>' + (inc.found ? (inc.files || 0) + ' PDF(s)' : 'não aberto') + '</dd></div>' +
+      '<div class="ae-kpi"><dt>DEPRE</dt><dd>' + (dep.found ? (dep.files || 0) + ' PDF(s)' : 'não localizado') + '</dd></div>' +
+      '<div class="ae-kpi"><dt>Total</dt><dd>' + esc(out.file_count || files.length) + '</dd></div>' +
+      '</dl>';
+    if (job.has_zip) {
+      html += '<p style="margin-top:1rem"><a class="camp-btn camp-btn-primary" href="/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/zip">Baixar ZIP completo</a></p>';
+    }
+    const byScope = { cumprimento: [], incidente: [], depre: [] };
+    files.forEach(function (f) {
+      const s = f.scope || 'outros';
+      if (!byScope[s]) byScope[s] = [];
+      byScope[s].push(f);
+    });
+    Object.keys(byScope).forEach(function (scope) {
+      const list = byScope[scope];
+      if (!list.length) return;
+      list.sort(function (a, b) { return (b.unified || b.kind === 'unificado') - (a.unified || a.kind === 'unificado'); });
+      html += '<section class="ae-section"><h2 class="dash-section-title">' + esc(scope) + '</h2>';
+      list.forEach(function (f) {
+        const href = '/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/arquivo?path=' + encodeURIComponent(f.relpath || '');
+        html += '<div class="ae-file"><span>' + esc(f.title || f.relpath) +
+          (f.unified || f.kind === 'unificado' ? ' <span class="ae-bl" style="color:#1e3a8a">unificado</span>' : '') +
+          (f.blacklisted ? ' <span class="ae-bl">blacklist</span>' : '') +
+          '</span><a href="' + href + '">PDF</a></div>';
+      });
+      html += '</section>';
+    });
+    if (err && job.status === 'error') {
+      html = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha parcial</strong>' + esc(err) + '</div>' + html;
+    }
+    resultEl.innerHTML = html || '<p class="camp-hint">Nenhum PDF devolvido.</p>';
+  }
+
+  async function poll() {
+    if (!jobId) return;
+    try {
+      const res = await fetch('/api/autos-esaj/' + encodeURIComponent(jobId), { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Falha no status');
+      setProgress(data.message, data.percent);
+      if (data.done) {
+        stopPoll();
+        renderOutcome(data);
+      }
+    } catch (e) {
+      stopPoll();
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(e.message) + '</div>';
+    }
+  }
+
+  btn.addEventListener('click', async function () {
+    if (!configured) return;
+    const processo = document.getElementById('ae-processo').value.trim();
+    const incidente = document.getElementById('ae-incidente').value.trim();
+    if (!processo) {
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--err">Informe o número do processo.</div>';
+      return;
+    }
+    btn.disabled = true;
+    resultEl.innerHTML = '';
+    setProgress('A iniciar…', 2);
+    try {
+      const res = await fetch('/api/autos-esaj/iniciar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numero_de_processo: processo, numero_do_incidente: incidente })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Não foi possível iniciar');
+      jobId = data.job_id;
+      timer = setInterval(poll, pollMs);
+      poll();
+    } catch (e) {
+      stopPoll();
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(e.message) + '</div>';
+    }
+  });
+})();
+</script>
+</body>
+</html>

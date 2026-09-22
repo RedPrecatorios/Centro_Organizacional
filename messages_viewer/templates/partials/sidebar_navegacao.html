@@ -31,6 +31,14 @@
       Memória de Cálculo{% if page_in_maintenance('memoria_calculo') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
+    {% if is_plataforma_admin %}
+    <a class="dash-nav-item{% if request.endpoint == 'api_calculo_page' %} active{% endif %}" href="{{ url_for('api_calculo_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </span>
+      API Cálculo
+    </a>
+    {% endif %}
     {% if user_can('pre_analise_processual') %}
     <a class="dash-nav-item{% if request.endpoint == 'pre_analise_processual_page' %} active{% endif %}{% if page_in_maintenance('pre_analise_processual') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('pre_analise_processual_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">
@@ -45,6 +53,22 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6M11 8v6"/></svg>
       </span>
       Levantamento Processual{% if page_in_maintenance('levantamento_processual') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
+    {% if user_can('autos_export') %}
+    <a class="dash-nav-item{% if request.endpoint == 'autos_export_page' %} active{% endif %}{% if page_in_maintenance('autos_export') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('autos_export_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </span>
+      Autos e-SAJ{% if page_in_maintenance('autos_export') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
+    {% if user_can('solicitacao_inclusao') %}
+    <a class="dash-nav-item{% if request.endpoint == 'solicitacao_inclusao_page' %} active{% endif %}{% if page_in_maintenance('solicitacao_inclusao') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('solicitacao_inclusao_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+      </span>
+      Solicitação de Inclusão{% if page_in_maintenance('solicitacao_inclusao') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
     {% if user_can('tabela_juros') %}

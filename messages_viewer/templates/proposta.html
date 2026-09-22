@@ -54,7 +54,7 @@
         </div>
         <p class="prop-msg" id="prop-msg" role="status" aria-live="polite"></p>
         <div class="prop-escolher" id="prop-escolher" hidden>
-          <p class="prop-escolher-tit">Vários registos encontrados. Selecione:</p>
+          <p class="prop-escolher-tit">Vários registros encontrados. Selecione:</p>
           <ul class="prop-escolher-list" id="prop-escolher-list"></ul>
         </div>
       </div>
@@ -118,7 +118,7 @@
           <button type="submit" class="camp-btn camp-btn-primary prop-btn-pdf" id="prop-btn-pdf">
             Gerar PDF
           </button>
-          <p class="prop-pdf-hint">O ficheiro segue o modelo RED Precatórios com as cores da marca.</p>
+          <p class="prop-pdf-hint">O arquivo segue o modelo RED Precatórios com as cores da marca.</p>
         </div>
       </form>
     </main>
@@ -209,14 +209,14 @@
           }
           lastResults = o.d.results || [];
           if (!lastResults.length) {
-            setMsg('Nenhum registo de precatório com este processo e incidente.', true);
+            setMsg('Nenhum registro de precatório com este processo e incidente.', true);
             return;
           }
           if (lastResults.length === 1) {
             fillForm(lastResults[0]);
             return;
           }
-          setMsg(lastResults.length + ' registos. Selecione abaixo.', false);
+          setMsg(lastResults.length + ' registros. Selecione abaixo.', false);
           if (elEscolher) elEscolher.removeAttribute('hidden');
           lastResults.forEach(function (row, ix) {
             var li = document.createElement('li');

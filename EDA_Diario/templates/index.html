@@ -12,7 +12,7 @@
 
   <section class="eda-template-section" aria-labelledby="eda-tpl-title">
     <h2 class="eda-template-h2" id="eda-tpl-title">Modelo de planilha (template)</h2>
-    <p class="eda-template-lead">Escolha o modelo (1 = PRC TJSP, 2 = PRC CMP, 3 = PRC IMP). O <strong>fluxo de enriquecimento</strong> é o mesmo: primeiro Lemitti, depois a segunda base. Só muda o tratamento da planilha principal (colunas, CPF, etc.).</p>
+    <p class="eda-template-lead">Escolha o modelo (1 = PRC TJSP, 2 = PRC CMP, 3 = PRC IMP). Fluxo: <strong>base da plataforma</strong> → Lemitti → Assertiva. Só muda o tratamento da planilha principal (colunas, CPF, etc.).</p>
     <div class="eda-template-group" role="radiogroup" aria-labelledby="eda-tpl-title">
       <label class="eda-template-btn">
         <input type="radio" name="eda_modelo" value="prc_tjsp"{% if eda_modelo == 'prc_tjsp' %} checked{% endif %} />
@@ -38,29 +38,17 @@
     </div>
   </section>
 
-  <!-- <section class="eda-template-section" aria-labelledby="eda-fluxo-title" style="margin-top: 1.25rem;">
-    <h2 class="eda-template-h2" id="eda-fluxo-title" style="font-size:1rem;">Fluxo de enriquecimento</h2>
-    <p class="eda-template-lead" style="margin:0.4rem 0 0.6rem; max-width: 56ch; line-height:1.5;">
-      <strong>Modelo 1 (TJSP), 2 (CMP) e 3 (IMP):</strong> o mesmo percurso. Só a leitura da planilha principal mapeia colunas/CPF; depois, Lemitti &rarr; CSV de faltantes &rarr; segunda base &rarr; conclusão.
-    </p>
-    <ol class="eda-template-lead" style="margin:0.5rem 0 0 1.1rem; line-height:1.55; max-width: 52ch;">
-      <li><strong>Etapa 1</strong> — Cruza a principal com a <strong>Lemitti (P2)</strong>. Saídas: <strong>INTERMEDIARIA.xlsx</strong> e <strong>CPFs não localizados</strong> nessa base (CSV).</li>
-      <li>Com o CSV, consulta na <strong>outra base de enriquecimento</strong> (ex.: <strong>Assertiva</strong>) e carrega o ficheiro P3 no painel.</li>
-      <li><strong>Etapa 2</strong> — Usa a intermediária e o P3; preenche telefones/emails <em>apenas</em> para quem ainda não tinha na etapa 1. O ficheiro final indica o modelo (TJSP, CMP ou IMP).</li>
-    </ol>
-  </section> -->
-
-  <!-- Etapa 1 -->
+  <!-- Etapa 0 — Base -->
   <section class="eda-section-card">
     <div class="eda-section-head">
-      <span class="eda-step-num">1</span>
+      <span class="eda-step-num">0</span>
       <div>
-        <h2>Etapa 1 — Enriquecimento Lemitti</h2>
-        <p>Cruza a planilha principal com os contatos da Lemitti (P2)</p>
+        <h2>Etapa 0 — Enriquecimento pela base</h2>
+        <p>Anexa a planilha completa do dia e puxa telefones/e-mails já existentes na plataforma (com blacklist e data de inclusão)</p>
       </div>
     </div>
 
-    <div class="eda-grid-2">
+    <div class="eda-max-w-sm" style="margin-bottom: 20px;">
       <div class="eda-upload-box">
         <div class="eda-upload-box-head">
           <p>Planilha Principal</p>
@@ -78,7 +66,54 @@
           </label>
         </form>
       </div>
+    </div>
 
+    <div class="eda-toolbar">
+      <form action="{{ url_for('rodar_etapa0') }}" method="POST">
+        <button type="submit" class="eda-btn eda-btn-primary"
+          {% if not arquivos.principal %}disabled title="Envie a planilha principal primeiro"{% endif %}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          Rodar Etapa 0
+        </button>
+      </form>
+
+      {% if arquivos.intermediaria %}
+        <a href="{{ url_for('download', arquivo='intermediaria') }}" class="eda-btn eda-btn-secondary" style="flex-direction:column;align-items:flex-start;gap:2px;">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Intermediária
+          </span>
+          {% if arquivos.data_intermediaria %}
+            <span style="font-size:12px;font-weight:500;color:var(--muted);">gerada em {{ arquivos.data_intermediaria }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+
+      {% if arquivos.nao_encontrados %}
+        <a href="{{ url_for('download', arquivo='nao_encontrados') }}" class="eda-link-warn">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            CPFs não encontrados
+          </span>
+          {% if arquivos.data_nao_encontrados %}
+            <span class="eda-link-sub">gerado em {{ arquivos.data_nao_encontrados }}</span>
+          {% endif %}
+        </a>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Etapa 1 — Lemitti -->
+  <section class="eda-section-card">
+    <div class="eda-section-head">
+      <span class="eda-step-num">1</span>
+      <div>
+        <h2>Etapa 1 — Enriquecimento Lemitti</h2>
+        <p>Completa os CPFs ainda sem contato com a Lemitti (P2). Use o CSV da Etapa 0 para emitir a base.</p>
+      </div>
+    </div>
+
+    <div class="eda-max-w-sm" style="margin-bottom: 20px;">
       <div class="eda-upload-box">
         <div class="eda-upload-box-head">
           <p>Lemitti (P2)</p>
@@ -101,7 +136,7 @@
     <div class="eda-toolbar">
       <form action="{{ url_for('rodar_etapa1') }}" method="POST">
         <button type="submit" class="eda-btn eda-btn-primary"
-          {% if not arquivos.principal or not arquivos.p2 %}disabled title="Faça os uploads primeiro"{% endif %}>
+          {% if not arquivos.intermediaria or not arquivos.p2 %}disabled title="Rode a Etapa 0 e envie a Lemitti primeiro"{% endif %}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           Rodar Etapa 1
         </button>
@@ -139,13 +174,13 @@
     </div>
   </section>
 
-  <!-- Etapa 2 -->
+  <!-- Etapa 2 — Assertiva -->
   <section class="eda-section-card">
     <div class="eda-section-head">
       <span class="eda-step-num eda-step-num--b">2</span>
       <div>
         <h2>Etapa 2 — Enriquecimento Assertiva</h2>
-        <p>Completa os CPFs não encontrados com dados da Assertiva (P3)</p>
+        <p>Completa os CPFs ainda sem contato com a Assertiva (P3) e gera a planilha FINAL</p>
       </div>
     </div>
 
@@ -169,10 +204,19 @@
       </div>
     </div>
 
+    {% if arquivos.intermediaria and arquivos.etapa2_motivo %}
+      <p class="eda-lead" style="margin:0 0 14px;color:#9f1239;max-width:62ch;">
+        <strong>Etapa 2 bloqueada.</strong> {{ arquivos.etapa2_motivo }}
+        {% if arquivos.intermediaria_modelo %}
+          Intermediária detectada: {{ arquivos.intermediaria_modelo }}{% if arquivos.data_intermediaria %} ({{ arquivos.data_intermediaria }}){% endif %}.
+        {% endif %}
+      </p>
+    {% endif %}
+
     <div class="eda-toolbar">
       <form action="{{ url_for('rodar_etapa2') }}" method="POST">
         <button type="submit" class="eda-btn eda-btn-indigo"
-          {% if not arquivos.intermediaria or not arquivos.p3 %}disabled title="Rode a Etapa 1 e envie a planilha P3 primeiro"{% endif %}>
+          {% if not arquivos.intermediaria or not arquivos.p3 or not arquivos.etapa2_ok %}disabled title="{% if arquivos.etapa2_motivo %}{{ arquivos.etapa2_motivo }}{% else %}Rode as Etapas 0/1 e envie a Assertiva primeiro{% endif %}"{% endif %}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           Rodar Etapa 2
         </button>
@@ -213,7 +257,7 @@
     return new URL('sessao/modelo', window.location.origin + path).toString();
   }
   function enviar(m) {
-    fetch(urlSessaoModelo(), {
+    return fetch(urlSessaoModelo(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelo: m }),
@@ -222,11 +266,11 @@
   }
   document.querySelectorAll('input[name="eda_modelo"]').forEach(function (el) {
     el.addEventListener('change', function () {
-      if (this.checked) enviar(this.value);
+      if (!this.checked) return;
+      var m = this.value;
+      enviar(m).then(function () { window.location.reload(); });
     });
   });
-  var c = document.querySelector('input[name="eda_modelo"]:checked');
-  if (c) enviar(c.value);
 })();
 </script>
 {% endblock %}

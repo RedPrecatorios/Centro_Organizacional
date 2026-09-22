@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %} · Enriquecer CPF{% endblock %}
+
+{% block content %}
+<div class="eda-wrap eda-wrap-narrow">
+
+  <div class="eda-page-head">
+    <h1 class="eda-h1">Enriquecer por CPF</h1>
+    <p class="eda-lead">
+      Envie um CSV com uma coluna <strong>CPF</strong>. O sistema cruza com a base
+      (processos, telefones SMS, e-mails e HSM) e devolve um Excel com os contatos
+      encontrados e a coluna <strong>Blacklist</strong> preenchida com a situação do caso
+      (Sim/Não + motivo).
+    </p>
+  </div>
+
+  <div class="eda-section-card">
+    <form id="form-enriquecer-cpf" action="{{ url_for('enriquecer_cpf_gerar') }}" method="POST" enctype="multipart/form-data">
+      <div class="eda-upload-box">
+        <div class="eda-upload-box-head">
+          <p>CSV de CPFs</p>
+          <span class="eda-badge eda-badge--pend" id="cpf-badge">Pendente</span>
+        </div>
+        <label class="eda-dropzone">
+          <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+          <span class="eda-dz-hint">.csv · uma coluna CPF</span>
+          <input id="arquivo-cpf" type="file" name="arquivo" accept=".csv,.txt,text/csv" required>
+        </label>
+      </div>
+
+      <p class="eda-hint" style="margin-top:0.85rem;">
+        Aceita cabeçalho <code>CPF</code> (ou só a lista, um CPF por linha). Máscara
+        <code>000.000.000-00</code> ou só dígitos. Até {{ max_cpfs }} CPFs.
+        Listas grandes podem levar alguns minutos.
+      </p>
+
+      <button type="submit" id="cpf-submit" class="eda-btn eda-btn-primary eda-btn-block" style="margin-top:1.25rem;">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        <span id="cpf-btn-label">Enriquecer e baixar Excel</span>
+      </button>
+      <p class="eda-hint" id="cpf-status" style="margin-top:0.75rem;">O envio responde na hora; o cruzamento roda em segundo plano e o Excel fica disponível na tela de progresso.</p>
+    </form>
+
+    <div class="eda-sep" style="margin:1.5rem 0;"><span>ou</span></div>
+
+    <a href="{{ url_for('enriquecer_cpf_modelo') }}" class="eda-btn eda-btn-secondary eda-btn-block">
+      Baixar modelo CSV (coluna CPF)
+    </a>
+
+    {% if ultimo %}
+    <a href="{{ url_for('enriquecer_cpf_ultimo') }}" class="eda-btn eda-btn-secondary eda-btn-block" style="margin-top:0.75rem;">
+      Baixar último resultado ({{ ultimo }})
+    </a>
+    {% endif %}
+  </div>
+
+  <div class="eda-section-card" style="margin-top:1.25rem;">
+    <h2 class="eda-template-h2" style="font-size:1rem;margin:0 0 0.6rem;">O que o Excel contém</h2>
+    <ul class="eda-lead" style="margin:0;padding-left:1.2rem;line-height:1.55;">
+      <li><strong>Principal</strong> — um processo por linha, com <code>TELEFONE_1…</code>, <code>EMAIL_1…</code> e <code>TELEFONE_HSM_1…</code>, mais Blacklist, Motivo e data de inclusão da tag.</li>
+      <li><strong>sms</strong> — explosão no padrão da Etapa 2 (TELEFONE, Contato, Nome, Processo) e blacklist só na linha do telefone quando o motivo for Telefone Incorreto.</li>
+      <li><strong>Emails</strong> e <strong>Disparo_HSM</strong> — mesmo padrão da FINAL da Etapa 2.</li>
+      <li><strong>CPFs_nao_encontrados</strong> — CPFs do CSV que não estão na base.</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("arquivo-cpf");
+  var badge = document.getElementById("cpf-badge");
+  var form = document.getElementById("form-enriquecer-cpf");
+  var btn = document.getElementById("cpf-submit");
+  var label = document.getElementById("cpf-btn-label");
+  var status = document.getElementById("cpf-status");
+
+  if (input) {
+    input.addEventListener("change", function () {
+      if (input.files && input.files[0]) {
+        badge.textContent = input.files[0].name;
+        badge.className = "eda-badge eda-badge--ok";
+      }
+    });
+  }
+
+  if (form) {
+    form.addEventListener("submit", function () {
+      /* Não desabilitar o botão no mesmo tick: o Chrome aborta o body do POST
+         e o Apache devolve 408 (RequestReadTimeout). */
+      status.textContent = "Enviando o CSV…";
+      setTimeout(function () {
+        btn.disabled = true;
+        label.textContent = "Enviando…";
+      }, 50);
+    });
+  }
+})();
+</script>
+{% endblock %}

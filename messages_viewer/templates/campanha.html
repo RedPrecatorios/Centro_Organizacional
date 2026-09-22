@@ -21,7 +21,7 @@
     </header>
 
     <nav class="camp-tabs" role="tablist" aria-label="Sub-abas da Campanha">
-      <button type="button" class="camp-tab active" data-tab="dominios" role="tab" aria-selected="true">Dominios</button>
+      <button type="button" class="camp-tab active" data-tab="dominios" role="tab" aria-selected="true">Domínios</button>
       <button type="button" class="camp-tab" data-tab="templates" role="tab" aria-selected="false">Templates</button>
       <button type="button" class="camp-tab" data-tab="disparar" role="tab" aria-selected="false">Disparar</button>
       <button type="button" class="camp-tab" data-tab="monitoramento" role="tab" aria-selected="false">Monitoramento</button>
@@ -113,7 +113,7 @@
               <textarea id="tpl-txt" rows="8" class="camp-textarea-code"></textarea>
             </div>
             <div class="camp-field" style="grid-column:1/-1">
-              <label for="tpl-map-json">Mapeamento padrao (JSON opcional)</label>
+              <label for="tpl-map-json">Mapeamento padrão (JSON opcional)</label>
               <input type="text" id="tpl-map-json" class="camp-input-mono" placeholder='{"credor":"nome","processo":"processo"}' />
               <small class="camp-hint">Chave = variavel no template; valor = coluna CSV ou __email__ / __nome__</small>
             </div>
@@ -126,12 +126,12 @@
           <div id="tpl-form-msg" class="camp-msg" style="display:none"></div>
         </div>
 
-        <div id="tpl-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+        <div id="tpl-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> Carregando...</div>
         <table class="camp-table" id="tpl-table" style="display:none">
           <thead><tr><th>Nome</th><th>Assunto</th><th>Tamanho</th><th>Acoes</th></tr></thead>
           <tbody id="tpl-tbody"></tbody>
         </table>
-        <p id="tpl-empty" class="camp-empty" style="display:none">Nenhum template. Crie um ou importe conteudo dos ficheiros em <code>campanha/templates/</code>.</p>
+        <p id="tpl-empty" class="camp-empty" style="display:none">Nenhum template. Crie um ou importe conteúdo dos arquivos em <code>campanha/templates/</code>.</p>
       </section>
 
       <!-- ═══ SUB-ABA: DISPARAR ═══ -->
@@ -150,7 +150,7 @@
           <div class="camp-field" style="max-width:28rem">
             <label for="disp-template-id">Template</label>
             <select id="disp-template-id">
-              <option value="">Padrao (ficheiros default.html / default.txt)</option>
+              <option value="">Padrão (arquivos default.html / default.txt)</option>
             </select>
           </div>
           <div id="disp-map-container" style="display:none;margin-top:0.75rem">
@@ -243,7 +243,7 @@
           </div>
           <div class="camp-field" style="grid-column:1/-1">
             <label for="unico-template-id">Template (opcional)</label>
-            <select id="unico-template-id"><option value="">Padrao (default.html)</option></select>
+            <select id="unico-template-id"><option value="">Padrão (default.html)</option></select>
           </div>
         </div>
         <button type="button" class="camp-btn camp-btn-secondary" id="btn-disparo-unico">Enviar para este email</button>
@@ -501,7 +501,7 @@
       lab.innerHTML = '<code>' + '\u007B\u007B' + esc(v) + '\u007D\u007D' + '</code>';
       const sel = document.createElement('select');
       sel.dataset.tplVar = v;
-      let html = '<option value="">(auto: coluna com mesmo nome ou padrao do template)</option>';
+      let html = '<option value="">(auto: coluna com mesmo nome ou padrão do template)</option>';
       opts.forEach(o => { html += '<option value="' + tplEscAttr(o) + '">' + esc(o) + '</option>'; });
       sel.innerHTML = html;
       const def = dispTemplateMapDefault[v];
@@ -533,7 +533,7 @@
     const sel = document.getElementById('disp-template-id');
     const sel2 = document.getElementById('unico-template-id');
     const cur = sel.value, cur2 = sel2.value;
-    const head = '<option value="">Padrao (ficheiros default.html / default.txt)</option>';
+    const head = '<option value="">Padrão (arquivos default.html / default.txt)</option>';
     const body = (d.templates || []).map(t => '<option value="' + String(t.id) + '">' + esc(t.nome) + '</option>').join('');
     sel.innerHTML = head + body;
     sel2.innerHTML = head + body;

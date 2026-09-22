@@ -487,7 +487,7 @@ def baixar_anexo_pdf(
     try:
         if not _file_under_root(service, file_id, root):
             return (
-                {"ok": False, "error": "Ficheiro fora da pasta configurada."},
+                {"ok": False, "error": "Arquivo fora da pasta configurada."},
                 403,
                 headers_err,
             )
@@ -517,7 +517,7 @@ def baixar_anexo_pdf(
         is_pdf = mime == _PDF_MIME or name.lower().endswith(".pdf")
         if not is_pdf and mime.startswith("application/vnd.google-apps."):
             return (
-                {"ok": False, "error": "Ficheiro Google nativo — exporte como PDF no Drive."},
+                {"ok": False, "error": "Arquivo Google nativo — exporte como PDF no Drive."},
                 415,
                 headers_err,
             )

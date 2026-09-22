@@ -20,6 +20,7 @@ from general_functions.general_functions import *
 from db_handler.db_handler import DBHandler
 from txt_handler.txt_handler import TxtHandler
 from calculation_automation.calculation_automation import CalculationAutomation
+from manager.prioridade_detect import resolve_planilha_prioridade
 
 
 def _coleta_mysql_config():
@@ -131,17 +132,45 @@ class Manager:
         except ValueError:
             return 0.0
 
-    def run_atualizacao_calculo(self, prec_id: int, feito_por: str | None = None) -> dict:
+    def run_atualizacao_calculo(
+        self,
+        prec_id: int,
+        feito_por: str | None = None,
+        prioridade: bool = False,
+        percentual_honorarios: float | None = None,
+    ) -> dict:
         """
         Actualização de cálculo para **um** ``id`` de ``precainfosnew`` (o mesmo
         que ``id_precainfosnew`` na tabela ``memoria_calculo``) — p.ex. API Flask
         a partir do botão «Atualizar Cálculo».
 
         ``feito_por``: guardado em ``memoria_calculo.feito_por`` (username ou "automação").
+        ``prioridade``: se True, o nome da planilha no Drive começa por ``PRIORI``.
+        ``percentual_honorarios``: Q14 da planilha (0–100). ``None`` usa o padrão V33 (30).
         """
         from manager.run_single_calculo import execute_atualizacao_calculo
 
-        return execute_atualizacao_calculo(self, prec_id, feito_por=feito_por)
+        return execute_atualizacao_calculo(
+            self,
+            prec_id,
+            feito_por=feito_por,
+            prioridade=prioridade,
+            percentual_honorarios=percentual_honorarios,
+        )
+
+    def run_atualizacao_calculo_from_form(
+        self,
+        form_payload: dict,
+        *,
+        feito_por: str | None = None,
+        prioridade: bool = False,
+    ) -> dict:
+        """Planilha + memoria_calculo a partir do formulário, sem gravar em precainfosnew."""
+        from manager.run_single_calculo import execute_atualizacao_from_form_dict
+
+        return execute_atualizacao_from_form_dict(
+            self, form_payload, feito_por=feito_por, prioridade=prioridade
+        )
 
     def run(self):
         try:
@@ -325,11 +354,11 @@ class Manager:
                                 verificar_meses = True
                         elif saldo == 0:
                             update_query = f"UPDATE precainfosnew SET Calculo_Atualizado = 'Sem saldo' WHERE id = {id};"
-                        elif valor_pago > 0:
-                            update_query = f"UPDATE precainfosnew SET Calculo_Atualizado = 'Prioridade' WHERE id = {id};"
                         elif valor_pago == 0 and meses_validados == 0:
                             verificar_meses = True
                         elif valor_pago == 0 and meses_validados > 0:
+                            pass
+                        elif valor_pago > 0:
                             pass
                         else:
                             print("não se encaixou em nenhuma regra")
@@ -462,8 +491,19 @@ class Manager:
                         db_handler.cursor.close()
                         db_handler = None
 
+                        prioridade_planilha = resolve_planilha_prioridade(
+                            valor_pago=valor_pago,
+                            saldo=saldo,
+                            processo=numero_de_processo,
+                            incidente=numero_de_incidente,
+                        )
+                        if prioridade_planilha:
+                            print(
+                                f"\t{Fore.CYAN}[atualizacao] prioridade detectada: "
+                                f"planilha com PRIORI no nome{Style.RESET_ALL}\n"
+                            )
                         calculation_automation = CalculationAutomation(
-                            main_dict, self.today
+                            main_dict, self.today, prioridade=bool(prioridade_planilha)
                         )
                         self.today = calculation_automation.check_day()
                         calculation_automation.edit_cells()
@@ -475,6 +515,7 @@ class Manager:
                             print(
                                 f"[+] {main_dict['Processo']} - {main_dict['Incidente']}: Verificar meses"
                             )
+                            calculation_automation.clean()
 
                     first_execution = False
                     exit()

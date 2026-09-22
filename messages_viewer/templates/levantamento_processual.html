@@ -180,7 +180,7 @@
         <span class="lp-meta" id="lp-job-meta" style="margin:0"></span>
       </div>
 
-      <div id="lp-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A aguardar resultado do levantamento…</div>
+      <div id="lp-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> Aguardando resultado do levantamento…</div>
       <p id="lp-summary" class="camp-hint" style="margin:0.75rem 0">Informe nome, CPF ou processo + nome e clique em Enviar levantamento.</p>
       <div id="lp-results"></div>
       <p id="lp-empty" class="camp-empty" style="display:none">Nenhum processo apto encontrado.</p>
@@ -519,7 +519,7 @@
     setBusy(true);
     elResults.innerHTML = '';
     elEmpty.style.display = 'none';
-    elSummary.textContent = 'A enviar pedido de levantamento…';
+    elSummary.textContent = 'Enviando pedido de levantamento…';
     elToolbar.style.display = 'flex';
     elStatus.className = 'lp-status lp-status--queued';
     elStatus.textContent = 'enviando';
@@ -549,7 +549,7 @@
           handleTerminal(res.body);
           return;
         }
-        elSummary.textContent = 'Levantamento em curso — a sincronizar resultados…';
+        elSummary.textContent = 'Levantamento em andamento — sincronizando resultados…';
         schedulePoll(activeJobId);
       })
       .catch(function (e) {

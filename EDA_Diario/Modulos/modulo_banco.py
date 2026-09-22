@@ -1170,6 +1170,17 @@ def normalizar_cpf(valor) -> str:
     if not s or s.lower() in ("nan", "nat", "none"):
         return ""
 
+    if re.search(r"[eE]", s):
+        try:
+            s = str(int(round(float(s))))
+        except ValueError:
+            pass
+
+    if s.endswith(".0"):
+        core = s[:-2].lstrip("-")
+        if core.isdigit():
+            s = s[:-2]
+
     digitos = "".join(re.findall(r"\d+", s))
     if not digitos:
         return ""
@@ -1177,7 +1188,7 @@ def normalizar_cpf(valor) -> str:
     if len(digitos) < 11:
         digitos = digitos.zfill(11)
     elif len(digitos) > 11:
-        digitos = digitos[:11]
+        digitos = digitos[-11:]
 
     return digitos
 
@@ -1189,7 +1200,7 @@ def _val_cpf_cadastro(row) -> str:
             v = _val(row, col)
             if v:
                 return normalizar_cpf(v)
-    return normalizar_cpf(_val(row, "CPF") or "")
+    return normalizar_cpf(_val(row, "CPF") or _val(row, "cpf") or "")
 
 
 def _data(row, col):
@@ -1247,7 +1258,12 @@ def salvar_processos(df: pd.DataFrame, id_execucao: int) -> dict[str, int]:
 
     for _, row in df.iterrows():
         cpf             = _val_cpf_cadastro(row)
-        nome            = _val(row, "Requerente")
+        nome            = (
+            _val(row, "Requerente")
+            or _val(row, "requerente")
+            or _val(row, "NOME")
+            or _val(row, "Nome")
+        )
         data_nasc       = _data(row, "Data_de_Nascimento")
         numero_processo, numero_incidente = _processo_incidente_db(row)
         chave_mapa = _chave_mapa_processo(row)
@@ -1417,7 +1433,13 @@ def salvar_disparo_hsm(
     total = 0
 
     def _requerente(row) -> str | None:
-        return _val(row, "Requerente") or _val(row, "NOME") or _val(row, "Nome")
+        return (
+            _val(row, "Requerente")
+            or _val(row, "requerente")
+            or _val(row, "NOME")
+            or _val(row, "Nome")
+            or _val(row, "nome")
+        )
 
     for idx, (_, row) in enumerate(df.iterrows()):
         numero_processo, numero_incidente = _processo_incidente_db(row)

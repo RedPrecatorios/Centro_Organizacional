@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Cálculo — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+  <style>
+    .acm {
+      --acm-queued: #1d4ed8;
+      --acm-queued-soft: #dbeafe;
+      --acm-running: #c2410c;
+      --acm-running-soft: #ffedd5;
+      --acm-done: #047857;
+      --acm-done-soft: #d1fae5;
+      --acm-error: #b91c1c;
+      --acm-error-soft: #fee2e2;
+      --acm-ink: #0f172a;
+      --acm-panel: #ffffff;
+      --acm-line: var(--border);
+      --acm-soft: #f1f5f9;
+      --acm-radius: 12px;
+    }
+
+    .acm-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem 1.5rem;
+      margin-bottom: 1.1rem;
+    }
+    .acm-head-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem;
+    }
+    .acm-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      background: var(--acm-soft);
+      border: 1px solid var(--acm-line);
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .acm-live-dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: #94a3b8;
+      box-shadow: 0 0 0 0 rgba(4, 120, 87, 0.35);
+    }
+    .acm-live--ok .acm-live-dot {
+      background: #059669;
+      animation: acm-pulse 1.8s ease-out infinite;
+    }
+    .acm-live--bad .acm-live-dot { background: #dc2626; }
+    .acm-live--warn .acm-live-dot { background: #d97706; }
+    @keyframes acm-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.45); }
+      70% { box-shadow: 0 0 0 8px rgba(5, 150, 105, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+    }
+    .acm-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    .acm-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 0.9rem;
+    }
+    @media (max-width: 980px) {
+      .acm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .acm-kpi {
+      position: relative;
+      background: var(--acm-panel);
+      border: 1px solid var(--acm-line);
+      border-radius: var(--acm-radius);
+      padding: 0.95rem 1rem 0.95rem 1.05rem;
+      overflow: hidden;
+      min-height: 5.4rem;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .acm-kpi::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: var(--kpi-accent, #64748b);
+    }
+    .acm-kpi-label {
+      margin: 0;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .acm-kpi-value {
+      margin: 0.35rem 0 0;
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      color: var(--acm-ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .acm-kpi-sub {
+      margin: 0.45rem 0 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .acm-kpi--queued { --kpi-accent: var(--acm-queued); }
+    .acm-kpi--running { --kpi-accent: var(--acm-running); }
+    .acm-kpi--done { --kpi-accent: var(--acm-done); }
+    .acm-kpi--error { --kpi-accent: var(--acm-error); }
+    .acm-kpi--flash { animation: acm-flash 0.45s ease; }
+    @keyframes acm-flash {
+      from { background: #f8fafc; }
+      to { background: var(--acm-panel); }
+    }
+
+    .acm-status-row {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 900px) {
+      .acm-status-row { grid-template-columns: 1fr; }
+    }
+    .acm-panel {
+      background: var(--acm-panel);
+      border: 1px solid var(--acm-line);
+      border-radius: var(--acm-radius);
+      padding: 0.9rem 1rem;
+    }
+    .acm-panel-title {
+      margin: 0 0 0.75rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .acm-svc-list {
+      display: grid;
+      gap: 0.55rem;
+    }
+    .acm-svc {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.55rem 0.7rem;
+      border-radius: 10px;
+      background: var(--acm-soft);
+      border: 1px solid transparent;
+    }
+    .acm-svc-name {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--acm-ink);
+    }
+    .acm-svc-meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+    .acm-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .acm-badge::before {
+      content: "";
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .acm-badge--ok { background: var(--acm-done-soft); color: var(--acm-done); }
+    .acm-badge--bad { background: var(--acm-error-soft); color: var(--acm-error); }
+    .acm-badge--warn { background: var(--acm-running-soft); color: var(--acm-running); }
+
+    .acm-capacity {
+      display: grid;
+      gap: 0.7rem;
+    }
+    .acm-cap-row {
+      display: grid;
+      grid-template-columns: 5.5rem 1fr auto;
+      gap: 0.65rem;
+      align-items: center;
+    }
+    .acm-cap-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .acm-cap-track {
+      height: 0.7rem;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .acm-cap-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #0f766e, #14b8a6);
+      transition: width 0.35s ease;
+    }
+    .acm-cap-fill--hot {
+      background: linear-gradient(90deg, #c2410c, #f59e0b);
+    }
+    .acm-cap-val {
+      font-size: 0.8rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--acm-ink);
+      min-width: 3.2rem;
+      text-align: right;
+    }
+    .acm-meta {
+      margin: 0.65rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    .acm-section {
+      margin: 0 0 0.65rem;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .acm-section h2 {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--acm-ink);
+    }
+    .acm-section span {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .acm-clouds {
+      display: grid;
+      gap: 0.55rem;
+      margin-bottom: 1.15rem;
+    }
+    .acm-cloud {
+      display: grid;
+      grid-template-columns: minmax(9rem, 1.1fr) minmax(0, 2fr) auto;
+      gap: 0.75rem 1rem;
+      align-items: center;
+      background: var(--acm-panel);
+      border: 1px solid var(--acm-line);
+      border-radius: var(--acm-radius);
+      padding: 0.75rem 0.9rem;
+    }
+    @media (max-width: 780px) {
+      .acm-cloud { grid-template-columns: 1fr; }
+    }
+    .acm-cloud-host {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--acm-ink);
+      line-height: 1.2;
+    }
+    .acm-cloud-ip {
+      margin-top: 0.15rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .acm-stack {
+      display: flex;
+      height: 0.85rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e2e8f0;
+      width: 100%;
+    }
+    .acm-stack > i {
+      display: block;
+      height: 100%;
+      min-width: 0;
+    }
+    .acm-stack .q { background: var(--acm-queued); }
+    .acm-stack .r { background: var(--acm-running); }
+    .acm-stack .d { background: #94a3b8; }
+    .acm-stack .e { background: var(--acm-error); }
+    .acm-cloud-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.7rem;
+      justify-content: flex-end;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .acm-cloud-counts b { font-weight: 700; }
+    .acm-c-q { color: var(--acm-queued); }
+    .acm-c-r { color: var(--acm-running); }
+    .acm-c-d { color: #475569; }
+    .acm-c-e { color: var(--acm-error); }
+
+    .acm-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 980px) {
+      .acm-split { grid-template-columns: 1fr; }
+    }
+    .acm-jobs-panel {
+      background: var(--acm-panel);
+      border: 1px solid var(--acm-line);
+      border-radius: var(--acm-radius);
+      min-height: 12rem;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .acm-jobs-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.75rem 0.9rem;
+      border-bottom: 1px solid var(--acm-line);
+      background: linear-gradient(180deg, #f8fafc, #fff);
+    }
+    .acm-jobs-head h2 {
+      margin: 0;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    .acm-jobs-count {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      background: var(--acm-soft);
+      color: var(--muted);
+    }
+    .acm-jobs-list {
+      list-style: none;
+      margin: 0;
+      padding: 0.35rem 0;
+      flex: 1;
+      overflow: auto;
+      max-height: 22rem;
+    }
+    .acm-job {
+      display: grid;
+      grid-template-columns: 0.55rem 1fr auto;
+      gap: 0.65rem;
+      align-items: start;
+      padding: 0.55rem 0.9rem;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .acm-job:last-child { border-bottom: 0; }
+    .acm-job:hover { background: #f8fafc; }
+    .acm-job-dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      margin-top: 0.35rem;
+      background: #94a3b8;
+    }
+    .acm-job--running .acm-job-dot {
+      background: var(--acm-running);
+      box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.15);
+    }
+    .acm-job--queued .acm-job-dot { background: var(--acm-queued); }
+    .acm-job--done .acm-job-dot { background: var(--acm-done); }
+    .acm-job--error .acm-job-dot { background: var(--acm-error); }
+    .acm-job-title {
+      font-size: 0.86rem;
+      font-weight: 650;
+      color: var(--acm-ink);
+      line-height: 1.25;
+    }
+    .acm-job-meta {
+      margin-top: 0.2rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.2rem 0.55rem;
+    }
+    .acm-job-meta code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      background: var(--acm-soft);
+      padding: 0.05rem 0.3rem;
+      border-radius: 4px;
+      color: #334155;
+    }
+    .acm-job-side {
+      text-align: right;
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .acm-job-side strong {
+      display: block;
+      color: var(--acm-ink);
+      font-size: 0.78rem;
+      font-weight: 700;
+      margin-bottom: 0.15rem;
+    }
+    .acm-rank {
+      display: inline-block;
+      margin-top: 0.2rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.08rem 0.35rem;
+      border-radius: 4px;
+      background: #e2e8f0;
+      color: #475569;
+    }
+    .acm-rank--0 { background: #fef3c7; color: #92400e; }
+    .acm-rank--1 { background: #dbeafe; color: #1e40af; }
+
+    .acm-empty {
+      margin: 0;
+      padding: 1.6rem 1rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .acm-bottom {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 0.85rem;
+    }
+    @media (max-width: 980px) {
+      .acm-bottom { grid-template-columns: 1fr; }
+    }
+
+    .acm-loading .acm-kpi-value { opacity: 0.35; }
+  </style>
+</head>
+<body class="dashboard-body acm"
+  data-acm-configured='{{ api_calculo_monitor_configured | tojson }}'
+  data-acm-poll-ms='{{ api_calculo_poll_interval_ms | tojson }}'>
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top acm-head">
+      <div>
+        <h1 class="dash-h1">API Cálculo</h1>
+        <p class="dash-sub">Monitor da fila DEPRE — carga por cloud, execução e saúde dos serviços.</p>
+      </div>
+      <div class="acm-head-actions">
+        <span class="acm-live" id="acm-live"><span class="acm-live-dot" aria-hidden="true"></span><span id="acm-updated">Aguardando…</span></span>
+        <label class="acm-toggle">
+          <input type="checkbox" id="acm-auto" checked />
+          Auto {{ (api_calculo_poll_interval_ms / 1000)|int }}s
+        </label>
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="acm-refresh">Atualizar</button>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      {% if not api_calculo_monitor_configured %}
+      <div class="camp-msg camp-msg--warn" role="alert">
+        Pasta de jobs da API_CALCULO não encontrada. Defina <code>API_CALCULO_ROOT</code> ou
+        <code>API_CALCULO_JOBS_DIR</code> no <code>.env</code> da plataforma.
+      </div>
+      {% endif %}
+
+      <div class="acm-kpis" id="acm-stats">
+        <div class="acm-kpi acm-kpi--queued">
+          <p class="acm-kpi-label">Na fila</p>
+          <p class="acm-kpi-value" id="acm-c-queued">—</p>
+          <p class="acm-kpi-sub" id="acm-s-queued">aguardando slot</p>
+        </div>
+        <div class="acm-kpi acm-kpi--running">
+          <p class="acm-kpi-label">Em execução</p>
+          <p class="acm-kpi-value" id="acm-c-running">—</p>
+          <p class="acm-kpi-sub" id="acm-s-running">LibreOffice</p>
+        </div>
+        <div class="acm-kpi acm-kpi--done">
+          <p class="acm-kpi-label">Concluídos</p>
+          <p class="acm-kpi-value" id="acm-c-done">—</p>
+          <p class="acm-kpi-sub">retidos no disco</p>
+        </div>
+        <div class="acm-kpi acm-kpi--error">
+          <p class="acm-kpi-label">Erros</p>
+          <p class="acm-kpi-value" id="acm-c-error">—</p>
+          <p class="acm-kpi-sub">jobs com falha</p>
+        </div>
+      </div>
+
+      <div class="acm-status-row">
+        <section class="acm-panel">
+          <h2 class="acm-panel-title">Serviços</h2>
+          <div class="acm-svc-list">
+            <div class="acm-svc">
+              <div>
+                <div class="acm-svc-name">api-calculo</div>
+                <div class="acm-svc-meta">FastAPI · porta 9487 · workers de cálculo</div>
+              </div>
+              <span class="acm-badge" id="acm-svc-api">—</span>
+            </div>
+            <div class="acm-svc">
+              <div>
+                <div class="acm-svc-name">drive-worker</div>
+                <div class="acm-svc-meta">Upload das planilhas para o Google Drive</div>
+              </div>
+              <span class="acm-badge" id="acm-svc-drive">—</span>
+            </div>
+          </div>
+          <p class="acm-meta" id="acm-paths"></p>
+        </section>
+        <section class="acm-panel">
+          <h2 class="acm-panel-title">Capacidade</h2>
+          <div class="acm-capacity">
+            <div class="acm-cap-row">
+              <span class="acm-cap-label">LibreOffice</span>
+              <div class="acm-cap-track"><div class="acm-cap-fill" id="acm-lo-fill"></div></div>
+              <span class="acm-cap-val" id="acm-lo-val">—</span>
+            </div>
+            <div class="acm-cap-row">
+              <span class="acm-cap-label">Fila ativa</span>
+              <div class="acm-cap-track"><div class="acm-cap-fill" id="acm-q-fill" style="background:linear-gradient(90deg,#1d4ed8,#60a5fa)"></div></div>
+              <span class="acm-cap-val" id="acm-q-val">—</span>
+            </div>
+            <p class="acm-meta" id="acm-rr" style="margin-top:0.15rem"></p>
+          </div>
+        </section>
+      </div>
+
+      <div class="acm-section">
+        <h2>Por cloud / máquina</h2>
+        <span id="acm-clouds-hint">partilha da carga</span>
+      </div>
+      <div class="acm-clouds" id="acm-clouds"></div>
+      <p class="acm-empty" id="acm-clouds-empty" hidden>Nenhum job no disco.</p>
+
+      <div class="acm-split">
+        <section class="acm-jobs-panel">
+          <div class="acm-jobs-head">
+            <h2>Em execução</h2>
+            <span class="acm-jobs-count" id="acm-running-count">0</span>
+          </div>
+          <ul class="acm-jobs-list" id="acm-running"></ul>
+          <p class="acm-empty" id="acm-running-empty">Nenhum job a correr.</p>
+        </section>
+        <section class="acm-jobs-panel">
+          <div class="acm-jobs-head">
+            <h2>Mais antigos na fila</h2>
+            <span class="acm-jobs-count" id="acm-queued-count">0</span>
+          </div>
+          <ul class="acm-jobs-list" id="acm-queued"></ul>
+          <p class="acm-empty" id="acm-queued-empty">Fila vazia.</p>
+        </section>
+      </div>
+
+      <div class="acm-bottom">
+        <section class="acm-jobs-panel">
+          <div class="acm-jobs-head">
+            <h2>Concluídos recentes</h2>
+            <span class="acm-jobs-count" id="acm-done-count">0</span>
+          </div>
+          <ul class="acm-jobs-list" id="acm-done"></ul>
+          <p class="acm-empty" id="acm-done-empty">Sem concluídos retidos.</p>
+        </section>
+        <section class="acm-jobs-panel">
+          <div class="acm-jobs-head">
+            <h2>Erros recentes</h2>
+            <span class="acm-jobs-count" id="acm-error-count">0</span>
+          </div>
+          <ul class="acm-jobs-list" id="acm-errors"></ul>
+          <p class="acm-empty" id="acm-errors-empty">Sem erros recentes.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    const configured = document.body.dataset.acmConfigured === "true";
+    const pollMs = Math.max(3000, parseInt(document.body.dataset.acmPollMs || "8000", 10) || 8000);
+    const btn = document.getElementById("acm-refresh");
+    const auto = document.getElementById("acm-auto");
+    const live = document.getElementById("acm-live");
+    let timer = null;
+    let loading = false;
+    let lastCounts = null;
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function shortTs(v) {
+      if (!v) return "—";
+      const s = String(v);
+      const m = s.match(/(\d{2}:\d{2}:\d{2})/);
+      if (m) {
+        const d = s.match(/(\d{4}-\d{2}-\d{2})/);
+        return (d ? d[1].slice(5) + " " : "") + m[1];
+      }
+      return s.slice(0, 19);
+    }
+
+    function relAge(v) {
+      if (!v) return "";
+      const t = Date.parse(String(v));
+      if (!Number.isFinite(t)) return "";
+      const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (sec < 60) return "há " + sec + "s";
+      if (sec < 3600) return "há " + Math.floor(sec / 60) + " min";
+      if (sec < 86400) return "há " + Math.floor(sec / 3600) + " h";
+      return "há " + Math.floor(sec / 86400) + " d";
+    }
+
+    function badgeClass(state) {
+      if (state === "active" || state === "running") return "acm-badge--ok";
+      if (state === "inactive" || state === "failed" || state === "dead") return "acm-badge--bad";
+      return "acm-badge--warn";
+    }
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    function setKpi(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const next = String(value ?? 0);
+      if (el.textContent !== next) {
+        el.textContent = next;
+        const card = el.closest(".acm-kpi");
+        if (card) {
+          card.classList.remove("acm-kpi--flash");
+          void card.offsetWidth;
+          card.classList.add("acm-kpi--flash");
+        }
+      }
+    }
+
+    function setBadge(id, state) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const label = state || "—";
+      el.textContent = label;
+      el.className = "acm-badge " + badgeClass(state);
+    }
+
+    function jobItem(row, kind, timeField) {
+      const name = row.requerente || "Sem requerente";
+      const age = relAge(row[timeField]);
+      const rank = Number(row.priority_rank);
+      const rankCls = rank === 0 ? "acm-rank--0" : rank === 1 ? "acm-rank--1" : "";
+      return (
+        '<li class="acm-job acm-job--' + kind + '">' +
+          '<span class="acm-job-dot" aria-hidden="true"></span>' +
+          '<div>' +
+            '<div class="acm-job-title">' + esc(name) + '</div>' +
+            '<div class="acm-job-meta">' +
+              '<span>' + esc(row.host || "—") + '</span>' +
+              (row.processo ? '<code>' + esc(row.processo) + '</code>' : '') +
+              (row.incidente ? '<span>inc. ' + esc(row.incidente) + '</span>' : '') +
+              (row.error ? '<span title="' + esc(row.error) + '">' + esc(String(row.error).slice(0, 60)) + (String(row.error).length > 60 ? "…" : "") + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="acm-job-side">' +
+            '<strong>' + esc(age || shortTs(row[timeField])) + '</strong>' +
+            esc(shortTs(row[timeField])) +
+            '<span class="acm-rank ' + rankCls + '">rank ' + esc(row.priority_rank) + '</span>' +
+          '</div>' +
+        '</li>'
+      );
+    }
+
+    function fillJobs(listId, emptyId, countId, rows, kind, timeField) {
+      const list = document.getElementById(listId);
+      const empty = document.getElementById(emptyId);
+      const count = document.getElementById(countId);
+      if (!list) return;
+      const items = rows || [];
+      if (count) count.textContent = String(items.length);
+      if (!items.length) {
+        list.innerHTML = "";
+        if (empty) empty.hidden = false;
+        return;
+      }
+      if (empty) empty.hidden = true;
+      list.innerHTML = items.map((r) => jobItem(r, kind, timeField)).join("");
+    }
+
+    function renderClouds(rows, totals) {
+      const wrap = document.getElementById("acm-clouds");
+      const empty = document.getElementById("acm-clouds-empty");
+      if (!wrap) return;
+      const list = rows || [];
+      if (!list.length) {
+        wrap.innerHTML = "";
+        if (empty) empty.hidden = false;
+        return;
+      }
+      if (empty) empty.hidden = true;
+      const maxTotal = Math.max(1, ...list.map((r) => Number(r.total) || 0));
+      wrap.innerHTML = list.map((row) => {
+        const q = Number(row.queued) || 0;
+        const r = Number(row.running) || 0;
+        const d = Number(row.done) || 0;
+        const e = Number(row.error) || 0;
+        const t = Math.max(1, Number(row.total) || q + r + d + e);
+        const scale = (100 * t) / maxTotal;
+        const pq = (100 * q) / t;
+        const pr = (100 * r) / t;
+        const pd = (100 * d) / t;
+        const pe = (100 * e) / t;
+        const shareQ = totals.queued ? Math.round((100 * q) / Math.max(1, totals.queued)) : 0;
+        return (
+          '<article class="acm-cloud">' +
+            '<div>' +
+              '<div class="acm-cloud-host">' + esc(row.host) + '</div>' +
+              '<div class="acm-cloud-ip">' + esc(row.source_ip) +
+                (totals.queued ? ' · ' + shareQ + '% da fila' : '') +
+              '</div>' +
+            '</div>' +
+            '<div class="acm-stack" style="width:' + Math.max(18, scale) + '%" title="queued/running/done/error">' +
+              '<i class="q" style="width:' + pq + '%"></i>' +
+              '<i class="r" style="width:' + pr + '%"></i>' +
+              '<i class="d" style="width:' + pd + '%"></i>' +
+              '<i class="e" style="width:' + pe + '%"></i>' +
+            '</div>' +
+            '<div class="acm-cloud-counts">' +
+              '<span class="acm-c-q"><b>' + q + '</b> fila</span>' +
+              '<span class="acm-c-r"><b>' + r + '</b> run</span>' +
+              '<span class="acm-c-d"><b>' + d + '</b> done</span>' +
+              '<span class="acm-c-e"><b>' + e + '</b> err</span>' +
+            '</div>' +
+          '</article>'
+        );
+      }).join("");
+    }
+
+    function render(data) {
+      if (!data || !data.ok) {
+        setText("acm-updated", data && data.error ? data.error : "Falha ao carregar");
+        if (live) live.className = "acm-live acm-live--bad";
+        return;
+      }
+      const c = data.counts || {};
+      const queued = Number(c.queued) || 0;
+      const running = Number(c.running) || 0;
+      const done = Number(c.done) || 0;
+      const error = Number(c.error) || 0;
+      setKpi("acm-c-queued", queued);
+      setKpi("acm-c-running", running);
+      setKpi("acm-c-done", done);
+      setKpi("acm-c-error", error);
+
+      const loMax = data.libreoffice_max_concurrent;
+      setText("acm-s-queued", queued === 0 ? "fila limpa" : "jobs à espera");
+      setText(
+        "acm-s-running",
+        loMax != null ? running + " / " + loMax + " slots LO" : "em processamento"
+      );
+
+      setText("acm-updated", "Atualizado " + shortTs(data.generated_at));
+      const pathBits = [];
+      if (data.index_queued != null) pathBits.push("índice " + data.index_queued);
+      if (data.jobs_dir) pathBits.push(data.jobs_dir);
+      setText("acm-paths", pathBits.join(" · "));
+
+      const svc = data.services || {};
+      setBadge("acm-svc-api", svc.api_calculo);
+      setBadge("acm-svc-drive", svc.api_calculo_drive_worker);
+
+      const apiOk = svc.api_calculo === "active";
+      const drvOk = svc.api_calculo_drive_worker === "active";
+      if (live) {
+        live.className = "acm-live " + (apiOk && drvOk ? "acm-live--ok" : apiOk ? "acm-live--warn" : "acm-live--bad");
+      }
+
+      const loPct = loMax ? Math.min(100, Math.round((100 * running) / loMax)) : 0;
+      const loFill = document.getElementById("acm-lo-fill");
+      if (loFill) {
+        loFill.style.width = loPct + "%";
+        loFill.classList.toggle("acm-cap-fill--hot", loPct >= 85);
+      }
+      setText("acm-lo-val", loMax != null ? running + "/" + loMax : "—");
+
+      const qFill = document.getElementById("acm-q-fill");
+      const qVis = Math.min(100, Math.round((100 * queued) / Math.max(20, queued)));
+      if (qFill) qFill.style.width = (queued ? Math.max(8, qVis) : 0) + "%";
+      setText("acm-q-val", String(queued));
+
+      const rr = data.rr_state;
+      setText(
+        "acm-rr",
+        rr && rr.last_source_key
+          ? "Round-robin · último IP: " + rr.last_source_key
+          : "Round-robin · sem estado"
+      );
+
+      renderClouds(data.by_source, c);
+      setText("acm-clouds-hint", (data.by_source || []).length + " origem(ns)");
+
+      fillJobs("acm-running", "acm-running-empty", "acm-running-count", data.running_jobs, "running", "started_at");
+      fillJobs("acm-queued", "acm-queued-empty", "acm-queued-count", data.queued_oldest, "queued", "enqueued_at");
+      fillJobs("acm-done", "acm-done-empty", "acm-done-count", data.recent_done, "done", "finished_at");
+      fillJobs("acm-errors", "acm-errors-empty", "acm-error-count", data.recent_errors, "error", "finished_at");
+
+      lastCounts = c;
+    }
+
+    async function refresh() {
+      if (!configured || loading) return;
+      loading = true;
+      document.body.classList.add("acm-loading");
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch("/api/api-calculo/monitor", { credentials: "same-origin" });
+        const data = await res.json();
+        render(data);
+      } catch (err) {
+        setText("acm-updated", "Erro de rede ao atualizar");
+        if (live) live.className = "acm-live acm-live--bad";
+      } finally {
+        loading = false;
+        document.body.classList.remove("acm-loading");
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function schedule() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      if (auto && auto.checked && configured) {
+        timer = setInterval(refresh, pollMs);
+      }
+    }
+
+    if (btn) btn.addEventListener("click", refresh);
+    if (auto) auto.addEventListener("change", schedule);
+    if (configured) {
+      refresh();
+      schedule();
+    }
+  })();
+  </script>
+</body>
+</html>

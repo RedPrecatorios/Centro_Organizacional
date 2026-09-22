@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sincroniza ``memoria_calculo`` a partir do bloco **Memória de cálculo** da planilha
-(células **O307–O313**), preferencialmente a partir de um **.xlsx** gerado com
+(células **R30–R36**), preferencialmente a partir de um **.xlsx** gerado com
 **LibreOffice headless** (``--convert-to xlsx``) para materializar fórmulas; fallback:
 leitura do ``.xlsm`` com ``data_only=True`` (cache vazio se nunca recalculado no Excel).
 
@@ -12,18 +12,18 @@ por defeito ``calculation_automation/.lo_profile``), ``MEMORIA_LIBREOFFICE_TIMEO
 Mapeamento célula → coluna MySQL
 --------------------------------
 
-- **O307** → ``principal_bruto``
-- **O308** → ``juros``
-- **O309** → ``total_bruto``
-- **O310** → ``desc_saude_prev`` (magnitude geralmente positiva na BD)
-- **O311** → ``desc_ir`` (magnitude geralmente positiva na BD)
-- **O312** → **valor monetário** da reserva de honorários → ``reserva_honorarios`` (pode ser negativo; ex. ``-R$ 63.346,23``)
-- **O313** → ``total_liquido`` (valor **directo** da célula). Se O313 não puder ser lido
-  (vazio/cache), usa-se só então o fallback ``O309+O310+O311+O312`` com O310–O312 em ``None``
+- **R30** → ``principal_bruto``
+- **R31** → ``juros``
+- **R32** → ``total_bruto``
+- **R33** → ``desc_saude_prev`` (magnitude geralmente positiva na BD)
+- **R34** → ``desc_ir`` (magnitude geralmente positiva na BD)
+- **R35** → **valor monetário** da reserva de honorários → ``reserva_honorarios`` (pode ser negativo; ex. ``-R$ 63.346,23``)
+- **R36** → ``total_liquido`` (valor **directo** da célula). Se R36 não puder ser lido
+  (vazio/cache), usa-se só então o fallback ``R32+R33+R34+R35`` com R33–R35 em ``None``
   tratados como 0. Leitura usa ``read_only=False`` para células unidas.
 
-A coluna ``percentual_honorarios`` na BD (DEC ``30.00`` = 30 %), não a célula de valor; usa-se
-``MEMORIA_HONORARIOS_PERCENT`` no ``.env`` (padrão **30.0**), alinhada ao rótulo “30 %” do Excel.
+A coluna ``percentual_honorarios`` na BD vem de **Q14** da mesma planilha (0,3 → 30).
+Só se Q14 for ilegível se usa ``MEMORIA_HONORARIOS_PERCENT`` (padrão 30).
 
 **Bases (``.env``):** ``_build_memoria_db_targets`` (MEMORIA_MYSQL_*, dúplica, legado).
 """
@@ -42,17 +42,21 @@ from dotenv import load_dotenv
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 
-from calculation_automation.sheet_constants import NUMERO_MESES_DB_VERIFICAR
+from openpyxl.styles import Font, PatternFill
 
-# 307–313: 7 células de dados (O); percentual de honorários = meta na BD, não célula O
-O_COLUMN_TO_FIELD: tuple[tuple[str, str], ...] = (
-    ("O307", "principal_bruto"),
-    ("O308", "juros"),
-    ("O309", "total_bruto"),
-    ("O310", "desc_saude_prev"),
-    ("O311", "desc_ir"),
-    ("O312", "reserva_honorarios"),
-    ("O313", "total_liquido"),
+from calculation_automation.sheet_constants import (
+    CELULA_HONORARIOS_PCT,
+    HONORARIOS_PERCENT_TEMPLATE,
+    ISENCAO_IR_OBSERVACAO,
+    NUMERO_MESES_CELULA,
+    NUMERO_MESES_DB_VERIFICAR,
+    NUMERO_MESES_ISENCAO_IR,
+    NUMERO_MESES_OBSERVACAO_CELULA,
+    O_COLUMN_TO_FIELD,
+    SHEET_NAME,
+    honorarios_q14_formula,
+    pin_q14_formula_preserving_caches,
+    q14_value_to_percent,
 )
 
 
@@ -64,7 +68,7 @@ def _libreoffice_enabled() -> bool:
 def memoria_recalc_wanted() -> bool:
     """
     Se True, espera-se conversão .xlsm → .xlsx com ``soffice`` para materializar fórmulas
-    (O307:O313). Usado para falhar cedo com mensagem clara em vez de gravar zeros.
+    (R30:R36). Usado para falhar cedo com mensagem clara em vez de gravar zeros.
     """
     return _libreoffice_enabled()
 
@@ -289,7 +293,7 @@ def read_memoria_valores_da_planilha(
     file_path: str, sheet_name: str, *, data_only: bool = True
 ) -> dict[str, float | None]:
     """
-    Lê O307:O313 do ficheiro (após gravação, ``data_only=True`` usa cache de fórmulas
+    Lê R30:R36 do ficheiro (após gravação, ``data_only=True`` usa cache de fórmulas
     se existir no ficheiro).
     """
     out: dict[str, float | None] = {}
@@ -298,7 +302,7 @@ def read_memoria_valores_da_planilha(
     empty = {f: None for _c, f in O_COLUMN_TO_FIELD}
     try:
         is_xlsm = file_path.lower().endswith(".xlsm")
-        # read_only=False: merged_cells activo; O310–O312 podem estar em ranges unidos
+        # read_only=False: merged_cells activo; R33–R35 podem estar em ranges unidos
         # (Libre/Excel) e o valor cai só no canto.
         wb = load_workbook(
             file_path,
@@ -323,14 +327,129 @@ def read_memoria_valores_da_planilha(
 
 
 def _default_honorarios_percent() -> float:
-    raw = (os.getenv("MEMORIA_HONORARIOS_PERCENT") or "30").strip()
+    raw = (os.getenv("MEMORIA_HONORARIOS_PERCENT") or str(HONORARIOS_PERCENT_TEMPLATE)).strip()
     try:
         p = float(raw.replace(",", "."))
     except ValueError:
-        p = 30.0
+        p = HONORARIOS_PERCENT_TEMPLATE
     if 0 < p <= 1.0:
         p = p * 100.0
     return min(100.0, max(0.0, round(p, 2)))
+
+
+def apply_honorarios_percent_cell(ws, percent: float | None = None) -> None:
+    """Grava Q14 como fórmula (V33). ``percent`` 0–100; ``None`` → padrão da planilha."""
+    pct = _default_honorarios_percent() if percent is None else float(percent)
+    if pct < 0:
+        pct = _default_honorarios_percent()
+    cell = ws[CELULA_HONORARIOS_PCT]
+    cell.value = honorarios_q14_formula(pct)
+    cell.number_format = "0%"
+
+
+def pin_honorarios_percent_on_xlsx(
+    file_path: str,
+    *,
+    percent: float | None = None,
+    sheet_name: str | None = None,
+) -> bool:
+    """Regrava Q14 no .xlsx do Drive sem apagar o cache de R30:R36."""
+    if not file_path or not os.path.isfile(file_path):
+        return False
+    name = (sheet_name or SHEET_NAME).strip() or SHEET_NAME
+    pct = _default_honorarios_percent() if percent is None else float(percent)
+    if pct < 0:
+        pct = _default_honorarios_percent()
+    if pin_q14_formula_preserving_caches(
+        file_path, percent=pct, sheet_name=name
+    ):
+        return True
+    try:
+        wb = load_workbook(file_path, data_only=False, read_only=False)
+        ws = _get_sheet(wb, name)
+        apply_honorarios_percent_cell(ws, pct)
+        wb.save(file_path)
+        wb.close()
+        print(
+            "\n[memoria_calculo] Q14 gravado via openpyxl "
+            "(caches de fórmula podem ficar vazios até o Sheets recalcular).\n"
+        )
+        return True
+    except Exception as e:
+        print(f"\n[memoria_calculo] Não foi possível fixar {CELULA_HONORARIOS_PCT}: {e}\n")
+        return False
+
+
+def pin_numero_de_meses_on_xlsx(
+    file_path: str,
+    meses: int = NUMERO_MESES_ISENCAO_IR,
+    *,
+    sheet_name: str | None = None,
+    observacao: str | None = ISENCAO_IR_OBSERVACAO,
+) -> bool:
+    """Grava R24 (e opcionalmente B13) no .xlsx antes do 2.º recálculo LibreOffice."""
+    if not file_path or not os.path.isfile(file_path):
+        return False
+    name = (sheet_name or SHEET_NAME).strip() or SHEET_NAME
+    try:
+        meses_int = int(meses)
+    except (TypeError, ValueError):
+        meses_int = NUMERO_MESES_ISENCAO_IR
+    try:
+        wb = load_workbook(file_path, data_only=False, read_only=False)
+        ws = _get_sheet(wb, name)
+        cell = ws[NUMERO_MESES_CELULA]
+        cell.value = meses_int
+        cell.fill = PatternFill(fill_type=None)
+        cell.font = Font()
+        cell.comment = None
+        if observacao:
+            obs = ws[NUMERO_MESES_OBSERVACAO_CELULA]
+            obs.value = observacao
+            obs.fill = PatternFill(fill_type=None)
+            obs.font = Font()
+        wb.save(file_path)
+        wb.close()
+        return True
+    except Exception as e:
+        print(f"\n[memoria_calculo] Não foi possível fixar {NUMERO_MESES_CELULA}: {e}\n")
+        return False
+
+
+def read_honorarios_percent_da_planilha(
+    file_path: str,
+    sheet_name: str,
+) -> float | None:
+    """Lê Q14 (data_only + fórmula) da mesma planilha de R30:R36."""
+    if not file_path or not os.path.isfile(file_path):
+        return None
+    percents: list[float] = []
+    for data_only in (True, False):
+        try:
+            wb = load_workbook(
+                file_path,
+                data_only=data_only,
+                read_only=False,
+                keep_vba=file_path.lower().endswith(".xlsm"),
+            )
+        except Exception:
+            continue
+        try:
+            ws = _get_sheet(wb, sheet_name)
+            parsed = q14_value_to_percent(_celula_valor_se_unida(ws, CELULA_HONORARIOS_PCT))
+            if parsed is not None:
+                percents.append(parsed)
+        except Exception:
+            pass
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
+    for parsed in percents:
+        if parsed > 0:
+            return parsed
+    return percents[0] if percents else None
 
 
 def _ensure_percent_0_100(v: float) -> float:
@@ -426,11 +545,11 @@ def _apply_total_liquido_soma_O309_312(
     merged: dict[str, float | None], *, print_ok: bool
 ) -> None:
     """
-    **total_liquido** na BD = valor lido de **O313** sempre que a célula for legível.
+    **total_liquido** na BD = valor lido de **R36** sempre que a célula for legível.
 
-    Fallback (LibreOffice/cache sem materializar O313): se O313 for ``None`` ou não for
-    número, e existir **O309** (``total_bruto``), calcula-se ``O309+O310+O311+O312`` com
-    O310–O312 em ``None`` → 0.
+    Fallback (LibreOffice/cache sem materializar R36): se R36 for ``None`` ou não for
+    número, e existir **R32** (``total_bruto``), calcula-se ``R32+R33+R34+R35`` com
+    R33–R35 em ``None`` → 0.
     """
     o313_lido = merged.get("total_liquido")
     if o313_lido is not None:
@@ -447,9 +566,9 @@ def _apply_total_liquido_soma_O309_312(
                         soma = float(tb) + float(ds) + float(di) + float(rh)
                         if abs(o313_f - soma) > 0.02:
                             print(
-                                "\n\t[memoria_calculo] total_liquido: O313 = "
-                                f"{o313_f:,.2f}; soma O309+O310+O311+O312 = {soma:,.2f} "
-                                "(divergência informativa; gravado o valor de O313).\n"
+                                "\n\t[memoria_calculo] total_liquido: R36 = "
+                                f"{o313_f:,.2f}; soma R32+R33+R34+R35 = {soma:,.2f} "
+                                "(divergência informativa; gravado o valor de R36).\n"
                             )
                     except (TypeError, ValueError):
                         pass
@@ -471,9 +590,9 @@ def _apply_total_liquido_soma_O309_312(
             return 0.0, o_ref
         return float(v), None
 
-    p310, a310 = _parcela_ou_zero(ds, "O310")
-    p311, a311 = _parcela_ou_zero(di, "O311")
-    p312, a312 = _parcela_ou_zero(rh, "O312")
+    p310, a310 = _parcela_ou_zero(ds, "R33")
+    p311, a311 = _parcela_ou_zero(di, "R34")
+    p312, a312 = _parcela_ou_zero(rh, "R35")
     try:
         soma = float(tb) + p310 + p311 + p312
     except (TypeError, ValueError):
@@ -484,14 +603,14 @@ def _apply_total_liquido_soma_O309_312(
         return
     if faltou:
         print(
-            "\n\t[memoria_calculo] total_liquido: O313 vazio/ilegível; "
+            "\n\t[memoria_calculo] total_liquido: R36 vazio/ilegível; "
             f"{' '.join(faltou)} sem valor na leitura (0 na soma). "
-            f"Fallback O309+O310+O311+O312 = {soma:,.2f}.\n"
+            f"Fallback R32+R33+R34+R35 = {soma:,.2f}.\n"
         )
     else:
         print(
-            "\n\t[memoria_calculo] total_liquido: O313 vazio/ilegível; "
-            f"fallback O309+O310+O311+O312 = {soma:,.2f}.\n"
+            "\n\t[memoria_calculo] total_liquido: R36 vazio/ilegível; "
+            f"fallback R32+R33+R34+R35 = {soma:,.2f}.\n"
         )
 
 
@@ -499,8 +618,8 @@ def load_merged_memoria_valores(
     file_path: str, sheet_name: str, *, print_ok: bool = True
 ) -> dict[str, float | None]:
     """
-    Lê O307:O313 (merge data_only + raw). ``total_liquido`` = **O313**; se O313 faltar,
-    fallback soma O309+O310+O311+O312.
+    Lê R30:R36 (merge data_only + raw). ``total_liquido`` = **R36**; se R36 faltar,
+    fallback soma R32+R33+R34+R35.
     """
     r_do = read_memoria_valores_da_planilha(file_path, sheet_name, data_only=True)
     r_raw = read_memoria_valores_da_planilha(file_path, sheet_name, data_only=False)
@@ -540,10 +659,10 @@ def sync_memoria_calculo_to_db(
 ) -> bool:
     """
     UPSERT: identificação a partir de ``main_dict``; **valores monetários** só
-    a partir de O307:O313 no ficheiro (por defeito ``output_path``; use
+    a partir de R30:R36 no ficheiro (por defeito ``output_path``; use
     ``read_memoria_path`` para um ``.xlsx`` recalculado pelo LibreOffice). Se
     ``precomputed_merged`` for passado, usa-o em vez de reler a planilha (ex.: o mesmo
-    dicionário já usado para O313 / ``Calculo_Atualizado``).
+    dicionário já usado para R36 / ``Calculo_Atualizado``).
 
     ``feito_por``: se ``None``, usa ``main_dict.get("feito_por")``; normalizado para
     string curta ou **automação**.
@@ -561,11 +680,11 @@ def sync_memoria_calculo_to_db(
     except (TypeError, ValueError):
         print("\n[memoria_calculo] id inválido; sincronização ignorada.\n")
         return False
-    if pid <= 0:
+    if pid == 0:
         return False
     if not output_path or not os.path.isfile(output_path):
         print(
-            f"\n[memoria_calculo] Ficheiro inexistente para leitura O307:O313: {output_path!r}\n"
+            f"\n[memoria_calculo] Ficheiro inexistente para leitura R30:R36: {output_path!r}\n"
         )
         return False
 
@@ -586,7 +705,7 @@ def sync_memoria_calculo_to_db(
 
     if all(merged.get(f) is None for _c, f in O_COLUMN_TO_FIELD):
         print(
-            "\n\t[memoria_calculo] Nenhum valor O307:O313 na planilha (cache vazio / LibreOffice inactivo). "
+            "\n\t[memoria_calculo] Nenhum valor R30:R36 na planilha (cache vazio / LibreOffice inactivo). "
             "Não vou gravar memoria_calculo com zeros para não apagar dados anteriores. "
             "Instale o LibreOffice no servidor, confira MEMORIA_LIBREOFFICE e MEMORIA_LIBREOFFICE_BIN, "
             "e que o ficheiro .xlsx intermédio seja gerado.\n"
@@ -600,7 +719,21 @@ def sync_memoria_calculo_to_db(
     di = _valor_para_coluna_db("desc_ir", merged.get("desc_ir"))
     reserva = _valor_para_coluna_db("reserva_honorarios", merged.get("reserva_honorarios"))
     tliq = _valor_para_coluna_db("total_liquido", merged.get("total_liquido"))
-    pct = _ensure_percent_0_100(_default_honorarios_percent())
+    pct_sheet = read_honorarios_percent_da_planilha(read_from, sheet_name)
+    if pct_sheet is None:
+        pct = _ensure_percent_0_100(_default_honorarios_percent())
+        if print_ok:
+            print(
+                f"\n\t[memoria_calculo] {CELULA_HONORARIOS_PCT} ilegível; "
+                f"percentual_honorarios={pct} (fallback env).\n"
+            )
+    else:
+        pct = _ensure_percent_0_100(pct_sheet)
+        if print_ok:
+            print(
+                f"\n\t[memoria_calculo] {CELULA_HONORARIOS_PCT}={pct}% "
+                f"(mesma planilha de R30:R36).\n"
+            )
     if feito_por is not None:
         fp_txt = _normalize_feito_por(feito_por)
     else:
@@ -611,7 +744,7 @@ def sync_memoria_calculo_to_db(
 
     if print_ok and max(abs(pb), abs(juros), abs(tb), abs(tliq), abs(reserva)) < 1e-9:
         print(
-            "\n\t[memoria_calculo] Aviso: O307:O313 vieram sem valores numéricos. "
+            "\n\t[memoria_calculo] Aviso: R30:R36 vieram sem valores numéricos. "
             "Gravação na BD com zeros. Confirme LibreOffice, MEMORIA_LIBREOFFICE=1 e PATH; "
             "ou abra a planilha no Excel, grave, para preencher o cache de fórmulas.\n"
         )
@@ -619,7 +752,7 @@ def sync_memoria_calculo_to_db(
         if print_ok:
             print(
                 f"\n\t[memoria_calculo] A ler memória a partir de {os.path.basename(read_from)} "
-                f"(O307:O313).\n"
+                f"(R30:R36).\n"
             )
 
     sql = """

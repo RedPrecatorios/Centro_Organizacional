@@ -101,7 +101,7 @@
           </dl>
           <div class="ai-progress" id="ai-progress" hidden>
             <div class="ai-progress-bar" aria-hidden="true"></div>
-            <p class="ai-progress-text">A processar… isto pode levar alguns minutos.</p>
+            <p class="ai-progress-text">Processando… isto pode levar alguns minutos.</p>
           </div>
         </section>
 
@@ -185,7 +185,7 @@
                   </tr>
                 </thead>
                 <tbody id="ai-hist-body">
-                  <tr><td colspan="7">A carregar…</td></tr>
+                  <tr><td colspan="7">Carregando…</td></tr>
                 </tbody>
               </table>
           </div>
@@ -302,7 +302,7 @@
         if (!files || !files.length) return;
         var f = files[0];
         if (f && f.type && f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name || '')) {
-          setMsg('Só são aceites ficheiros PDF.', true);
+          setMsg('Só são aceitos arquivos PDF.', true);
           return;
         }
         try {
@@ -310,7 +310,7 @@
           dt.items.add(f);
           input.files = dt.files;
         } catch (err) {
-          setMsg('Não foi possível anexar o ficheiro neste navegador. Use o seletor de ficheiros.', true);
+          setMsg('Não foi possível anexar o arquivo neste navegador. Use o seletor de arquivos.', true);
           return;
         }
         updateSlot(box);
@@ -428,7 +428,7 @@
       fd.append('demonstrativo', f1);
       fd.append('comprovante', f2);
       btnEnviar.disabled = true;
-      btnEnviar.textContent = 'A enviar…';
+      btnEnviar.textContent = 'Enviando…';
       fetch('{{ url_for("api_atualizacao_imposto_enviar") }}', {
         method: 'POST',
         body: fd,
@@ -478,7 +478,7 @@
       if (histLoaded && !force) return;
       var body = document.getElementById('ai-hist-body');
       var histMsg = document.getElementById('ai-hist-msg');
-      body.innerHTML = '<tr><td colspan="7">A carregar…</td></tr>';
+      body.innerHTML = '<tr><td colspan="7">Carregando…</td></tr>';
       histMsg.textContent = '';
       histMsg.className = 'ai-msg';
       fetch('{{ url_for("api_atualizacao_imposto_historico") }}?limit=100', { credentials: 'same-origin' })

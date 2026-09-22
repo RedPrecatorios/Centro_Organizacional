@@ -3,9 +3,9 @@
 Automação de planilha em Linux: openpyxl (sem Microsoft Excel / xlwings).
 
 - ``load_workbook(..., keep_vba=True)`` preserva o .xlsm; não se executa VBA.
-- openpyxl **não recalcula** fórmulas; o valor lido (ex. O313) vem do **cache** do
+- openpyxl **não recalcula** fórmulas; o valor lido (ex. R36) vem do **cache** do
   ficheiro, salvo se o ficheiro for recalculado noutro ambiente.
-- N306:O313: sincronizados com ``memoria_calculo`` (``db_handler.memoria_range_sync``)
+- R30:R36: sincronizados com ``memoria_calculo`` (``db_handler.memoria_range_sync``)
   se ``MEMORIA_MYSQL_*`` estiver no .env; com ``MEMORIA_LIBREOFFICE=1`` (padrão) tenta
   recálculo com LibreOffice headless antes de ler as células.
 """
@@ -27,18 +27,40 @@ from openpyxl.styles import Font, PatternFill
 from colorama import Fore, Style
 
 from calculation_automation.sheet_constants import (
+    CELULA_CABECA,
+    CELULA_CUMPRIMENTO,
+    CELULA_DATA_BASE,
+    CELULA_DATA_INSCRICAO,
+    CELULA_DESCONTOS,
+    CELULA_DESPESAS,
+    CELULA_ENTIDADE,
+    CELULA_EP,
+    CELULA_HONORARIOS_PCT,
+    CELULA_INCIDENTE,
+    CELULA_JUROS,
+    CELULA_NOME,
+    CELULA_OC,
+    CELULA_PRINCIPAL,
+    CELULA_PROCESSO,
     NUMERO_MESES_ALERTA_AUTOR,
     NUMERO_MESES_ALERTA_PLANILHA,
     NUMERO_MESES_CELULA,
     NUMERO_MESES_FALLBACK,
+    NUMERO_MESES_ISENCAO_IR,
     NUMERO_MESES_OBSERVACAO_CELULA,
     SHEET_NAME,
+    TOTAL_LIQUIDO_CELL,
+    deve_aplicar_meses_isencao_ir,
+    honorarios_percent_from_main_dict,
 )
 from db_handler.db_handler import DBHandler
 from db_handler.memoria_range_sync import (
+    apply_honorarios_percent_cell,
     libreoffice_recalc_export_xlsx,
     load_merged_memoria_valores,
     memoria_recalc_wanted,
+    pin_honorarios_percent_on_xlsx,
+    pin_numero_de_meses_on_xlsx,
     sync_memoria_calculo_to_db,
     total_liquido_arredondado,
 )
@@ -127,7 +149,7 @@ def resolve_planilha_template_path(calc_dir: str | None = None) -> str:
             return path
 
     for name in (
-        "Planilha de Cálculos V32 03082026 (Pós PEC 66).xlsm",
+        "Planilha de Cálculos V33 04092026 Pós PEC 66).xlsm",
     ):
         path = os.path.join(base, name)
         if os.path.isfile(path):
@@ -146,15 +168,16 @@ def resolve_planilha_template_path(calc_dir: str | None = None) -> str:
     except OSError:
         pass
 
-    return os.path.join(base, "Planilha de Cálculos V32 03082026 (Pós PEC 66).xlsm")
+    return os.path.join(base, "Planilha de Cálculos V33 04092026 Pós PEC 66).xlsm")
 
 
 class CalculationAutomation:
-    def __init__(self, main_dict, today: datetime) -> None:
+    def __init__(self, main_dict, today: datetime, *, prioridade: bool = False) -> None:
         self.txt = TxtHandler()
         self._wb = None
         self._ws = None
         self.google_drive_link: str | None = None
+        self.prioridade = bool(prioridade)
 
         t0 = time.time()
         self.terminate_excel_process()
@@ -182,6 +205,8 @@ class CalculationAutomation:
         self.output_path = None
         self._last_calculo_value = None
         self._save_completed = False
+        self._meses_isencao_ir_aplicados = False
+        self._honorarios_percent = honorarios_percent_from_main_dict(main_dict)
 
     def _get_sheet(self, wb: openpyxl.workbook.workbook.Workbook):
         if self.sheet_name in wb.sheetnames:
@@ -219,7 +244,7 @@ class CalculationAutomation:
             )
             return total_liquido_arredondado(merged)
         except Exception as e:
-            print(f"\n{Fore.YELLOW}[!] leitura memória / O313: {e}{Style.RESET_ALL}")
+            print(f"\n{Fore.YELLOW}[!] leitura memória / {TOTAL_LIQUIDO_CELL}: {e}{Style.RESET_ALL}")
         return None
 
     def check_day(self):
@@ -240,13 +265,31 @@ class CalculationAutomation:
         try:
             from google_api.drive import upload_saved_spreadsheet
 
-            return upload_saved_spreadsheet(p, main_dict=self.main_dict)
+            return upload_saved_spreadsheet(
+                p, main_dict=self.main_dict, prioridade=self.prioridade
+            )
         except Exception as e:
             print(
                 f"\n{Fore.YELLOW}[google_drive] Erro ao importar ou enviar (planilha local mantida): {e}"
                 f"{Style.RESET_ALL}\n"
             )
             return None
+
+    def _remove_local_output_after_drive(self) -> None:
+        p = self.output_path
+        if not p or not os.path.isfile(p):
+            return
+        try:
+            os.remove(p)
+            print(
+                f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Planilha local removida após Drive: "
+                f"{os.path.basename(p)}{Style.RESET_ALL}\n"
+            )
+        except OSError as e:
+            print(
+                f"\n{Fore.YELLOW}[google_drive] Não foi possível apagar {p!r}: {e}"
+                f"{Style.RESET_ALL}\n"
+            )
 
     def remove_accentuation(self, input_str):
         nfkd_form = unicodedata.normalize("NFKD", input_str)
@@ -260,9 +303,127 @@ class CalculationAutomation:
             print(f"\n[x] ERROR:\n\t{e}")
             return None
 
+    def _sql_numero_meses_isencao(self) -> str:
+        if not self._meses_isencao_ir_aplicados:
+            return ""
+        return f"Numero_de_Meses = {int(NUMERO_MESES_ISENCAO_IR)},"
+
+    def _persist_numero_de_meses_isencao_precainfos(self) -> None:
+        """Grava 1000 em precainfosnew.Numero_de_Meses (cadastro que a UI lê)."""
+        if not self._meses_isencao_ir_aplicados:
+            return
+        try:
+            rec_id = int(self.main_dict.get("id") or 0)
+        except (TypeError, ValueError):
+            rec_id = 0
+        if rec_id <= 0:
+            return
+        db_handler = self.start_conn()
+        if not db_handler or not db_handler.ok:
+            print(
+                f"\n{Fore.YELLOW}[isencao IR] MySQL indisponível; "
+                f"não gravei Numero_de_Meses=1000 em precainfosnew.{Style.RESET_ALL}\n"
+            )
+            return
+        try:
+            db_handler.cursor.execute(
+                "UPDATE precainfosnew SET Numero_de_Meses = %s WHERE id = %s",
+                (int(NUMERO_MESES_ISENCAO_IR), rec_id),
+            )
+            db_handler.config.commit()
+            print(
+                f"\n\t{Fore.GREEN}[isencao IR] precainfosnew.id={rec_id} "
+                f"Numero_de_Meses={NUMERO_MESES_ISENCAO_IR}{Style.RESET_ALL}\n"
+            )
+        except Exception as e:
+            print(
+                f"\n{Fore.YELLOW}[isencao IR] Falha ao gravar Numero_de_Meses "
+                f"em precainfosnew: {e}{Style.RESET_ALL}\n"
+            )
+        finally:
+            try:
+                db_handler.cursor.close()
+                db_handler.config.close()
+            except Exception:
+                pass
+
+    def _meses_atuais_main_dict(self) -> int:
+        try:
+            return int(self.main_dict.get("Numero_de_Meses") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _recalc_and_read_memoria(self, source_path: str):
+        recalc_xlsx, recalc_tmpdir = libreoffice_recalc_export_xlsx(source_path)
+        if memoria_recalc_wanted() and not recalc_xlsx:
+            raise RuntimeError(
+                "O LibreOffice não produziu ficheiro .xlsx recalculado — sem isso, "
+                "R30:R36 podem ficar vazios/errados e a BD ficaria mal preenchida. "
+                "Resolva: (1) instale, ex.: `sudo apt install -y libreoffice-calc`; "
+                "(2) teste `sudo -u www-data soffice --version`; "
+                "(3) no .env do projecto, se preciso, `MEMORIA_LIBREOFFICE_BIN=/usr/bin/soffice` "
+                "(ou o caminho de `command -v soffice`); (4) reinicie `atualizacao-calculo-api`. "
+                "Com `www-data`, defina também `MEMORIA_LIBREOFFICE_HOME` para um directório gravável "
+                "(ex. `/var/lib/lo-calc` com chown www-data) ou use o padrão "
+                "`calculation_automation/.lo_profile` com permissões correctas. "
+                "Apenas em teste, `MEMORIA_LIBREOFFICE=0` desactiva a conversão (não recomendado)."
+            )
+        read_path = (recalc_xlsx or source_path).strip()
+        return recalc_xlsx, recalc_tmpdir, read_path
+
+    def _aplicar_isencao_ir_se_necessario(self, merged: dict) -> dict:
+        """
+        Se R36 ≤ 200 mil, grava R24=1000, recalcula e devolve a memória nova.
+        Tem de correr **antes** do UPSERT em memoria_calculo / UPDATE precainfosnew.
+        """
+        total = total_liquido_arredondado(merged)
+        if not deve_aplicar_meses_isencao_ir(total, self._meses_atuais_main_dict()):
+            return merged
+        if not self.output_path or not os.path.isfile(self.output_path):
+            return merged
+        if not pin_numero_de_meses_on_xlsx(
+            self.output_path, NUMERO_MESES_ISENCAO_IR, sheet_name=self.sheet_name
+        ):
+            print(
+                f"\n{Fore.YELLOW}[isencao IR] Não foi possível gravar "
+                f"{NUMERO_MESES_CELULA}=1000 na planilha.{Style.RESET_ALL}\n"
+            )
+            return merged
+
+        self.main_dict["Numero_de_Meses"] = NUMERO_MESES_ISENCAO_IR
+        self._meses_isencao_ir_aplicados = True
+        print(
+            f"\n\t{Fore.CYAN}[isencao IR] R36={total:,.2f} ≤ 200.000,00; "
+            f"{NUMERO_MESES_CELULA}={NUMERO_MESES_ISENCAO_IR} para zerar imposto. "
+            f"A recalcular…{Style.RESET_ALL}\n"
+        )
+        recalc_xlsx, recalc_tmpdir, read_path = self._recalc_and_read_memoria(
+            self.output_path
+        )
+        try:
+            if (
+                recalc_xlsx
+                and os.path.isfile(recalc_xlsx)
+                and os.path.abspath(recalc_xlsx) != os.path.abspath(self.output_path)
+            ):
+                shutil.copy2(recalc_xlsx, self.output_path)
+            return load_merged_memoria_valores(
+                read_path, self.sheet_name, print_ok=True
+            )
+        finally:
+            if recalc_tmpdir and os.path.isdir(recalc_tmpdir):
+                shutil.rmtree(recalc_tmpdir, ignore_errors=True)
+
     def get_calculo_atualizado(self, id, db_handler):
         try:
-            # Usar só O313 já recalculado (LibreOffice) em save_workbook — não cache openpyxl.
+            try:
+                rec_id = int(id)
+            except (TypeError, ValueError):
+                rec_id = 0
+            if rec_id <= 0:
+                self.clean()
+                return
+            # Usar só R36 já recalculado (LibreOffice) em save_workbook — não cache openpyxl.
             if self._last_calculo_value is not None and self._last_calculo_value > 0:
                 calculo_atualizado_fmt = format_calculo_atualizado_br(
                     float(self._last_calculo_value)
@@ -274,6 +435,7 @@ class CalculationAutomation:
                 query = f"""
                     UPDATE precainfosnew
                     SET Calculo_Atualizado = '{calculo_atualizado_fmt}',
+                        {self._sql_numero_meses_isencao()}
                         UPDATES_INDEX = UPDATES_INDEX + 1
                     WHERE id = {int(id)};
                 """
@@ -302,7 +464,7 @@ class CalculationAutomation:
                 if n is None:
                     self.save_ERRORs(id)
                     print(
-                        f"\n{Fore.YELLOW}[!] O313 / memória sem valor legível. "
+                        f"\n{Fore.YELLOW}[!] {TOTAL_LIQUIDO_CELL} / memória sem valor legível. "
                         f"Não foi gravado 'Calculo_Atualizado' (evita substituir por 0,00). "
                         f"Instale o LibreOffice no servidor, defina MEMORIA_LIBREOFFICE_BIN se "
                         f"o serviço correr como outro utilizador, e confirme o cache de fórmulas na planilha."
@@ -313,6 +475,7 @@ class CalculationAutomation:
                     query = f"""
                         UPDATE precainfosnew
                         SET Calculo_Atualizado = '{calculo_atualizado}',
+                            {self._sql_numero_meses_isencao()}
                             UPDATES_INDEX = UPDATES_INDEX + 1
                         WHERE id = {int(id)};
                     """
@@ -380,9 +543,12 @@ class CalculationAutomation:
     def clean(self):
         try:
             self.terminate_excel_process()
+            if self.google_drive_link:
+                self._remove_local_output_after_drive()
+                return
+
             _calc_dir = os.path.dirname(os.path.abspath(__file__))
             base_folder = _calc_dir
-            output_folder = os.path.join(base_folder, "OUTPUT")
             bkp_folder = os.path.join(base_folder, "BKP")
             plans_folder = os.environ.get("PLANS_OUTPUT_DIR") or os.path.join(
                 base_folder, "PLANS_ARCHIVED"
@@ -415,39 +581,43 @@ class CalculationAutomation:
                         return zip_name
                     zip_index += 1
 
-            if os.path.exists(output_folder):
-                for filename in os.listdir(output_folder):
-                    file_path = os.path.join(output_folder, filename)
-                    if not os.path.isfile(file_path):
-                        continue
-                    if filename.lower().endswith((".xlsx", ".xlsm")):
-                        if not os.path.isfile(file_path):
-                            continue
-                        zip_name = get_current_zip()
-                        with zipfile.ZipFile(
-                            zip_name, "a", zipfile.ZIP_DEFLATED
-                        ) as zipf:
-                            arcname = filename
-                            if arcname not in zipf.namelist():
-                                zipf.write(file_path, arcname=arcname)
-                                zip_size = os.path.getsize(zip_name) / (1024 * 1024)
-                                print(
-                                    f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Added: {filename} → "
-                                    f"{os.path.basename(zip_name)} (Current size: {zip_size:.2f} MB){Style.RESET_ALL}\n"
-                                )
-                            else:
-                                print(
-                                    f"\n{Fore.YELLOW}[WARNING] Skipped duplicate in ZIP: {filename}{Style.RESET_ALL}\n"
-                                )
-                        dest_path = os.path.join(dated_plans_folder, filename)
-                        if os.path.isfile(file_path):
-                            shutil.move(file_path, dest_path)
+            # Só o ficheiro deste cálculo. Arquivar tudo de OUTPUT/ apagava
+            # planilhas de outro job ainda a enviar para o Drive.
+            to_archive: list[str] = []
+            if self.output_path and os.path.isfile(self.output_path):
+                to_archive.append(self.output_path)
+            for file_path in to_archive:
+                filename = os.path.basename(file_path)
+                if not filename.lower().endswith((".xlsx", ".xlsm")):
+                    continue
+                try:
+                    zip_name = get_current_zip()
+                    with zipfile.ZipFile(
+                        zip_name, "a", zipfile.ZIP_DEFLATED
+                    ) as zipf:
+                        arcname = filename
+                        if arcname not in zipf.namelist():
+                            zipf.write(file_path, arcname=arcname)
+                            zip_size = os.path.getsize(zip_name) / (1024 * 1024)
                             print(
-                                f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Moved: {filename} → {dated_plans_folder}{Style.RESET_ALL}\n"
+                                f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Added: {filename} → "
+                                f"{os.path.basename(zip_name)} (Current size: {zip_size:.2f} MB){Style.RESET_ALL}\n"
                             )
-                    else:
-                        os.remove(file_path)
-                        print(f"[INFO] Removed non-Excel file: {filename}")
+                        else:
+                            print(
+                                f"\n{Fore.YELLOW}[WARNING] Skipped duplicate in ZIP: {filename}{Style.RESET_ALL}\n"
+                            )
+                except Exception as e:
+                    print(
+                        f"\n{Fore.YELLOW}[WARNING] BKP zip ignorado ({e}); "
+                        f"a planilha continua a ser arquivada.{Style.RESET_ALL}\n"
+                    )
+                dest_path = os.path.join(dated_plans_folder, filename)
+                if os.path.isfile(file_path):
+                    shutil.move(file_path, dest_path)
+                    print(
+                        f"\n\t{Fore.LIGHTCYAN_EX}[INFO] Moved: {filename} → {dated_plans_folder}{Style.RESET_ALL}\n"
+                    )
         except Exception as e:
             print(f"\n{Fore.RED}[x] ERROR: clean()\n\t{e}{Style.RESET_ALL}")
 
@@ -464,13 +634,15 @@ class CalculationAutomation:
             requerente = re.sub(r"\s+", " ", requerente)
             # Por enquanto, geramos apenas .xlsx (melhor compatibilidade com Google Sheets).
             output_name = f"{proc_id}_{requerente}_{current_date}.xlsx"
+            if self.prioridade:
+                output_name = f"PRIORI {output_name}"
             _calc_dir = os.path.dirname(os.path.abspath(__file__))
             output_dir = os.path.join(_calc_dir, "OUTPUT")
             os.makedirs(output_dir, exist_ok=True)
             self.output_path = os.path.join(output_dir, output_name)
 
             t_save = time.time()
-            # O313 só é fiável após LibreOffice; não preencher _last_calculo_value aqui.
+            # R36 só é fiável após LibreOffice; não preencher _last_calculo_value aqui.
             self._last_calculo_value = None
 
             self._wb.save(self.output_path)
@@ -480,27 +652,35 @@ class CalculationAutomation:
             self._wb = None
             self._ws = None
 
-            # Saída é .xlsx, mas precisamos materializar fórmulas (O307–O313) antes de ler.
+            # Saída é .xlsx, mas precisamos materializar fórmulas (R30–R36) antes de ler.
             # O LibreOffice headless abre e recalcula, exportando um .xlsx “com valores”.
-            recalc_xlsx, recalc_tmpdir = libreoffice_recalc_export_xlsx(self.output_path)
-            read_path = (recalc_xlsx or self.output_path).strip()
-            if memoria_recalc_wanted() and not recalc_xlsx:
-                raise RuntimeError(
-                    "O LibreOffice não produziu ficheiro .xlsx recalculado — sem isso, "
-                    "O307:O313 podem ficar vazios/errados e a BD ficaria mal preenchida. "
-                    "Resolva: (1) instale, ex.: `sudo apt install -y libreoffice-calc`; "
-                    "(2) teste `sudo -u www-data soffice --version`; "
-                    "(3) no .env do projecto, se preciso, `MEMORIA_LIBREOFFICE_BIN=/usr/bin/soffice` "
-                    "(ou o caminho de `command -v soffice`); (4) reinicie `atualizacao-calculo-api`. "
-                    "Com `www-data`, defina também `MEMORIA_LIBREOFFICE_HOME` para um directório gravável "
-                    "(ex. `/var/lib/lo-calc` com chown www-data) ou use o padrão "
-                    "`calculation_automation/.lo_profile` com permissões correctas. "
-                    "Apenas em teste, `MEMORIA_LIBREOFFICE=0` desactiva a conversão (não recomendado)."
-                )
+            recalc_xlsx, recalc_tmpdir, read_path = self._recalc_and_read_memoria(
+                self.output_path
+            )
             try:
                 merged = load_merged_memoria_valores(
                     read_path, self.sheet_name, print_ok=True
                 )
+                # Materializa o 1.º recálculo em OUTPUT; a isenção (se aplicada)
+                # grava R24=1000 nesse ficheiro e recalcula de novo por cima.
+                try:
+                    if (
+                        recalc_xlsx
+                        and os.path.isfile(recalc_xlsx)
+                        and self.output_path
+                        and os.path.abspath(recalc_xlsx)
+                        != os.path.abspath(self.output_path)
+                    ):
+                        shutil.copy2(recalc_xlsx, self.output_path)
+                except OSError as e:
+                    print(
+                        f"\n{Fore.YELLOW}[google_drive] Aviso: não foi possível "
+                        f"copiar o recálculo para OUTPUT ({e}).{Style.RESET_ALL}\n"
+                    )
+                merged = self._aplicar_isencao_ir_se_necessario(merged)
+                if self._meses_isencao_ir_aplicados:
+                    read_path = self.output_path
+                    self._persist_numero_de_meses_isencao_precainfos()
                 try:
                     sync_memoria_calculo_to_db(
                         self.main_dict,
@@ -520,6 +700,16 @@ class CalculationAutomation:
                 self._last_calculo_value = total_liquido_arredondado(merged)
                 self._save_completed = True
             finally:
+                if self.output_path and os.path.isfile(self.output_path):
+                    if pin_honorarios_percent_on_xlsx(
+                        self.output_path,
+                        percent=self._honorarios_percent,
+                        sheet_name=self.sheet_name,
+                    ):
+                        print(
+                            f"\n\t[memoria_calculo] {CELULA_HONORARIOS_PCT} "
+                            "fixado na planilha enviada (mesma regra da memória).\n"
+                        )
                 if recalc_tmpdir and os.path.isdir(recalc_tmpdir):
                     try:
                         shutil.rmtree(recalc_tmpdir, ignore_errors=True)
@@ -527,7 +717,7 @@ class CalculationAutomation:
                         pass
             if self._last_calculo_value is None:
                 print(
-                    f"\n{Fore.YELLOW}[!] O313 não pôde ser lido como número. "
+                    f"\n{Fore.YELLOW}[!] {TOTAL_LIQUIDO_CELL} não pôde ser lido como número. "
                     f"Se LibreOffice não recalculou, instale/ajuste MEMORIA_LIBREOFFICE ou PATH. "
                     f"Verifique ERRORs.txt.{Style.RESET_ALL}\n"
                 )
@@ -535,6 +725,12 @@ class CalculationAutomation:
                 f"\n\t{Fore.LIGHTBLACK_EX}SAVED {self.output_path}{Style.RESET_ALL}\n"
             )
             self.google_drive_link = self._upload_output_to_google_drive_if_configured()
+            if (
+                self.google_drive_link
+                and self._last_calculo_value is not None
+                and self._last_calculo_value > 0
+            ):
+                self._remove_local_output_after_drive()
         except Exception:
             traceback.print_exc()
             self._last_calculo_value = None
@@ -593,37 +789,38 @@ class CalculationAutomation:
             entidade_devedora = "Estadual/Municipal"
 
         reqte = str(self.main_dict["Requerente"]).strip()
-        ws["B11"] = reqte
-        ws["B21"] = reqte
-        ws["B12"] = entidade_devedora
-        ws["B14"] = self.main_dict["Processo"]
-        ws["B15"] = self.main_dict["Oc"]
-        ws["B16"] = self.main_dict["EP"]
-        ws["B17"] = self.main_dict["Cumprimento"]
-        ws["B18"] = self.main_dict["Incidente"]
+        ws[CELULA_CABECA] = reqte
+        ws[CELULA_NOME] = reqte
+        ws[CELULA_ENTIDADE] = entidade_devedora
+        ws[CELULA_PROCESSO] = self.main_dict["Processo"]
+        ws[CELULA_OC] = self.main_dict["Oc"]
+        ws[CELULA_EP] = self.main_dict["EP"]
+        ws[CELULA_CUMPRIMENTO] = self.main_dict["Cumprimento"]
+        ws[CELULA_INCIDENTE] = self.main_dict["Incidente"]
 
-        # F27 = Data_Base; J27 = Data_Decisão (chave Data_Inscrição).
+        # F18 = Data_Base; J18 = Data_Decisão (chave Data_Inscrição).
         # Sem data válida no banco → célula em branco (não manter default do template).
         data_base_dt = parse_planilha_date(self.main_dict.get("Data_Base"))
         data_insc_dt = parse_planilha_date(self.main_dict.get("Data_Inscrição"))
-        ws["F27"] = data_base_dt
-        ws["J27"] = data_insc_dt
+        ws[CELULA_DATA_BASE] = data_base_dt
+        ws[CELULA_DATA_INSCRICAO] = data_insc_dt
         if data_base_dt is None:
             print(
                 f"\n{Fore.YELLOW}[!] Data_Base ausente/inválida "
-                f"({self.main_dict.get('Data_Base')!r}); F27 em branco.{Style.RESET_ALL}"
+                f"({self.main_dict.get('Data_Base')!r}); {CELULA_DATA_BASE} em branco.{Style.RESET_ALL}"
             )
         if data_insc_dt is None:
             print(
                 f"\n{Fore.YELLOW}[!] Data_Decisão/Inscrição ausente/inválida "
-                f"({self.main_dict.get('Data_Inscrição')!r}); J27 em branco.{Style.RESET_ALL}"
+                f"({self.main_dict.get('Data_Inscrição')!r}); {CELULA_DATA_INSCRICAO} em branco.{Style.RESET_ALL}"
             )
 
         previdencia_total = previdencia_total_from_main_dict(self.main_dict)
-        ws["B32"] = self.main_dict["Principal_Liquido"]
-        ws["D32"] = self.main_dict["Juros_Moratorio"]
-        ws["F32"] = self.main_dict["Despesas"]
-        ws["I32"] = previdencia_total
+        ws[CELULA_PRINCIPAL] = self.main_dict["Principal_Liquido"]
+        ws[CELULA_JUROS] = self.main_dict["Juros_Moratorio"]
+        ws[CELULA_DESPESAS] = self.main_dict["Despesas"]
+        ws[CELULA_DESCONTOS] = previdencia_total
+        apply_honorarios_percent_cell(ws, self._honorarios_percent)
         n_meses = int(self.main_dict.get("Numero_de_Meses", 0) or 0)
         ws[NUMERO_MESES_CELULA] = (
             n_meses if n_meses > 0 else NUMERO_MESES_FALLBACK

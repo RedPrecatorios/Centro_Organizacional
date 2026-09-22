@@ -16,7 +16,7 @@
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Auditoria syscall</h1>
-        <p class="dash-sub">Consulta à tabela MySQL configurada em <code>MYSQL_AUDIT_TABLE</code> (padrão <code>request_audit</code>), com as credenciais <code>EDA_MYSQL_*</code>. Filtros e paginação; clique numa linha para ver payload e cabeçalhos.{% if not is_plataforma_admin %} Só vê ligações associadas ao login <strong>{{ plataforma_user.username|e }}</strong> na plataforma (correspondência automática ao utilizador Syscall).{% endif %}</p>
+        <p class="dash-sub">Consulta à tabela MySQL configurada em <code>MYSQL_AUDIT_TABLE</code> (padrão <code>request_audit</code>), com as credenciais <code>EDA_MYSQL_*</code>. Filtros e paginação; clique numa linha para ver payload e cabeçalhos.{% if not is_plataforma_admin %} Só vê ligações associadas ao login <strong>{{ plataforma_user.username|e }}</strong> na plataforma (correspondência automática ao usuário Syscall).{% endif %}</p>
       </div>
     </header>
 
@@ -34,7 +34,7 @@
           </div>
           {% if is_plataforma_admin %}
           <div class="camp-field">
-            <label for="af-user">Utilizador (login)</label>
+            <label for="af-user">Usuário (login)</label>
             <input type="text" id="af-user" placeholder="usuario.syscall" />
           </div>
           {% endif %}
@@ -69,15 +69,15 @@
         </div>
       </div>
 
-      <p id="audit-summary" class="camp-hint" style="margin:0.75rem 0">Use os filtros e clique em <strong>Pesquisar</strong> (15 registos por página).</p>
-      <div id="audit-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+      <p id="audit-summary" class="camp-hint" style="margin:0.75rem 0">Use os filtros e clique em <strong>Pesquisar</strong> (15 registros por página).</p>
+      <div id="audit-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> Carregando...</div>
       <div id="audit-table-wrap" style="overflow-x:auto">
         <table class="camp-table" id="audit-table" style="display:none">
           <thead>
             <tr>
               <th>ID</th>
               <th>Última ligação</th>
-              <th>Utilizador</th>
+              <th>Usuário</th>
               <th>Operador</th>
               <th>Credor</th>
               <th>CPF</th>
@@ -90,7 +90,7 @@
           <tbody id="audit-tbody"></tbody>
         </table>
       </div>
-      <p id="audit-empty" class="camp-empty" style="display:none">Nenhum registo encontrado.</p>
+      <p id="audit-empty" class="camp-empty" style="display:none">Nenhum registro encontrado.</p>
       <div class="audit-pager" id="audit-pager" style="display:none">
         <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="af-prev">Anterior</button>
         <span id="audit-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
@@ -179,7 +179,7 @@
       var pageNum = Math.floor(offset / PAGE) + 1;
       var pageCount = lastTotal ? Math.max(1, Math.ceil(lastTotal / PAGE)) : 1;
       document.getElementById('audit-summary').textContent =
-        lastTotal + ' registo(s) no total — página ' + pageNum + ' de ' + pageCount
+        lastTotal + ' registro(s) no total — página ' + pageNum + ' de ' + pageCount
         + ' (' + (d.rows || []).length + ' nesta página)';
       const tbody = document.getElementById('audit-tbody');
       tbody.innerHTML = '';
@@ -366,7 +366,7 @@
     }
 
     html += detailSection('Requisição', detailGrid([
-      { label: 'ID registo', value: row.id, mono: true },
+      { label: 'ID registro', value: row.id, mono: true },
       { label: 'Request ID', value: row.request_id, mono: true },
       { label: 'Chave dedup', value: row.dedup_key, mono: true },
       { label: 'IP cliente', value: row.client_ip, mono: true },
@@ -381,7 +381,7 @@
   async function openDetail(id) {
     const modal = document.getElementById('audit-modal');
     const content = document.getElementById('audit-modal-content');
-    content.innerHTML = '<p class="camp-hint">A carregar...</p>';
+    content.innerHTML = '<p class="camp-hint">Carregando...</p>';
     modal.hidden = false;
     try {
       const r = await fetch('/api/auditoria-syscall/' + id);
@@ -391,7 +391,7 @@
         return;
       }
       var row = d.row || {};
-      var title = 'Registo #' + id;
+      var title = 'Registro #' + id;
       if (row.credor_nome) title += ' — ' + row.credor_nome;
       document.getElementById('audit-modal-title').textContent = title;
       content.innerHTML = renderDetail(row);
@@ -428,7 +428,7 @@
     document.getElementById('audit-empty').style.display = 'none';
     document.getElementById('audit-pager').style.display = 'none';
     document.getElementById('audit-summary').textContent =
-      'Use os filtros e clique em Pesquisar (15 registos por página).';
+      'Use os filtros e clique em Pesquisar (15 registros por página).';
     hideErr();
   });
   document.getElementById('af-prev').addEventListener('click', function() {

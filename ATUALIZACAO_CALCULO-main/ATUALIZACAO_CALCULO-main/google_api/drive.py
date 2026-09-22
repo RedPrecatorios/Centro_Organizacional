@@ -23,6 +23,8 @@ from __future__ import annotations
 import mimetypes
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -183,7 +185,10 @@ def _now_in_drive_tz():
 def _texto_para_planilha(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    if text.lower() in ("none", "null", "nan"):
+        return ""
+    return text
 
 
 def _pontos_tracos_para_sublinhado(value: str) -> str:
@@ -238,6 +243,15 @@ def build_drive_file_name(
     if prioridade:
         return f"PRIORI {corpo}"
     return corpo
+
+
+def _filename_indicates_prioridade(name: str) -> bool:
+    base = os.path.basename(name or "")
+    return (
+        base.startswith("PRIORI ")
+        or base.startswith("PRIORI_")
+        or base.startswith("PRIORI_AUTO_")
+    )
 
 
 def _resolve_upload_destination(
@@ -473,9 +487,30 @@ def upload_saved_spreadsheet(
     if not file_path or not os.path.isfile(file_path):
         print(f"\n[google_drive] Ficheiro inexistente: {file_path!r}\n")
         return None
+    # Cópia estável: o original em OUTPUT/ pode ser movido/apagado (LibreOffice,
+    # clean(), outro job) durante o OAuth e a criação de pastas (~2–3s).
+    ext = os.path.splitext(file_path)[1] or ".xlsx"
+    staging: str | None = None
+    try:
+        fd, staging = tempfile.mkstemp(prefix="gdrive_upload_", suffix=ext)
+        os.close(fd)
+        shutil.copy2(file_path, staging)
+    except OSError as e:
+        print(
+            f"\n[google_drive] Não foi possível copiar a planilha para envio ({e}); "
+            "a tentar o ficheiro original.\n",
+            flush=True,
+        )
+        if staging:
+            try:
+                os.remove(staging)
+            except OSError:
+                pass
+        staging = None
+    upload_path = staging if staging and os.path.isfile(staging) else file_path
     try:
         return _upload_impl(
-            file_path,
+            upload_path,
             fid,
             main_dict=main_dict,
             prioridade=prioridade,
@@ -484,6 +519,12 @@ def upload_saved_spreadsheet(
     except Exception as e:
         print(f"\n[google_drive] Falha no upload: {e}\n", flush=True)
         return None
+    finally:
+        if staging:
+            try:
+                os.remove(staging)
+            except OSError:
+                pass
 
 
 def _upload_impl(
@@ -503,8 +544,13 @@ def _upload_impl(
         main_dict=main_dict,
     )
 
+    if _filename_indicates_prioridade(file_path):
+        prioridade = True
+
     if drive_file_name and str(drive_file_name).strip():
         name = str(drive_file_name).strip()
+        if prioridade and not _filename_indicates_prioridade(name):
+            name = f"PRIORI {name}"
     elif main_dict:
         name = build_drive_file_name(main_dict, prioridade=prioridade)
     else:

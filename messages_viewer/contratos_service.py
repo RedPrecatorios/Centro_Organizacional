@@ -2,6 +2,7 @@
 """Orquestração: sync ficha + invocação do motor PHP legado."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -58,6 +59,28 @@ def _find_zip(engine: Path, nome_credor: str, suffix: str) -> Path | None:
             matches.sort(key=lambda x: x.stat().st_mtime, reverse=True)
             return matches[0]
     return None
+
+
+def _php_json_payload(text: str) -> dict | None:
+    blob = (text or "").strip()
+    if not blob:
+        return None
+    decoder = json.JSONDecoder()
+    found: dict | None = None
+    i = 0
+    while i < len(blob):
+        if blob[i] != "{":
+            i += 1
+            continue
+        try:
+            data, end = decoder.raw_decode(blob, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        if isinstance(data, dict) and "ok" in data:
+            found = data
+        i = max(end, i + 1)
+    return found
 
 
 def _php_bin() -> str:
@@ -256,11 +279,31 @@ def gerar_contratos(
 
     stderr = (proc.stderr or "").strip()
     stdout = (proc.stdout or "").strip()
-    if proc.returncode != 0:
+    php_payload = _php_json_payload(stdout) or _php_json_payload(stderr)
+    if php_payload and php_payload.get("ok") is False:
+        err = str(php_payload.get("erro") or php_payload.get("error") or "Erro no motor PHP ao gerar contratos.")
         return (
             {
                 "ok": False,
-                "error": "Erro no motor PHP ao gerar contratos.",
+                "error": err,
+                "stdout": stdout[:2000],
+                "stderr": stderr[:2000],
+            },
+            500,
+            None,
+        )
+    if proc.returncode != 0:
+        err = "Erro no motor PHP ao gerar contratos."
+        if php_payload and php_payload.get("erro"):
+            err = str(php_payload.get("erro"))
+        elif stdout:
+            err = stdout[:400]
+        elif stderr:
+            err = stderr[:400]
+        return (
+            {
+                "ok": False,
+                "error": err,
                 "stdout": stdout[:2000],
                 "stderr": stderr[:2000],
             },

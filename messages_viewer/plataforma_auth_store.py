@@ -71,8 +71,12 @@ def init_auth_schema(conn: MySQLConnection | None = None) -> None:
             role ENUM('admin', 'colaborador') NOT NULL,
             active TINYINT(1) NOT NULL DEFAULT 1,
             perms_version INT NOT NULL DEFAULT 0,
+            first_name VARCHAR(120) NULL,
+            last_name VARCHAR(120) NULL,
+            email VARCHAR(255) NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_plataforma_users_username (username)
+            UNIQUE KEY uq_plataforma_users_username (username),
+            UNIQUE KEY uq_plataforma_users_email (email)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """,
         """
@@ -107,7 +111,36 @@ def init_auth_schema(conn: MySQLConnection | None = None) -> None:
     cur = auth_cursor(conn)
     for stmt in statements:
         cur.execute(stmt)
+    _ensure_user_profile_columns(cur)
     conn.commit()
+
+
+def _ensure_user_profile_columns(cur: MySQLCursorDict) -> None:
+    """Contas antigas: nome, sobrenome e e-mail para o forms de produção."""
+    cur.execute("SHOW COLUMNS FROM plataforma_users")
+    existing = {
+        str(row.get("Field") or "").lower()
+        for row in (cur.fetchall() or [])
+    }
+    if "first_name" not in existing:
+        cur.execute("ALTER TABLE plataforma_users ADD COLUMN first_name VARCHAR(120) NULL")
+    if "last_name" not in existing:
+        cur.execute("ALTER TABLE plataforma_users ADD COLUMN last_name VARCHAR(120) NULL")
+    if "email" not in existing:
+        cur.execute("ALTER TABLE plataforma_users ADD COLUMN email VARCHAR(255) NULL")
+    cur.execute("UPDATE plataforma_users SET email = NULL WHERE email = ''")
+    cur.execute("SHOW INDEX FROM plataforma_users")
+    indexes = {
+        str(row.get("Key_name") or "").lower()
+        for row in (cur.fetchall() or [])
+    }
+    if "uq_plataforma_users_email" not in indexes:
+        try:
+            cur.execute(
+                "ALTER TABLE plataforma_users ADD UNIQUE KEY uq_plataforma_users_email (email)"
+            )
+        except Exception:
+            pass
 
 
 def platform_meta_get(key: str, default: str = "", conn: MySQLConnection | None = None) -> str:

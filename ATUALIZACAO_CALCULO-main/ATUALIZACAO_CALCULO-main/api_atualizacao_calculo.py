@@ -59,13 +59,55 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
         return None
 
 
-def _run_atualizacao(prec_id: int, feito_por: str | None = None) -> dict[str, Any]:
+def _json_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    s = str(value or "").strip().lower()
+    return s in ("1", "true", "yes", "sim", "on")
+
+
+def _parse_honorarios_percent(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    text = str(value).strip().replace("%", "").replace(" ", "").replace(",", ".")
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if number < 0:
+        return None
+    return round(min(number, 100.0), 2)
+
+
+def _run_atualizacao(
+    prec_id: int,
+    feito_por: str | None = None,
+    prioridade: bool = False,
+    form_payload: dict[str, Any] | None = None,
+    percentual_honorarios: float | None = None,
+) -> dict[str, Any]:
     from datetime import datetime
 
     from manager.manager import Manager
 
     m = Manager(datetime.now())
-    return m.run_atualizacao_calculo(prec_id, feito_por=feito_por)
+    if form_payload:
+        if percentual_honorarios is not None:
+            form_payload = dict(form_payload)
+            form_payload["Percentual_Honorarios"] = percentual_honorarios
+        return m.run_atualizacao_calculo_from_form(
+            form_payload, feito_por=feito_por, prioridade=bool(prioridade)
+        )
+    return m.run_atualizacao_calculo(
+        prec_id,
+        feito_por=feito_por,
+        prioridade=bool(prioridade),
+        percentual_honorarios=percentual_honorarios,
+    )
 
 
 configure_runner(_run_atualizacao)
@@ -161,11 +203,26 @@ class _Handler(BaseHTTPRequestHandler):
 
         wait_raw = data.get("wait", True)
         wait_sync = wait_raw not in (False, "false", "False", "0", 0)
+        prioridade = _json_truthy(data.get("prioridade"))
+        percentual_honorarios = _parse_honorarios_percent(
+            data.get("percentual_honorarios")
+            if data.get("percentual_honorarios") is not None
+            else data.get("Percentual_Honorarios")
+        )
+        form_payload = data.get("form_payload")
+        if form_payload is not None and not isinstance(form_payload, dict):
+            self._send(400, {"ok": False, "error": "form_payload inválido."})
+            return
 
         try:
             if wait_sync:
                 out, fila_ao_entrar = submit_and_wait(
-                    prec_id, feito_por=feito_por, timeout=timeout
+                    prec_id,
+                    feito_por=feito_por,
+                    timeout=timeout,
+                    prioridade=prioridade,
+                    form_payload=form_payload,
+                    percentual_honorarios=percentual_honorarios,
                 )
                 if fila_ao_entrar and fila_ao_entrar.get("em_execucao"):
                     out = dict(out)
@@ -175,7 +232,13 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     self._send(200, out)
                 return
-            out, _fila = enqueue(prec_id, feito_por=feito_por)
+            out, _fila = enqueue(
+                prec_id,
+                feito_por=feito_por,
+                prioridade=prioridade,
+                form_payload=form_payload,
+                percentual_honorarios=percentual_honorarios,
+            )
         except Exception as e:
             traceback.print_exc()
             self._send(500, {"ok": False, "error": str(e)})

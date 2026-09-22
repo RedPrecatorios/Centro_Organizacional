@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import threading
+import contextlib
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +66,59 @@ def _nome_arquivo_final(modelo: str | None = None) -> str:
 def _caminho_final(modelo: str | None = None) -> Path:
     return RESULTADOS / _nome_arquivo_final(modelo)
 
+
+def _modelo_ficheiro_xlsx(caminho: Path) -> str:
+    """Modelo gravado no sidecar ou inferido pelas colunas (CMP vs TJSP)."""
+    if not caminho.is_file():
+        return ""
+    gravado = ler_modelo_planilha(str(caminho))
+    if gravado:
+        return gravado
+    try:
+        df = carregar_planilha_principal_de_workbook(str(caminho))
+        return inferir_modelo_planilha(df)
+    except Exception:
+        return ""
+
+
+def _final_pronto(modelo: str) -> Path | None:
+    """
+    FINAL só é oferecido se for deste modelo e não for mais antigo que a
+    intermediária (senão o operador baixa o mailing do turno anterior).
+    """
+    caminho = _caminho_final(modelo)
+    if not caminho.is_file():
+        return None
+    inter = RESULTADOS / "INTERMEDIARIA.xlsx"
+    if inter.is_file() and caminho.stat().st_mtime + 1.0 < inter.stat().st_mtime:
+        return None
+    no_disco = _modelo_ficheiro_xlsx(caminho)
+    if no_disco and no_disco != modelo:
+        return None
+    return caminho
+
+
+def _send_download(caminho: Path, nome: str | None = None):
+    """Download sem cache do browser (evita 304 a servir o ficheiro do mailing anterior)."""
+    nome = nome or caminho.name
+    if str(nome).lower().endswith(".csv"):
+        mime = "text/csv; charset=utf-8"
+    else:
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    resp = send_file(
+        str(caminho),
+        as_attachment=True,
+        download_name=nome,
+        mimetype=mime,
+        max_age=0,
+        conditional=False,
+        etag=False,
+    )
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 from modulo_banco import (
     criar_banco_e_tabelas,
     carregar_blacklist,
@@ -73,11 +127,24 @@ from modulo_banco import (
     exportar_por_periodo,
     importar_blacklist_csv,
 )
+from modulo_merge import (
+    carregar_planilha_principal_de_workbook,
+    diagnostico_intermediaria_etapa2,
+    inferir_modelo_planilha,
+    ler_modelo_planilha,
+    rotulo_modelo_prc,
+)
 from modulo_exportacao_unificada import (
     ENTRY_SCHEMA,
     exportar_pesquisa_unificada,
     exportar_tudo_unificado,
     listar_motivos_blacklist,
+)
+from modulo_enriquecimento_cpf import (
+    MAX_CPFS,
+    EnriquecimentoCpfErro,
+    enriquecer_cpfs,
+    ler_cpfs_csv,
 )
 
 app = Flask(
@@ -147,19 +214,32 @@ def index():
     if m_sessao not in _E_MODELOS:
         m_sessao = "prc_tjsp"
 
+    p_intermediaria = RESULTADOS / "INTERMEDIARIA.xlsx"
+    p_principal = ENTRADA / "principal.xlsx"
+    diag_e2 = diagnostico_intermediaria_etapa2(
+        str(p_intermediaria), m_sessao, str(p_principal)
+    ) if p_intermediaria.exists() else {
+        "ok": False,
+        "motivo": "",
+        "modelo_intermediaria": "",
+        "stale": False,
+    }
     arquivos = {
         "principal":       _arquivo_entrada("principal"),
         "p2":              _arquivo_entrada("p2"),
         "p3":              _arquivo_entrada("p3"),
-        "intermediaria":   (RESULTADOS / "INTERMEDIARIA.xlsx").exists(),
-        "final":           _caminho_final(m_sessao).exists(),
+        "intermediaria":   p_intermediaria.exists(),
+        "final":           _final_pronto(m_sessao) is not None,
         "nome_final":      _nome_arquivo_final(m_sessao),
         "nao_encontrados": (RESULTADOS / "cpfs_nao_encontrados_p2.csv").exists(),
-        "data_intermediaria":    _data_arquivo(RESULTADOS / "INTERMEDIARIA.xlsx"),
+        "data_intermediaria":    _data_arquivo(p_intermediaria),
         "data_nao_encontrados":  _data_arquivo(RESULTADOS / "cpfs_nao_encontrados_p2.csv"),
-        "data_final":            _data_arquivo(_caminho_final(m_sessao)),
+        "data_final":            _data_arquivo(_final_pronto(m_sessao)),
         "blacklist_bloqueios":   (RESULTADOS / "blacklist_bloqueios.csv").exists(),
         "data_blacklist_bloq":   _data_arquivo(RESULTADOS / "blacklist_bloqueios.csv"),
+        "etapa2_ok":             bool(diag_e2.get("ok")),
+        "etapa2_motivo":         diag_e2.get("motivo") or "",
+        "intermediaria_modelo":  rotulo_modelo_prc(diag_e2.get("modelo_intermediaria")),
     }
     return render_template(
         "index.html", arquivos=arquivos, estado=estado, eda_modelo=m_sessao
@@ -212,6 +292,55 @@ def upload(tipo):
 
 # ── Execucao ──────────────────────────────────────────────────────────────────
 
+@app.route("/rodar/etapa0", methods=["POST"])
+def rodar_etapa0():
+    if estado["rodando"]:
+        flash("Ja existe uma execucao em andamento.", "warning")
+        return redirect(url_for("index"))
+
+    p_principal = _arquivo_entrada("principal")
+    if not p_principal:
+        flash("Envie a planilha principal antes de rodar a Etapa 0.", "error")
+        return redirect(url_for("index"))
+
+    estado["rodando"] = True
+    estado["log"] = []
+    estado["etapa"] = 0
+
+    modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
+    if modelo not in _E_MODELOS:
+        modelo = "prc_tjsp"
+
+    def _executar():
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                from modulo_etapa_base import etapa0_enriquecer_com_base
+
+                etapa0_enriquecer_com_base(
+                    caminho_principal=str(p_principal),
+                    caminho_saida_intermediaria=str(RESULTADOS / "INTERMEDIARIA.xlsx"),
+                    caminho_csv_nao_encontrados=str(
+                        RESULTADOS / "cpfs_nao_encontrados_p2.csv"
+                    ),
+                    modelo=modelo,
+                )
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
+            _log("[OK] Etapa 0 concluida com sucesso.")
+        except Exception as exc:
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
+            _log(f"[ERRO] {exc}")
+        finally:
+            estado["rodando"] = False
+
+    threading.Thread(target=_executar, daemon=True).start()
+    return redirect(url_for("progresso"))
+
+
 @app.route("/rodar/etapa1", methods=["POST"])
 def rodar_etapa1():
     if estado["rodando"]:
@@ -219,31 +348,47 @@ def rodar_etapa1():
         return redirect(url_for("index"))
 
     p_principal = _arquivo_entrada("principal")
-    p_p2        = _arquivo_entrada("p2")
-    if not p_principal or not p_p2:
-        flash("Envie a planilha principal e a planilha Lemitti antes de rodar.", "error")
+    p_p2 = _arquivo_entrada("p2")
+    p_intermediaria = RESULTADOS / "INTERMEDIARIA.xlsx"
+    if not p_intermediaria.exists():
+        flash("Rode a Etapa 0 (base) antes da Lemitti.", "error")
+        return redirect(url_for("index"))
+    if not p_p2:
+        flash("Envie a planilha Lemitti antes de rodar a Etapa 1.", "error")
         return redirect(url_for("index"))
 
     estado["rodando"] = True
-    estado["log"]     = []
-    estado["etapa"]   = 1
+    estado["log"] = []
+    estado["etapa"] = 1
 
     modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
     if modelo not in _E_MODELOS:
         modelo = "prc_tjsp"
 
     def _executar():
+        buf = io.StringIO()
         try:
-            from modulo_merge import etapa1_enriquecer_com_p2
-            etapa1_enriquecer_com_p2(
-                caminho_principal           = str(p_principal),
-                caminho_p2                  = str(p_p2),
-                caminho_saida_intermediaria = str(RESULTADOS / "INTERMEDIARIA.xlsx"),
-                caminho_csv_nao_encontrados = str(RESULTADOS / "cpfs_nao_encontrados_p2.csv"),
-                modelo                      = modelo,
-            )
+            with contextlib.redirect_stdout(buf):
+                from modulo_merge import etapa1_enriquecer_com_p2
+
+                etapa1_enriquecer_com_p2(
+                    caminho_principal=str(p_principal or p_intermediaria),
+                    caminho_p2=str(p_p2),
+                    caminho_saida_intermediaria=str(p_intermediaria),
+                    caminho_csv_nao_encontrados=str(
+                        RESULTADOS / "cpfs_nao_encontrados_p2.csv"
+                    ),
+                    modelo=modelo,
+                    caminho_intermediaria_entrada=str(p_intermediaria),
+                )
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
             _log("[OK] Etapa 1 concluida com sucesso.")
         except Exception as exc:
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
             _log(f"[ERRO] {exc}")
         finally:
             estado["rodando"] = False
@@ -259,30 +404,48 @@ def rodar_etapa2():
         return redirect(url_for("index"))
 
     p_intermediaria = RESULTADOS / "INTERMEDIARIA.xlsx"
-    p_p3            = _arquivo_entrada("p3")
+    p_p3 = _arquivo_entrada("p3")
     if not p_intermediaria.exists() or not p_p3:
-        flash("Rode a Etapa 1 primeiro e envie a planilha Assertiva.", "error")
+        flash("Rode as Etapas 0/1 primeiro e envie a planilha Assertiva.", "error")
         return redirect(url_for("index"))
 
     modelo = (session.get("eda_modelo") or "prc_tjsp").strip().lower()
     if modelo not in _E_MODELOS:
         modelo = "prc_tjsp"
+    p_principal = ENTRADA / "principal.xlsx"
+    diag_e2 = diagnostico_intermediaria_etapa2(
+        str(p_intermediaria), modelo, str(p_principal)
+    )
+    if not diag_e2.get("ok"):
+        flash(diag_e2.get("motivo") or "Intermediária incompatível. Rode a Etapa 0.", "error")
+        return redirect(url_for("index"))
     caminho_final = _caminho_final(modelo)
 
     estado["rodando"] = True
-    estado["log"]     = []
-    estado["etapa"]   = 2
+    estado["log"] = []
+    estado["etapa"] = 2
 
     def _executar():
+        buf = io.StringIO()
         try:
-            from modulo_merge import etapa2_enriquecer_com_p3
-            etapa2_enriquecer_com_p3(
-                caminho_intermediaria = str(p_intermediaria),
-                caminho_p3            = str(p_p3),
-                caminho_saida_final   = str(caminho_final),
-            )
+            with contextlib.redirect_stdout(buf):
+                from modulo_merge import etapa2_enriquecer_com_p3
+
+                etapa2_enriquecer_com_p3(
+                    caminho_intermediaria=str(p_intermediaria),
+                    caminho_p3=str(p_p3),
+                    caminho_saida_final=str(caminho_final),
+                    modelo=modelo,
+                    caminho_principal=str(p_principal),
+                )
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
             _log("[OK] Etapa 2 concluida com sucesso.")
         except Exception as exc:
+            for line in buf.getvalue().splitlines():
+                if line.strip():
+                    _log(line)
             _log(f"[ERRO] {exc}")
         finally:
             estado["rodando"] = False
@@ -303,7 +466,7 @@ def api_status():
     return jsonify({
         "rodando": estado["rodando"],
         "etapa":   estado["etapa"],
-        "log":     estado["log"][-50:],
+        "log":     estado["log"][-200:],
     })
 
 
@@ -315,16 +478,23 @@ def download(arquivo):
     if modelo not in _E_MODELOS:
         modelo = "prc_tjsp"
     mapa = {
-        "final":               _caminho_final(modelo),
+        "final":               _final_pronto(modelo),
         "intermediaria":       RESULTADOS / "INTERMEDIARIA.xlsx",
         "nao_encontrados":     RESULTADOS / "cpfs_nao_encontrados_p2.csv",
         "blacklist_bloqueios": RESULTADOS / "blacklist_bloqueios.csv",
     }
     caminho = mapa.get(arquivo)
-    if not caminho or not caminho.exists():
+    if arquivo == "final" and not caminho:
+        flash(
+            "Ainda não há FINAL deste modelo. Rode a Etapa 2 depois da Etapa 1 — "
+            "o ficheiro antigo (outro mailing) não é servido.",
+            "error",
+        )
+        return redirect(url_for("index"))
+    if not caminho or not Path(caminho).exists():
         flash("Arquivo nao encontrado.", "error")
         return redirect(url_for("index"))
-    return send_file(str(caminho), as_attachment=True)
+    return _send_download(Path(caminho))
 
 
 @app.route("/download/hsm_lemitti")
@@ -348,14 +518,19 @@ def download_hsm_lemitti():
         return redirect(url_for("index"))
 
     nome = f"PRC_{_sufixo_arquivo_por_modelo(modelo)}_HSM_Lemitti.xlsx"
-    return send_file(
+    resp = send_file(
         io.BytesIO(data),
         as_attachment=True,
         download_name=nome,
         mimetype=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
+        max_age=0,
+        conditional=False,
+        etag=False,
     )
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
 
 
 # ── Blacklist ─────────────────────────────────────────────────────────────────
@@ -513,9 +688,9 @@ def historico():
 # HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _data_arquivo(caminho: Path) -> str | None:
+def _data_arquivo(caminho: Path | None) -> str | None:
     """Retorna a data de modificação do arquivo formatada, ou None se não existir."""
-    if caminho and caminho.exists():
+    if caminho and caminho.exists() and caminho.is_file():
         ts = caminho.stat().st_mtime
         return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
     return None
@@ -764,6 +939,103 @@ def exportar_unificada_tudo():
         return redirect(url_for("exportar_unificada"))
 
     return _resposta_excel_unificada(buffer, nome_arquivo, meta)
+
+
+_ENRIQ_CPF_ULTIMO = RESULTADOS / "enriquecimento_cpf_ultimo.xlsx"
+
+
+def _nome_enriquecimento_cpf() -> str:
+    return datetime.now().strftime("enriquecimento_cpf_%Y-%m-%d_%H%M.xlsx")
+
+
+@app.route("/enriquecer-cpf")
+def enriquecer_cpf():
+    ultimo = ""
+    if _ENRIQ_CPF_ULTIMO.is_file():
+        ultimo = datetime.fromtimestamp(_ENRIQ_CPF_ULTIMO.stat().st_mtime).strftime(
+            "%d/%m/%Y %H:%M"
+        )
+    return render_template("enriquecer_cpf.html", max_cpfs=MAX_CPFS, ultimo=ultimo)
+
+
+@app.route("/enriquecer-cpf/modelo")
+def enriquecer_cpf_modelo():
+    buf = io.BytesIO("CPF\n000.000.000-00\n".encode("utf-8-sig"))
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name="modelo_enriquecimento_cpf.csv",
+        mimetype="text/csv; charset=utf-8",
+    )
+
+
+@app.route("/enriquecer-cpf/ultimo")
+def enriquecer_cpf_ultimo():
+    if not _ENRIQ_CPF_ULTIMO.is_file():
+        flash("Ainda não há resultado gerado nesta sessão.", "warning")
+        return redirect(url_for("enriquecer_cpf"))
+    return _send_download(_ENRIQ_CPF_ULTIMO, "enriquecimento_cpf_ultimo.xlsx")
+
+
+@app.route("/enriquecer-cpf/gerar", methods=["POST"])
+def enriquecer_cpf_gerar():
+    if estado["rodando"]:
+        flash("Já existe uma execução em andamento. Aguarde terminar.", "warning")
+        return redirect(url_for("progresso"))
+
+    arquivo = request.files.get("arquivo")
+    if arquivo is None or not (arquivo.filename or "").strip():
+        flash("Envie um CSV com a coluna CPF.", "error")
+        return redirect(url_for("enriquecer_cpf"))
+
+    nome = (arquivo.filename or "").lower()
+    if not nome.endswith((".csv", ".txt")):
+        flash("Use um arquivo .csv (ou .txt com um CPF por linha).", "error")
+        return redirect(url_for("enriquecer_cpf"))
+
+    destino = ENTRADA / "enriquecimento_cpfs.csv"
+    try:
+        bruto = arquivo.read()
+        cpfs = ler_cpfs_csv(bruto)
+    except EnriquecimentoCpfErro as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("enriquecer_cpf"))
+    except Exception as exc:
+        flash(f"Erro ao ler o CSV: {exc}", "error")
+        return redirect(url_for("enriquecer_cpf"))
+
+    try:
+        if destino.is_file():
+            destino.unlink()
+        destino.write_bytes(bruto)
+    except OSError:
+        pass
+
+    estado["rodando"] = True
+    estado["log"] = []
+    estado["etapa"] = "cpf"
+    _log(f"CSV recebido: {len(cpfs)} CPF(s) único(s).")
+
+    def _executar():
+        try:
+            buffer, meta = enriquecer_cpfs(cpfs, log=_log)
+            payload = buffer.getvalue()
+            nome_arq = _nome_enriquecimento_cpf()
+            _ENRIQ_CPF_ULTIMO.write_bytes(payload)
+            (RESULTADOS / nome_arq).write_bytes(payload)
+            _log(
+                f"[OK] Processos={meta.get('Processos_enriquecidos', 0)} | "
+                f"Na blacklist={meta.get('Processos_na_blacklist', 0)} | "
+                f"CPFs não encontrados={meta.get('CPFs_nao_encontrados', 0)}."
+            )
+        except Exception as exc:
+            _log(f"[ERRO] {exc}")
+        finally:
+            estado["rodando"] = False
+
+    threading.Thread(target=_executar, daemon=True).start()
+    return redirect(url_for("progresso"))
 
 
 @app.route("/exportar/gerar", methods=["POST"])

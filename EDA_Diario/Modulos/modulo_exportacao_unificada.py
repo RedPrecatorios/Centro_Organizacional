@@ -19,6 +19,7 @@ from modulo_blacklist import (
     _normalizar_email_cmp,
     _normalizar_nome_cmp,
     _normalizar_tel_cmp,
+    motivo_marca_so_contato,
     normalizar_chave_processo_incidente,
     normalizar_chave_processo_incidente_de_valor,
     normalizar_valor_para_blacklist,
@@ -876,6 +877,18 @@ def _blacklist_status_for_row(
                 if m:
                     return m
         return ""
+
+    # Telefone Incorreto / Deixou Recado / Engano: não sobem para o caso —
+    # só a linha do contato respectivo (sms/Emails) deve exibir a tag.
+    filtrados: list[tuple[str, str]] = []
+    for t, v in uniq:
+        if t in ("TELEFONE", "EMAIL") and motivo_marca_so_contato(_motivo_de(t, v)):
+            continue
+        filtrados.append((t, v))
+    uniq = filtrados
+
+    if not uniq:
+        return ("Não", "", "", "")
 
     tipos = "; ".join(sorted({t for t, _ in uniq}))
     valores = "; ".join(f"{t}={v}" for t, v in uniq)

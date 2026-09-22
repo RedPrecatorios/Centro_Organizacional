@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}?v=20260824-tabs" />
 </head>
 <body class="dashboard-body">
   {% include 'partials/sidebar_navegacao.html' %}
@@ -15,7 +15,12 @@
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Utilizadores e painéis</h1>
-        <p class="dash-sub">Defina quais <strong>painéis do menu lateral</strong> e funcionalidades extra (ex.: botão Análise processual na Memória de cálculo) cada colaborador pode usar. Administradores têm acesso a tudo automaticamente.</p>
+        <p class="dash-sub">Defina quais <strong>painéis do menu lateral</strong> e funcionalidades extra cada colaborador pode usar. Administradores têm acesso a tudo automaticamente.</p>
+        <nav class="admin-mod-tabs" aria-label="Abas de utilizadores">
+          <button type="button" class="admin-mod-tab" data-mod="add">1. Adicionar usuário</button>
+          <button type="button" class="admin-mod-tab" data-mod="ops">2. IP e manutenção</button>
+          <button type="button" class="admin-mod-tab is-active" data-mod="users">3. Gerenciar usuários</button>
+        </nav>
       </div>
     </header>
     <main class="dash-content admin-users-main">
@@ -26,19 +31,24 @@
       <p class="auth-ok" role="status">{{ ok_message }}</p>
       {% endif %}
 
-      <section class="admin-section" aria-labelledby="h-new">
-        <h2 id="h-new" class="dash-section-title">Novo utilizador</h2>
+      <section class="admin-mod-panel" id="mod-add" data-mod-panel="add" style="display:none">
+        <h2 id="h-new" class="dash-section-title">Adicionar usuário</h2>
         <form class="admin-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="form-novo-user">
           <input type="hidden" name="action" value="create" />
           <div class="admin-row">
-            <label>Utilizador <input class="auth-input" name="new_username" type="text" required autocomplete="off" /></label>
-            <label>Palavra-passe <input class="auth-input" name="new_password" type="password" required autocomplete="new-password" /></label>
+            <label>Usuário <input class="auth-input" name="new_username" type="text" required autocomplete="off" /></label>
+            <label>Senha <input class="auth-input" name="new_password" type="password" required autocomplete="new-password" /></label>
             <label>Tipo
               <select class="auth-input" name="new_role" id="new-role">
                 <option value="colaborador">Colaborador</option>
                 <option value="admin">Administrador</option>
               </select>
             </label>
+          </div>
+          <div class="admin-row">
+            <label>Nome <input class="auth-input" name="new_first_name" type="text" required autocomplete="given-name" /></label>
+            <label>Sobrenome <input class="auth-input" name="new_last_name" type="text" required autocomplete="family-name" /></label>
+            <label>E-mail <input class="auth-input auth-input-wide" name="new_email" type="email" required autocomplete="off" /></label>
             <button class="auth-submit" type="submit">Criar</button>
           </div>
           <div id="new-collab-panels" class="admin-panels-block">
@@ -64,11 +74,11 @@
         </form>
       </section>
 
-      <section class="admin-section" aria-labelledby="h-ip-access">
+      <section class="admin-mod-panel" id="mod-ops" data-mod-panel="ops" style="display:none">
         <h2 id="h-ip-access" class="dash-section-title">Acesso por IP dos colaboradores</h2>
         <p class="dash-sub admin-maint-intro">
-          Todos os utilizadores do tipo <strong>Colaborador</strong> herdam esta lista. Administradores não têm limite de IP.
-          Informe um IP ou faixa CIDR por linha, vírgula ou espaço. IP actual desta sessão: <code>{{ current_remote_ip or 'desconhecido' }}</code>.
+          Todos os usuários do tipo <strong>Colaborador</strong> herdam esta lista. Administradores não têm limite de IP.
+          Informe um IP ou faixa CIDR por linha, vírgula ou espaço. IP atual desta sessão: <code>{{ current_remote_ip or 'desconhecido' }}</code>.
         </p>
         <form class="admin-form admin-ip-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
           <input type="hidden" name="action" value="save_ip_restriction" />
@@ -78,15 +88,13 @@
           <p class="admin-maint-env-note" role="status">
             Se a lista estiver vazia, nenhum colaborador acessa páginas protegidas até um administrador cadastrar ao menos um IP/faixa.
           </p>
-          <button class="auth-submit" type="submit">Guardar IPs permitidos</button>
+          <button class="auth-submit" type="submit">Salvar IPs permitidos</button>
         </form>
-      </section>
 
-      <section class="admin-section" aria-labelledby="h-maint">
-        <h2 id="h-maint" class="dash-section-title">Manutenção por módulo</h2>
+        <h2 id="h-maint" class="dash-section-title admin-mod-subtitle">Manutenção por módulo</h2>
         <p class="dash-sub admin-maint-intro">
-          Com a manutenção activa, ninguém utiliza o módulo (páginas e APIs), incluindo administradores.
-          Para desactivar, use esta página em <strong>Utilizadores</strong>. Também pode forçar via <code>PAGE_MAINTENANCE</code> no <code>.env</code>.
+          Com a manutenção ativa, ninguém utiliza o módulo (páginas e APIs), incluindo administradores.
+          Para desativar, use esta página em <strong>Utilizadores</strong>. Também pode forçar via <code>PAGE_MAINTENANCE</code> no <code>.env</code>.
         </p>
         <form class="admin-form admin-maint-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
           <input type="hidden" name="action" value="save_maintenance" />
@@ -99,97 +107,167 @@
               </label>
               <p class="admin-maint-row-desc">{{ m.description }}</p>
               {% if m.env_enabled %}
-              <p class="admin-maint-env-note" role="status">Activado pelo <code>.env</code> (não editável aqui).</p>
+              <p class="admin-maint-env-note" role="status">Ativado pelo <code>.env</code> (não editável aqui).</p>
               {% endif %}
-              <label class="admin-maint-msg-label">Mensagem opcional (vista pelo utilizador)
+              <label class="admin-maint-msg-label">Mensagem opcional (vista pelo usuário)
                 <textarea class="auth-input admin-maint-msg" name="maint_msg_{{ m.tab_id }}" rows="2" placeholder="Texto personalizado; vazio = mensagem padrão.">{{ m.message or '' }}</textarea>
               </label>
             </article>
             {% endfor %}
           </div>
-          <button class="auth-submit" type="submit">Guardar manutenção</button>
+          <button class="auth-submit" type="submit">Salvar manutenção</button>
         </form>
       </section>
 
-      <section class="admin-section" aria-labelledby="h-list">
-        <h2 id="h-list" class="dash-section-title">Contas existentes</h2>
-        <div class="admin-user-list">
-          {% for u in users %}
-          <article class="admin-user-block">
-            <header class="admin-user-header">
-              <strong class="admin-user-name">{{ u.username|e }}</strong>
-              <span class="dash-pill {{ 'dash-pill-ok' if u.active else '' }}">
-                {{ 'Ativo' if u.active else 'Inactivo' }} · {{ 'Admin' if u.role == 'admin' else 'Colaborador' }}
-              </span>
-            </header>
+      <section class="admin-mod-panel" id="mod-users" data-mod-panel="users" style="display:block">
+        <div class="admin-users-toolbar">
+          <h2 id="h-list" class="dash-section-title admin-users-toolbar-title">Gerenciar usuários</h2>
+          <label class="admin-users-filter-label">Filtrar
+            <input class="auth-input admin-users-filter" type="search" id="admin-user-filter" placeholder="Nome, login ou e-mail" autocomplete="off" />
+          </label>
+          <span class="admin-users-count" id="admin-users-count">{{ users|length }} conta{{ 's' if users|length != 1 else '' }}</span>
+        </div>
 
-            {% if u.role == 'colaborador' %}
-            <div class="admin-user-panels-summary" aria-label="Painéis activos">
-              {% set ns = namespace(any=false) %}
-              {% for key, title, desc in panel_defs %}
-                {% if key in u.tabs %}
-                  {% set ns.any = true %}
-                  <span class="admin-panel-chip">{{ title }}</span>
-                {% endif %}
-              {% endfor %}
-              {% if not ns.any %}
-              <span class="admin-panel-chip admin-panel-chip-warn">Nenhum painel seleccionado</span>
-              {% endif %}
-            </div>
-
-            <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="perm-form-{{ u.id }}">
-              <input type="hidden" name="action" value="save_perms" />
-              <input type="hidden" name="user_id" value="{{ u.id }}" />
-              <div class="admin-panels-toolbar">
-                <p class="admin-perm-label">Seleccionar painéis para <strong>{{ u.username|e }}</strong>:</p>
-                <div class="admin-panels-actions">
-                  <button type="button" class="admin-btn admin-btn-sm" data-panels-action="all" data-panels-root="perm-form-{{ u.id }}">Marcar todos</button>
-                  <button type="button" class="admin-btn admin-btn-sm" data-panels-action="none" data-panels-root="perm-form-{{ u.id }}">Desmarcar todos</button>
-                </div>
-              </div>
-              <div class="admin-panel-grid">
+        <div class="dash-table-wrap admin-users-table-wrap">
+          <div class="dash-table-scroll">
+            <table class="dash-table admin-users-table">
+              <colgroup>
+                <col class="admin-col-user" />
+                <col class="admin-col-email" />
+                <col class="admin-col-tipo" />
+                <col class="admin-col-estado" />
+                <col class="admin-col-paineis" />
+                <col class="admin-col-acoes" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Usuário</th>
+                  <th>E-mail</th>
+                  <th>Tipo</th>
+                  <th>Estado</th>
+                  <th>Painéis</th>
+                  <th class="admin-users-th-actions">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for u in users %}
+                {% set display_name = ((u.first_name or '') ~ ' ' ~ (u.last_name or ''))|trim %}
+                {% set search_blob = ((display_name or '') ~ ' ' ~ (u.username or '') ~ ' ' ~ (u.email or ''))|lower %}
+                {% set ns = namespace(titles=[]) %}
                 {% for key, title, desc in panel_defs %}
-                <label class="admin-panel-card">
-                  <input type="checkbox" name="tab_{{ key }}" value="1" class="admin-panel-cb" {% if key in u.tabs %}checked{% endif %} />
-                  <span class="admin-panel-card-body">
-                    <span class="admin-panel-card-title">{{ title }}</span>
-                    <span class="admin-panel-card-desc">{{ desc }}</span>
-                  </span>
-                </label>
+                  {% if key in u.tabs %}
+                    {% set ns.titles = ns.titles + [title] %}
+                  {% endif %}
                 {% endfor %}
-              </div>
-              <button class="auth-submit admin-perm-btn" type="submit">Guardar painéis</button>
-            </form>
-            {% else %}
-            <p class="admin-note">Administrador — acesso a todos os painéis da plataforma.</p>
-            {% endif %}
+                <tr class="admin-user-row" data-user-id="{{ u.id }}" data-search="{{ search_blob|e }}">
+                  <td class="admin-user-idcell" title="{{ (display_name or u.username)|e }} · {{ u.username|e }}">
+                    <span class="admin-user-line">
+                      <strong class="admin-user-name">{{ (display_name or u.username)|e }}</strong>
+                      {% if display_name %}
+                      <span class="admin-user-profile-hint">· {{ u.username|e }}</span>
+                      {% else %}
+                      <span class="admin-panel-chip admin-panel-chip-warn">Perfil incompleto</span>
+                      {% endif %}
+                    </span>
+                  </td>
+                  <td class="admin-user-email" title="{{ (u.email or '')|e }}">{{ (u.email or '—')|e }}</td>
+                  <td>{{ 'Admin' if u.role == 'admin' else 'Colaborador' }}</td>
+                  <td>
+                    <span class="dash-pill {{ 'dash-pill-ok' if u.active else '' }}">
+                      {{ 'Ativo' if u.active else 'Inativo' }}
+                    </span>
+                  </td>
+                  <td class="admin-user-paineis" title="{% if u.role == 'admin' %}Todos os painéis{% elif ns.titles %}{{ ns.titles|join(', ') }}{% else %}Nenhum painel{% endif %}">
+                    {% if u.role == 'admin' %}
+                    <span class="admin-paineis-count">Todos</span>
+                    {% elif ns.titles %}
+                    <span class="admin-paineis-count">{{ ns.titles|length }} painel{{ 's' if ns.titles|length != 1 else '' }}</span>
+                    {% else %}
+                    <span class="admin-paineis-count admin-paineis-count--warn">Nenhum</span>
+                    {% endif %}
+                  </td>
+                  <td class="admin-users-td-actions">
+                    <div class="admin-actions admin-actions-row">
+                      <button type="button" class="admin-btn admin-btn-edit" data-edit-user="{{ u.id }}" aria-expanded="false" aria-controls="user-editor-{{ u.id }}">Editar</button>
+                      <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+                        <input type="hidden" name="action" value="toggle" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <button class="admin-btn" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>
+                          {{ 'Desativar' if u.active else 'Ativar' }}
+                        </button>
+                      </form>
+                      <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}" onsubmit="return confirm('Remover este usuário?');">
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <button class="admin-btn admin-btn-danger" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>Apagar</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+                <tr class="admin-user-editor" id="user-editor-{{ u.id }}" data-editor-for="{{ u.id }}" hidden>
+                  <td colspan="6">
+                    <div class="admin-user-editor-inner">
+                      {% if u.role == 'colaborador' %}
+                      <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}" id="perm-form-{{ u.id }}">
+                        <input type="hidden" name="action" value="save_perms" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <div class="admin-panels-toolbar">
+                          <p class="admin-perm-label">Painéis de <strong>{{ u.username|e }}</strong></p>
+                          <div class="admin-panels-actions">
+                            <button type="button" class="admin-btn admin-btn-sm" data-panels-action="all" data-panels-root="perm-form-{{ u.id }}">Marcar todos</button>
+                            <button type="button" class="admin-btn admin-btn-sm" data-panels-action="none" data-panels-root="perm-form-{{ u.id }}">Desmarcar todos</button>
+                          </div>
+                        </div>
+                        <div class="admin-panel-grid">
+                          {% for key, title, desc in panel_defs %}
+                          <label class="admin-panel-card">
+                            <input type="checkbox" name="tab_{{ key }}" value="1" class="admin-panel-cb" {% if key in u.tabs %}checked{% endif %} />
+                            <span class="admin-panel-card-body">
+                              <span class="admin-panel-card-title">{{ title }}</span>
+                              <span class="admin-panel-card-desc">{{ desc }}</span>
+                            </span>
+                          </label>
+                          {% endfor %}
+                        </div>
+                        <button class="auth-submit admin-perm-btn" type="submit">Salvar painéis</button>
+                      </form>
+                      {% else %}
+                      <p class="admin-note">Administrador — acesso a todos os painéis da plataforma.</p>
+                      {% endif %}
 
-            <div class="admin-actions">
-              <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}">
-                <input type="hidden" name="action" value="toggle" />
-                <input type="hidden" name="user_id" value="{{ u.id }}" />
-                <button class="admin-btn" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>
-                  {{ 'Desactivar' if u.active else 'Activar' }}
-                </button>
-              </form>
-              <form class="admin-inline" method="post" action="{{ url_for('auth.admin_usuarios') }}" onsubmit="return confirm('Remover este utilizador?');">
-                <input type="hidden" name="action" value="delete" />
-                <input type="hidden" name="user_id" value="{{ u.id }}" />
-                <button class="admin-btn admin-btn-danger" type="submit"{% if u.id == plataforma_user.id %} disabled{% endif %}>Apagar</button>
-              </form>
-            </div>
-            <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
-              <input type="hidden" name="action" value="set_password" />
-              <input type="hidden" name="user_id" value="{{ u.id }}" />
-              <label>Nova palavra-passe (mín. 4 caracteres)
-                <input class="auth-input" name="new_pass" type="password" autocomplete="new-password" minlength="4" />
-              </label>
-              <button class="auth-submit" type="submit">Alterar palavra-passe</button>
-            </form>
-          </article>
-          {% else %}
-          <p>Nenhum utilizador registado.</p>
-          {% endfor %}
+                      <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+                        <input type="hidden" name="action" value="save_profile" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <label>Nome
+                          <input class="auth-input" name="first_name" type="text" required autocomplete="given-name" value="{{ (u.first_name or '')|e }}" />
+                        </label>
+                        <label>Sobrenome
+                          <input class="auth-input" name="last_name" type="text" required autocomplete="family-name" value="{{ (u.last_name or '')|e }}" />
+                        </label>
+                        <label>E-mail
+                          <input class="auth-input auth-input-wide" name="email" type="email" required autocomplete="off" value="{{ (u.email or '')|e }}" />
+                        </label>
+                        <button class="auth-submit" type="submit">Salvar perfil</button>
+                      </form>
+                      <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+                        <input type="hidden" name="action" value="set_password" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <label>Nova senha (mín. 4 caracteres)
+                          <input class="auth-input" name="new_pass" type="password" required minlength="4" autocomplete="new-password" />
+                        </label>
+                        <button class="auth-submit" type="submit">Alterar senha</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="6"><p class="dash-empty">Nenhum usuário registrado.</p></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </main>
@@ -231,6 +309,110 @@
     roleSel.addEventListener('change', syncRole);
     syncRole();
   }
+
+  function showMod(id) {
+    document.querySelectorAll('[data-mod-panel]').forEach(function (panel) {
+      panel.style.display = panel.getAttribute('data-mod-panel') === id ? 'block' : 'none';
+    });
+    document.querySelectorAll('.admin-mod-tab').forEach(function (tab) {
+      tab.classList.toggle('is-active', tab.getAttribute('data-mod') === id);
+    });
+    try { sessionStorage.setItem('adminUsersMod', id); } catch (e) {}
+  }
+  document.querySelectorAll('.admin-mod-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      showMod(tab.getAttribute('data-mod'));
+    });
+  });
+  document.querySelectorAll('.admin-users-main form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var act = (form.querySelector('[name="action"]') || {}).value || '';
+      if (act === 'save_ip_restriction' || act === 'save_maintenance') showMod('ops');
+      else if (act === 'create') showMod('add');
+      else showMod('users');
+    });
+  });
+  var startMod = 'users';
+  try {
+    var saved = sessionStorage.getItem('adminUsersMod');
+    if (saved === 'add' || saved === 'ops' || saved === 'users') startMod = saved;
+  } catch (e) {}
+  showMod(startMod);
+
+  function closeAllEditors() {
+    document.querySelectorAll('.admin-user-editor').forEach(function (row) {
+      row.hidden = true;
+    });
+    document.querySelectorAll('.admin-user-row').forEach(function (row) {
+      row.classList.remove('is-editing');
+    });
+    document.querySelectorAll('[data-edit-user]').forEach(function (btn) {
+      btn.setAttribute('aria-expanded', 'false');
+      btn.textContent = 'Editar';
+    });
+  }
+  function openEditor(userId) {
+    var editor = document.getElementById('user-editor-' + userId);
+    var row = document.querySelector('.admin-user-row[data-user-id="' + userId + '"]');
+    var btn = document.querySelector('[data-edit-user="' + userId + '"]');
+    if (!editor) return;
+    var alreadyOpen = !editor.hidden;
+    closeAllEditors();
+    if (alreadyOpen) return;
+    editor.hidden = false;
+    if (row) row.classList.add('is-editing');
+    if (btn) {
+      btn.setAttribute('aria-expanded', 'true');
+      btn.textContent = 'Fechar';
+    }
+    editor.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  document.querySelectorAll('[data-edit-user]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      openEditor(btn.getAttribute('data-edit-user'));
+    });
+  });
+  document.querySelectorAll('.admin-user-editor form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      var editor = form.closest('[data-editor-for]');
+      if (editor) sessionStorage.setItem('adminEditUser', editor.getAttribute('data-editor-for'));
+    });
+  });
+  var savedEdit = sessionStorage.getItem('adminEditUser');
+  if (savedEdit) {
+    sessionStorage.removeItem('adminEditUser');
+    openEditor(savedEdit);
+  }
+
+  var filter = document.getElementById('admin-user-filter');
+  var countEl = document.getElementById('admin-users-count');
+  function applyFilter() {
+    var q = (filter && filter.value || '').trim().toLowerCase();
+    var visible = 0;
+    document.querySelectorAll('.admin-user-row').forEach(function (row) {
+      var match = !q || (row.getAttribute('data-search') || '').indexOf(q) !== -1;
+      var editor = document.getElementById('user-editor-' + row.getAttribute('data-user-id'));
+      row.hidden = !match;
+      if (editor) {
+        if (!match) {
+          editor.hidden = true;
+          row.classList.remove('is-editing');
+          var btn = row.querySelector('[data-edit-user]');
+          if (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+            btn.textContent = 'Editar';
+          }
+        } else if (row.classList.contains('is-editing')) {
+          editor.hidden = false;
+        }
+      }
+      if (match) visible += 1;
+    });
+    if (countEl) {
+      countEl.textContent = visible + ' conta' + (visible !== 1 ? 's' : '');
+    }
+  }
+  if (filter) filter.addEventListener('input', applyFilter);
 })();
 </script>
 </body>

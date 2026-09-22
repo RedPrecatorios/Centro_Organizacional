@@ -290,11 +290,23 @@ def proxy_pre_analise_api_request(
     return out, 502
 
 
+def _status_is_terminal(status: str | None) -> bool:
+    return (status or "").strip().lower() in _TERMINAL_STATUSES
+
+
 def _is_terminal_status(status: str | None, bloqueado: bool) -> bool:
-    if bloqueado:
-        return True
-    norm = (status or "").strip().lower()
-    return norm in _TERMINAL_STATUSES
+    """Polling pára só com status terminal da API.
+
+    ``bloqueado`` residual de uma falha anterior não pode congelar o caso:
+    no reprocesso o status volta a mapeamento_iniciado, mas o cache
+    mantinha bloqueado=1 e o sync desligava o polling para sempre.
+    """
+    del bloqueado
+    return _status_is_terminal(status)
+
+
+def _terminal_status_sql_in() -> str:
+    return ", ".join("'" + s.replace("'", "''") + "'" for s in sorted(_TERMINAL_STATUSES))
 
 
 def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -436,7 +448,7 @@ def resolve_id_externo(
         aviso = None
         if len(rows) > 1:
             aviso = (
-                "Vários registos em precainfosnew para este processo/incidente; "
+                "Vários registros em precainfosnew para este processo/incidente; "
                 "usado o id mais recente."
             )
         pid = rows[0].get("id")
@@ -524,13 +536,14 @@ def _upsert_caso_from_inputs(
     user_id: int | None,
 ) -> None:
     """Insere ou actualiza caso local (suporta idempotência do iniciar na API externa)."""
+    terminals = _terminal_status_sql_in()
     cur.execute(
-        """
+        f"""
         INSERT INTO pre_analise_casos (
             caso_id, id_externo, numero_cumprimento, numero_incidente,
             nome_credor, numero_depre_input, status, mensagem,
-            polling_ativo, criado_por_user_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, %s)
+            polling_ativo, bloqueado, criado_por_user_id
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, 0, %s)
         ON DUPLICATE KEY UPDATE
             id_externo = COALESCE(VALUES(id_externo), id_externo),
             numero_cumprimento = VALUES(numero_cumprimento),
@@ -539,14 +552,11 @@ def _upsert_caso_from_inputs(
             numero_depre_input = COALESCE(VALUES(numero_depre_input), numero_depre_input),
             status = VALUES(status),
             mensagem = VALUES(mensagem),
+            bloqueado = 0,
             polling_ativo = IF(
-                polling_ativo = 0 AND VALUES(status) NOT IN (
-                    'coleta_concluida', 'analise_gpt_concluida', 'analise_gpt_erro',
-                    'erro_processamento', 'blacklist',
-                    'erro', 'falha', 'cancelado', 'cancelada'
-                ),
-                1,
-                polling_ativo
+                LOWER(TRIM(VALUES(status))) IN ({terminals}),
+                0,
+                1
             )
         """,
         (
@@ -1104,7 +1114,7 @@ def cancelar_caso(caso_id: str) -> tuple[dict, int]:
             _apply_status_snapshot(cur, caso_id, api_out)
         conn.commit()
     except Exception as e:
-        return {"ok": False, "error": f"Cancelado na API, mas falha ao actualizar cache: {e}"}, 500
+        return {"ok": False, "error": f"Cancelado na API, mas falha ao atualizar cache: {e}"}, 500
     finally:
         if conn is not None:
             try:
@@ -1175,21 +1185,25 @@ def sincronizar_casos(
         cur = conn.cursor(dictionary=True)
         _ensure_table(cur)
 
-        # 1) Desliga polling de casos já terminais no cache (ex.: analise_gpt_concluida
-        #    gravado antes da lista de status terminais ser corrigida).
+        # 1) Alinha polling_ativo ao status em cache (ignora bloqueado residual).
+        #    Reativa reprocessos presos em mapeamento_iniciado com polling_ativo=0.
         terminal_list = sorted(_TERMINAL_STATUSES)
         placeholders = ", ".join(["%s"] * len(terminal_list))
         cur.execute(
             f"""
             UPDATE pre_analise_casos
-            SET polling_ativo = 0
-            WHERE polling_ativo = 1
-              AND (
-                bloqueado = 1
-                OR LOWER(TRIM(status)) IN ({placeholders})
-              )
+            SET polling_ativo = IF(
+                LOWER(TRIM(status)) IN ({placeholders}),
+                0,
+                1
+            )
+            WHERE polling_ativo <> IF(
+                LOWER(TRIM(status)) IN ({placeholders}),
+                0,
+                1
+            )
             """,
-            tuple(terminal_list),
+            tuple(terminal_list) + tuple(terminal_list),
         )
 
         # 2) Sincroniza TODOS os casos ainda activos (em lotes), não só os 20 mais

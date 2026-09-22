@@ -44,9 +44,9 @@ def apply_descontos_from_main_dict_to_merged(
     tolerance: float = 1.02,
 ) -> bool:
     """
-    Se O310 (desc_saude_prev) da planilha vier inflado vs. soma da base, corrige
-    ``merged`` antes do UPSERT em ``memoria_calculo``. Ajusta O311 (IR) na mesma
-    proporção quando parecer derivado de O310 (ex.: ~10%).
+    Se R33 (desc_saude_prev) da planilha vier inflado vs. soma da base, corrige
+    ``merged`` antes do UPSERT em ``memoria_calculo``. Ajusta R34 (IR) na mesma
+    proporção quando parecer derivado de R33 (ex.: ~10%).
     """
     expected = previdencia_total_from_main_dict(main_dict)
     if expected < 0.01:

@@ -15,7 +15,8 @@ import mysql.connector
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, url_for
+from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
+from werkzeug.exceptions import HTTPException
 
 # cd "c:\Users\justi\OneDrive\Documentos\Python Projects\PycharmProjects\View_Message"
 # python app.py
@@ -33,6 +34,10 @@ app = Flask(
 )
 app.secret_key = (os.getenv("FLASK_SECRET_KEY") or "").strip() or "dev-unsafe-defina-FLASK_SECRET_KEY-no-.env"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=14)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
+# Dois PDFs de até 80 MB + overhead do multipart.
+app.config["MAX_CONTENT_LENGTH"] = 170 * 1024 * 1024
 
 
 def _safe_embed_url(raw: str) -> str | None:
@@ -57,6 +62,13 @@ except ImportError:
     pass
 
 from messages_viewer.analise_processual_jobs import get_job_status, start_job
+from messages_viewer.autos_export_jobs import (
+    configured as autos_export_configured,
+    get_job_status as get_autos_export_job_status,
+    resolve_job_file as resolve_autos_export_file,
+    resolve_job_zip as resolve_autos_export_zip,
+    start_job as start_autos_export_job,
+)
 from messages_viewer.pre_analise_processual import (
     api_health as pre_analise_api_health,
     cancelar_caso as pre_analise_cancelar_caso,
@@ -89,6 +101,25 @@ from messages_viewer.levantamento_processual import (
     is_configured as levantamento_api_configured,
     poll_interval_ms as levantamento_poll_interval_ms,
 )
+from messages_viewer.solicitacao_inclusao import (
+    arquivar as solicitacao_inclusao_arquivar,
+    criar as solicitacao_inclusao_criar,
+    desarquivar as solicitacao_inclusao_desarquivar,
+    detalhe as solicitacao_inclusao_detalhe,
+    is_configured as solicitacao_inclusao_configured,
+    limpar_fila as solicitacao_inclusao_limpar_fila,
+    listar as solicitacao_inclusao_listar,
+    listar_solicitantes as solicitacao_inclusao_listar_solicitantes,
+    baixar_autos as solicitacao_inclusao_baixar_autos,
+    baixar_autos_texto as solicitacao_inclusao_baixar_autos_texto,
+    poll_interval_ms as solicitacao_inclusao_poll_ms,
+    create_cooldown_ms as solicitacao_inclusao_cooldown_ms,
+    status_catalog as solicitacao_inclusao_status_catalog,
+    user_can_view_autos as solicitacao_inclusao_can_view_autos,
+    user_can_view_gemini_details as solicitacao_inclusao_can_view_gemini_details,
+    user_can_view_other_solicitacoes as solicitacao_inclusao_can_view_other_solicitacoes,
+    pt_display_config as solicitacao_inclusao_pt_display,
+)
 from messages_viewer.proposta_pdf import gerar_pdf_proposta, nome_arquivo_proposta
 from messages_viewer.proposta_service import buscar_por_processo_incidente
 from messages_viewer.atualizacao_imposto import (
@@ -108,11 +139,24 @@ from messages_viewer.tabela_juros_calc import (
     calcular_comparativo,
     resultado_para_api,
 )
+from messages_viewer.calculo_manual import (
+    automation_payload_from_form as calculo_manual_automation_payload,
+    load_caso_for_form as calculo_manual_load,
+    normalize_form as calculo_manual_normalize,
+    upsert_memoria_from_form as calculo_manual_upsert_memoria,
+    upsert_precainfos_from_form as calculo_manual_upsert,
+)
+from messages_viewer.api_calculo_monitor import (
+    api_calculo_monitor_configured,
+    build_api_calculo_monitor_snapshot,
+    poll_interval_ms as api_calculo_poll_interval_ms,
+)
 from messages_viewer.plataforma_auth import (
     auth_bp,
     current_user,
     init_plataforma_auth,
     plataforma_before_request,
+    solicitante_from_user,
     user_can_tab,
     wsgi_eda_session_guard,
 )
@@ -124,6 +168,20 @@ init_plataforma_auth(app)
 @app.before_request
 def _plataforma_auth_guard():
     return plataforma_before_request()
+
+
+@app.errorhandler(Exception)
+def _api_json_errors(err):
+    """APIs devem devolver JSON; página HTML quebra o fetch().json() do frontend."""
+    if not request.path.startswith("/api/"):
+        if isinstance(err, HTTPException):
+            return err
+        raise err
+    if isinstance(err, HTTPException):
+        desc = (err.description or err.name or "Erro").strip()
+        return jsonify({"ok": False, "error": desc}), int(err.code or 500)
+    app.logger.exception("api error")
+    return jsonify({"ok": False, "error": "Erro interno. Tente de novo."}), 500
 
 
 @app.context_processor
@@ -181,7 +239,7 @@ def _memoria_mysql_config() -> dict | None:
 
     Variáveis de ambiente: MEMORIA_MYSQL_HOST, MEMORIA_MYSQL_PORT, MEMORIA_MYSQL_DATABASE,
     MEMORIA_MYSQL_USER, MEMORIA_MYSQL_PASSWORD, MEMORIA_MYSQL_CONNECT_TIMEOUT (segundos; padrão 1200),
-    MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL (opcional: nome da coluna de data da última actualização; senão autodetecta).
+    MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL (opcional: nome da coluna de data da última atualização; senão autodetecta).
     Credenciais no .env (nunca no código; use aspas se a password tiver # ou !).
     """
     name = (os.getenv("MEMORIA_MYSQL_DATABASE") or "").strip()
@@ -211,7 +269,7 @@ def _memoria_mysql_config() -> dict | None:
 
 def _memoria_calculo_ultima_atualizacao_field(cur) -> str | None:
     """
-    Nome da coluna de data/hora da última actualização em `memoria_calculo`.
+    Nome da coluna de data/hora da última atualização em `memoria_calculo`.
     Pode forçar com MEMORIA_MYSQL_ULTIMA_ATUALIZACAO_COL; senão tenta nomes comuns
     (data_ultima_atualizacao, ultima_atualizacao, data_atualizacao, updated_at, …).
     """
@@ -285,7 +343,7 @@ def _precainfos_numero_de_meses_editavel(raw: object) -> bool:
 
 
 def _enrich_results_precainfos_numero_de_meses(results: list[dict]) -> None:
-    """Anexa ``precainfos_numero_de_meses`` (flaskdb) a cada resultado com id_precainfosnew."""
+    """Anexa meses e Calculo_Atualizado do cadastro a cada resultado com id_precainfosnew."""
     if not results:
         return
     cfg = _flask_mysql_config()
@@ -311,32 +369,242 @@ def _enrich_results_precainfos_numero_de_meses(results: list[dict]) -> None:
         cur = conn.cursor(dictionary=True)
         fields = _precainfosnew_columns(cur)
         f_meses = _precainfos_numero_de_meses_column(fields)
-        if not f_meses:
+        f_calc = _pick_field(
+            fields,
+            "Calculo_Atualizado",
+            "calculo_atualizado",
+            "Calculo_atualizado",
+        )
+        select_cols = ["id"]
+        if f_meses:
+            select_cols.append(f"`{f_meses}` AS precainfos_numero_de_meses")
+        if f_calc:
+            select_cols.append(f"`{f_calc}` AS calculo_atualizado")
+        if len(select_cols) == 1:
             return
         placeholders = ",".join(["%s"] * len(ids))
         cur.execute(
             f"""
-            SELECT id, `{f_meses}` AS precainfos_numero_de_meses
+            SELECT {", ".join(select_cols)}
             FROM precainfosnew
             WHERE id IN ({placeholders})
             """,
             tuple(ids),
         )
-        by_id = {
-            int(r["id"]): r.get("precainfos_numero_de_meses")
-            for r in (cur.fetchall() or [])
-            if r.get("id") is not None
-        }
+        by_id: dict[int, dict] = {}
+        for r in cur.fetchall() or []:
+            if r.get("id") is None:
+                continue
+            by_id[int(r["id"])] = r
         for row in results:
             pid = row.get("id_precainfosnew")
             try:
                 pid_int = int(pid) if pid is not None else None
             except (TypeError, ValueError):
                 pid_int = None
-            if pid_int is not None and pid_int in by_id:
-                row["precainfos_numero_de_meses"] = by_id[pid_int]
+            if pid_int is None or pid_int not in by_id:
+                continue
+            cad = by_id[pid_int]
+            if f_meses:
+                row["precainfos_numero_de_meses"] = cad.get("precainfos_numero_de_meses")
+            calc_raw = cad.get("calculo_atualizado")
+            calc_str = str(calc_raw).strip() if calc_raw is not None else ""
+            if calc_str:
+                row["calculo_atualizado"] = calc_str
+                if calc_str.casefold() == "sem saldo":
+                    row["status"] = "Sem Saldo"
     except mysql.connector.Error as e:
         print(f"[memoria-calculo] enrich precainfos_numero_de_meses: {e}")
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _norm_credor_key(value: object) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _append_missing_precainfos_creditors(
+    results: list[dict],
+    *,
+    processo: str,
+    incidente: str,
+    blacklist: dict,
+    allow_blacklist_override: bool,
+    audit_context: dict,
+) -> list[dict]:
+    """Inclui credores do cadastro que ainda não existem na memória de cálculo."""
+    if not processo:
+        return results
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return results
+    known_ids: set[int] = set()
+    known_names: set[str] = set()
+    for row in results:
+        pid = row.get("id_precainfosnew")
+        try:
+            if pid is not None:
+                known_ids.add(int(pid))
+        except (TypeError, ValueError):
+            pass
+        name = _norm_credor_key(row.get("requerente"))
+        if name:
+            known_names.add(name)
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        fields = _precainfosnew_columns(cur)
+        f_req = _pick_field(fields, "requerente", "Requerente")
+        f_proc = _pick_field(
+            fields,
+            "numero_de_processo",
+            "Numero_de_processo",
+            "Numero_de_Processo",
+            "processo",
+            "Processo",
+        )
+        f_inc = _pick_field(
+            fields,
+            "numero_do_incidente",
+            "Numero_do_incidente",
+            "Numero_do_Incidente",
+            "numero_de_incidente",
+            "Numero_de_incidente",
+            "incidente",
+            "Incidente",
+        )
+        f_calc = _pick_field(
+            fields,
+            "Calculo_Atualizado",
+            "calculo_atualizado",
+            "Calculo_atualizado",
+        )
+        f_meses = _precainfos_numero_de_meses_column(fields)
+        if not f_proc:
+            return results
+        calc_sql = (
+            f"`{f_calc}` AS calculo_atualizado" if f_calc else "NULL AS calculo_atualizado"
+        )
+        meses_sql = (
+            f"`{f_meses}` AS precainfos_numero_de_meses"
+            if f_meses
+            else "NULL AS precainfos_numero_de_meses"
+        )
+        req_sql = f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"
+        if incidente and f_inc:
+            cur.execute(
+                f"""
+                SELECT id,
+                       {req_sql},
+                       `{f_proc}` AS numero_de_processo,
+                       `{f_inc}` AS numero_do_incidente,
+                       {calc_sql},
+                       {meses_sql}
+                FROM precainfosnew
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                ORDER BY id DESC
+                LIMIT 20
+                """,
+                (processo, incidente),
+            )
+        else:
+            inc_sel = (
+                f"`{f_inc}` AS numero_do_incidente" if f_inc else "NULL AS numero_do_incidente"
+            )
+            cur.execute(
+                f"""
+                SELECT id,
+                       {req_sql},
+                       `{f_proc}` AS numero_de_processo,
+                       {inc_sel},
+                       {calc_sql},
+                       {meses_sql}
+                FROM precainfosnew
+                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                ORDER BY id DESC
+                LIMIT 20
+                """,
+                (processo,),
+            )
+        extra: list[dict] = []
+        for r in cur.fetchall() or []:
+            try:
+                pid = int(r.get("id")) if r.get("id") is not None else None
+            except (TypeError, ValueError):
+                pid = None
+            name = _norm_credor_key(r.get("requerente"))
+            if pid is not None and pid in known_ids:
+                continue
+            if name and name in known_names:
+                continue
+            if pid is not None:
+                known_ids.add(pid)
+            if name:
+                known_names.add(name)
+            fallback_row = {
+                "id": pid,
+                "requerente": r.get("requerente"),
+                "numero_de_processo": r.get("numero_de_processo"),
+                "numero_do_incidente": r.get("numero_do_incidente"),
+            }
+            bl_row = _blacklist_case_match(
+                blacklist,
+                processo=fallback_row.get("numero_de_processo"),
+                incidente=fallback_row.get("numero_do_incidente"),
+                requerente=fallback_row.get("requerente"),
+            )
+            if bl_row is not None and not allow_blacklist_override:
+                extra.append(
+                    _blacklist_result_row(
+                        fallback_row,
+                        bl_row=bl_row,
+                        source="precainfosnew",
+                    )
+                )
+                continue
+            calc_raw = r.get("calculo_atualizado")
+            calc_str = str(calc_raw).strip() if calc_raw is not None else ""
+            row_status = "Sem Saldo" if calc_str.casefold() == "sem saldo" else None
+            extra.append(
+                {
+                    "id": None,
+                    "id_precainfosnew": pid,
+                    "requerente": r.get("requerente"),
+                    "numero_de_processo": r.get("numero_de_processo"),
+                    "numero_do_incidente": r.get("numero_do_incidente"),
+                    "calculo_atualizado": calc_str or None,
+                    "status": row_status,
+                    "principal_bruto": 0,
+                    "juros": 0,
+                    "desc_saude_prev": 0,
+                    "desc_ir": 0,
+                    "percentual_honorarios": 30,
+                    "total_bruto": 0,
+                    "reserva_honorarios": 0,
+                    "total_liquido": 0,
+                    "ultima_atualizacao": None,
+                    "precainfos_numero_de_meses": r.get("precainfos_numero_de_meses"),
+                    "source": "precainfosnew",
+                }
+            )
+        return results + extra
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] merge precainfosnew credores: {e}")
+        return results
     finally:
         if cur is not None:
             try:
@@ -379,15 +647,15 @@ def _update_precainfos_numero_de_meses(prec_id: int, meses: int) -> tuple[bool, 
         )
         row = cur.fetchone()
         if not row:
-            return False, f"Não existe registo com id {prec_id} em precainfosnew."
+            return False, f"Não existe registro com id {prec_id} em precainfosnew."
         atual = row.get("meses")
         if not _precainfos_numero_de_meses_editavel(atual):
             atual_txt = "vazio" if atual is None or str(atual).strip() == "" else str(atual)
             return (
                 False,
                 (
-                    "Numero_de_Meses só pode ser alterado quando o valor actual é "
-                    f"vazio, 0 ou 1 (actual: {atual_txt})."
+                    "Numero_de_Meses só pode ser alterado quando o valor atual é "
+                    f"vazio, 0 ou 1 (atual: {atual_txt})."
                 ),
             )
         if f_meses_termo:
@@ -691,8 +959,8 @@ def _pipeline_coleta_memoria_response(
             "source": "controle_coleta",
             "controle_coleta": {"status": status},
             "message": (
-                f"Coleta bloqueada no controle_coleta_TJSP (status: {status}). "
-                "Bloqueio técnico do pipeline TJSP — distinto da blacklist EDA."
+                f"Coleta bloqueada no pipeline processual (status: {status}). "
+                "Bloqueio técnico — distinto da blacklist comercial."
             ),
             "results": [
                 _pipeline_coleta_result_row(
@@ -1161,9 +1429,9 @@ def _bloquear_calculo_mes_atual_enabled() -> bool:
     """
     Bloqueio mensal por caso (não desliga o botão globalmente).
 
-    - BLOQUEAR_CALCULO=1/true/on/sim  -> activa bloqueio do mês actual
-    - BLOQUEAR_CALCULO=0/false/off/nao -> desactiva (útil em testes)
-    Padrão: activo (1).
+    - BLOQUEAR_CALCULO=1/true/on/sim  -> ativa bloqueio do mês atual
+    - BLOQUEAR_CALCULO=0/false/off/nao -> desativa (útil em testes)
+    Padrão: ativo (1).
     """
     raw = (os.getenv("BLOQUEAR_CALCULO") or "1").strip()
     if "#" in raw:
@@ -1174,13 +1442,13 @@ def _bloquear_calculo_mes_atual_enabled() -> bool:
 
 def _memoria_calculo_bloqueado_mes_atual(prec_id: int) -> tuple[bool, str | None]:
     """
-    Bloqueio de segurança: se ``memoria_calculo`` já tiver sido actualizada no mês actual
+    Bloqueio de segurança: se ``memoria_calculo`` já tiver sido atualizada no mês atual
     para este ``id_precainfosnew``, evita rodar a automação novamente (cliques repetidos).
 
     Returns
     -------
     (blocked, ultima_iso)
-        ``blocked=True`` quando a data de última actualização existe e é do mesmo mês/ano
+        ``blocked=True`` quando a data de última atualização existe e é do mesmo mês/ano
         do relógio do servidor; ``ultima_iso`` é string ISO para mensagem.
     """
     from datetime import datetime
@@ -1288,6 +1556,25 @@ def memoria_calculo():
         pode_forcar_atualizar_calculo=pode_forcar_atualizar_calculo,
         analise_processual_configured=_refactor_analise_processual_configured(),
     )
+
+
+@app.route("/api-calculo")
+def api_calculo_page():
+    return render_template(
+        "api_calculo_monitor.html",
+        api_calculo_monitor_configured=api_calculo_monitor_configured(),
+        api_calculo_poll_interval_ms=api_calculo_poll_interval_ms(),
+    )
+
+
+@app.route("/api/api-calculo/monitor", methods=["GET"], endpoint="api_api_calculo_monitor")
+def api_api_calculo_monitor():
+    try:
+        snapshot = build_api_calculo_monitor_snapshot()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    status = 200 if snapshot.get("ok") else 503
+    return jsonify(snapshot), status
 
 
 @app.route("/pre-analise-processual")
@@ -1588,6 +1875,293 @@ def api_levantamento_status(job_id: str):
     return jsonify(out), code
 
 
+@app.route("/autos-esaj")
+def autos_export_page():
+    return render_template(
+        "autos_export.html",
+        autos_export_configured=autos_export_configured(),
+        autos_export_poll_interval_ms=int(
+            (os.getenv("AUTOS_EXPORT_POLL_MS") or "1500").strip() or "1500"
+        ),
+    )
+
+
+@app.route("/api/autos-esaj/iniciar", methods=["POST"], endpoint="api_autos_export_start")
+def api_autos_export_start():
+    if not autos_export_configured():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Exportação de autos indisponível. Verifique REFACTOR_TJSP_PATH, "
+                        "venv e run_autos_export.py."
+                    ),
+                }
+            ),
+            503,
+        )
+    data = request.get_json(silent=True) or {}
+    processo = str(data.get("numero_de_processo") or data.get("processo") or "").strip()
+    incidente = str(data.get("numero_do_incidente") or data.get("incidente") or "").strip()
+    if not processo:
+        return jsonify({"ok": False, "error": "Número do processo é obrigatório."}), 400
+    try:
+        started = start_autos_export_job(processo=processo, incidente=incidente)
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, **started})
+
+
+@app.route("/api/autos-esaj/<job_id>", endpoint="api_autos_export_status")
+def api_autos_export_status(job_id: str):
+    job = get_autos_export_job_status((job_id or "").strip())
+    if job is None:
+        return jsonify({"ok": False, "error": "Job não encontrado."}), 404
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else result
+    payload = {
+        "ok": True,
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "done": bool(job.get("done")),
+        "message": job.get("message") or "A processar…",
+        "percent": float(job.get("percent") or 0.0),
+        "error": job.get("error") or (result.get("error") if isinstance(result, dict) else None),
+        "has_zip": bool(job.get("has_zip")),
+        "outcome": outcome if job.get("done") else None,
+    }
+    return jsonify(payload)
+
+
+@app.route("/api/autos-esaj/<job_id>/zip", endpoint="api_autos_export_zip")
+def api_autos_export_zip(job_id: str):
+    zip_path = resolve_autos_export_zip((job_id or "").strip())
+    if zip_path is None:
+        return jsonify({"ok": False, "error": "ZIP ainda não está disponível."}), 404
+    job = get_autos_export_job_status((job_id or "").strip()) or {}
+    processo = str(job.get("processo") or "autos").replace("/", "-")
+    incidente = str(job.get("incidente") or "0")
+    filename = f"autos_{processo}_{incidente}.zip"
+    return send_file(
+        zip_path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/zip",
+    )
+
+
+@app.route("/api/autos-esaj/<job_id>/arquivo", endpoint="api_autos_export_file")
+def api_autos_export_file(job_id: str):
+    relpath = (request.args.get("path") or "").strip()
+    target = resolve_autos_export_file((job_id or "").strip(), relpath)
+    if target is None:
+        return jsonify({"ok": False, "error": "Arquivo não encontrado."}), 404
+    return send_file(
+        target,
+        as_attachment=True,
+        download_name=target.name,
+        mimetype="application/pdf",
+    )
+
+
+@app.route("/solicitacao-inclusao")
+def solicitacao_inclusao_page():
+    u = current_user()
+    return render_template(
+        "solicitacao_inclusao.html",
+        monday_requests_configured=solicitacao_inclusao_configured(),
+        solicitante=solicitante_from_user(u),
+        poll_interval_ms=solicitacao_inclusao_poll_ms(),
+        create_cooldown_ms=solicitacao_inclusao_cooldown_ms(),
+        status_catalog=solicitacao_inclusao_status_catalog(),
+        can_view_autos=solicitacao_inclusao_can_view_autos(u),
+        can_view_gemini_details=solicitacao_inclusao_can_view_gemini_details(u),
+        can_view_other_solicitacoes=solicitacao_inclusao_can_view_other_solicitacoes(u),
+        pt_display=solicitacao_inclusao_pt_display(),
+    )
+
+
+@app.route("/api/solicitacao-inclusao", methods=["GET"], endpoint="api_solicitacao_inclusao_listar")
+def api_solicitacao_inclusao_listar():
+    try:
+        lim = int(request.args.get("limit", "50") or "50")
+        off = int(request.args.get("offset", "0") or "0")
+    except ValueError:
+        return jsonify({"ok": False, "error": "Paginação inválida."}), 400
+    out, code = solicitacao_inclusao_listar(
+        current_user(),
+        q=(request.args.get("q") or "").strip(),
+        status=(request.args.get("status") or "").strip(),
+        tipo=(request.args.get("tipo") or "").strip(),
+        limit=lim,
+        offset=off,
+        updated_since=(request.args.get("updated_since") or "").strip(),
+        arquivado=(request.args.get("arquivado") or "").strip().lower()
+        in ("1", "true", "sim", "yes"),
+        email_solicitante=(request.args.get("email_solicitante") or "").strip(),
+    )
+    return jsonify(out), code
+
+
+@app.route(
+    "/api/solicitacao-inclusao/solicitantes",
+    methods=["GET"],
+    endpoint="api_solicitacao_inclusao_solicitantes",
+)
+def api_solicitacao_inclusao_solicitantes():
+    out, code = solicitacao_inclusao_listar_solicitantes(
+        current_user(),
+        q=(request.args.get("q") or "").strip(),
+    )
+    return jsonify(out), code
+
+
+@app.route("/api/solicitacao-inclusao", methods=["POST"], endpoint="api_solicitacao_inclusao_criar")
+def api_solicitacao_inclusao_criar():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    out, code = solicitacao_inclusao_criar(data, current_user())
+    resp = jsonify(out)
+    wait = out.get("retry_after_seconds") if isinstance(out, dict) else None
+    if code == 429 and wait:
+        resp.headers["Retry-After"] = str(int(wait))
+    return resp, code
+
+
+@app.route(
+    "/api/solicitacao-inclusao/admin/fila/limpar",
+    methods=["POST"],
+    endpoint="api_solicitacao_inclusao_limpar_fila",
+)
+def api_solicitacao_inclusao_limpar_fila():
+    out, code = solicitacao_inclusao_limpar_fila(current_user())
+    return jsonify(out), code
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>",
+    methods=["GET"],
+    endpoint="api_solicitacao_inclusao_detalhe",
+)
+def api_solicitacao_inclusao_detalhe(sol_id: str):
+    try:
+        out, code = solicitacao_inclusao_detalhe(
+            sol_id,
+            current_user(),
+            email_solicitante=(request.args.get("email_solicitante") or "").strip(),
+        )
+        return jsonify(out), code
+    except Exception:
+        app.logger.exception("solicitacao-inclusao detalhe")
+        return jsonify({"ok": False, "error": "Falha ao carregar o detalhe."}), 500
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>/arquivo",
+    methods=["POST"],
+    endpoint="api_solicitacao_inclusao_arquivar",
+)
+def api_solicitacao_inclusao_arquivar(sol_id: str):
+    out, code = solicitacao_inclusao_arquivar(sol_id, current_user())
+    return jsonify(out), code
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>/arquivo",
+    methods=["DELETE"],
+    endpoint="api_solicitacao_inclusao_desarquivar",
+)
+def api_solicitacao_inclusao_desarquivar(sol_id: str):
+    out, code = solicitacao_inclusao_desarquivar(sol_id, current_user())
+    return jsonify(out), code
+
+
+def _solicitacao_autos_response(
+    sol_id: str,
+    indice: int | None = None,
+    texto_tipo: str | None = None,
+):
+    download = str(request.args.get("download") or "").strip().lower() in {
+        "1",
+        "true",
+        "sim",
+        "yes",
+    }
+    as_email = (request.args.get("email_solicitante") or "").strip()
+    if texto_tipo:
+        err, code, remote = solicitacao_inclusao_baixar_autos_texto(
+            sol_id,
+            current_user(),
+            tipo=texto_tipo,
+            download=download,
+            email_solicitante=as_email,
+        )
+        default_type = "text/plain; charset=utf-8"
+        default_name = f"autos-{texto_tipo}.txt"
+    else:
+        err, code, remote = solicitacao_inclusao_baixar_autos(
+            sol_id,
+            current_user(),
+            indice=indice,
+            download=download,
+            email_solicitante=as_email,
+        )
+        default_type = "application/pdf"
+        default_name = f"auto-{indice}.pdf" if indice is not None else "autos.pdf"
+    if err:
+        return jsonify(err), code
+    content_type = remote.headers.get("Content-Type") or default_type
+    if not texto_tipo:
+        content_type = content_type.split(";")[0] or default_type
+    disposition = remote.headers.get("Content-Disposition") or ""
+    if not disposition:
+        mode = "attachment" if download else "inline"
+        disposition = f'{mode}; filename="{default_name}"'
+
+    def generate():
+        try:
+            for chunk in remote.iter_content(65536):
+                if chunk:
+                    yield chunk
+        finally:
+            remote.close()
+
+    resp = Response(generate(), status=code, content_type=content_type)
+    resp.headers["Content-Disposition"] = disposition
+    return resp
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>/autos",
+    methods=["GET"],
+    endpoint="api_solicitacao_inclusao_autos",
+)
+def api_solicitacao_inclusao_autos(sol_id: str):
+    return _solicitacao_autos_response(sol_id)
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>/autos/texto/<tipo>",
+    methods=["GET"],
+    endpoint="api_solicitacao_inclusao_autos_texto",
+)
+def api_solicitacao_inclusao_autos_texto(sol_id: str, tipo: str):
+    return _solicitacao_autos_response(sol_id, texto_tipo=tipo)
+
+
+@app.route(
+    "/api/solicitacao-inclusao/<sol_id>/autos/<int:indice>",
+    methods=["GET"],
+    endpoint="api_solicitacao_inclusao_auto_indice",
+)
+def api_solicitacao_inclusao_auto_indice(sol_id: str, indice: int):
+    return _solicitacao_autos_response(sol_id, indice)
+
+
 @app.route("/api/memoria-calculo/buscar")
 def api_memoria_buscar():
     """
@@ -1827,6 +2401,16 @@ def api_memoria_buscar():
     if results:
         results = _apply_pipeline_coleta_blocks(results)
         _enrich_results_precainfos_numero_de_meses(results)
+        if use_process:
+            results = _append_missing_precainfos_creditors(
+                results,
+                processo=proc,
+                incidente=inc,
+                blacklist=blacklist,
+                allow_blacklist_override=allow_blacklist_override,
+                audit_context=audit_context,
+            )
+            results = _apply_pipeline_coleta_blocks(results)
         return jsonify(
             {
                 "ok": True,
@@ -2160,7 +2744,7 @@ def _calculo_api_connection_error(url: str, exc: BaseException) -> tuple[dict, i
             "ok": False,
             "error": (
                 f"Não foi possível contactar a API de cálculo ({url}). "
-                f"Confirme se o serviço «atualizacao-calculo-api» está activo e reiniciado. "
+                f"Confirme se o serviço «atualizacao-calculo-api» está ativo e reiniciado. "
                 f"Detalhe: {exc}"
             ),
         },
@@ -2230,18 +2814,25 @@ def _run_calculo_via_fila_async_poll(
     *,
     feito_por: str,
     timeout_sec: int,
+    prioridade: bool = False,
+    form_payload: dict | None = None,
+    percentual_honorarios: float | None = None,
 ) -> tuple[dict, int]:
     """
     Enfileira na API (resposta rápida) e faz polling até o caso terminar.
     Evita ``TimeoutError`` numa única ligação HTTP longa.
     """
-    post_body = json.dumps(
-        {
-            "id_precainfosnew": prec_id,
-            "feito_por": feito_por,
-            "wait": False,
-        }
-    ).encode("utf-8")
+    body: dict = {
+        "id_precainfosnew": prec_id,
+        "feito_por": feito_por,
+        "wait": False,
+        "prioridade": bool(prioridade),
+    }
+    if form_payload:
+        body["form_payload"] = form_payload
+    if percentual_honorarios is not None:
+        body["percentual_honorarios"] = percentual_honorarios
+    post_body = json.dumps(body).encode("utf-8")
     accepted, code = _proxy_calculo_atualizacao_api_request(
         "POST",
         "/atualizar",
@@ -2289,7 +2880,7 @@ def _run_calculo_via_fila_async_poll(
 
 @app.route("/api/memoria-calculo/atualizar-calculo/fila", methods=["GET"])
 def api_memoria_atualizar_calculo_fila():
-    """Estado da fila do serviço de actualização (operador, tamanho, tempo médio)."""
+    """Estado da fila do serviço de atualização (operador, tamanho, tempo médio)."""
     out, code = _proxy_calculo_atualizacao_api_get("/fila")
     return jsonify(out), code
 
@@ -2310,7 +2901,7 @@ def api_memoria_atualizar_calculo():
             jsonify(
                 {
                     "ok": False,
-                    "error": "Parâmetro obrigatório: id_precainfosnew (ou id) — id em precainfosnew.",
+                    "error": "Parâmetro obrigatório: identificador do caso.",
                 }
             ),
             400,
@@ -2319,6 +2910,19 @@ def api_memoria_atualizar_calculo():
         prec_id = int(pid)
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+    if prec_id <= 0:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Este caso existe só na memória de cálculo. "
+                        "Para recalcular, use a aba Cálculo manual."
+                    ),
+                }
+            ),
+            400,
+        )
 
     blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
     if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
@@ -2329,8 +2933,8 @@ def api_memoria_atualizar_calculo():
                 {
                     "ok": False,
                     "error": (
-                        "Este cálculo já foi actualizado no mês actual. "
-                        + (f"Última actualização: {ultima_iso}." if ultima_iso else "")
+                        "Este cálculo já foi atualizado no mês atual. "
+                        + (f"Última atualização: {ultima_iso}." if ultima_iso else "")
                     ),
                 }
             ),
@@ -2351,18 +2955,189 @@ def api_memoria_atualizar_calculo():
             ),
             503,
         )
+    honor_pct = None
+    raw_honor = data.get("percentual_honorarios")
+    if raw_honor is None:
+        raw_honor = data.get("Percentual_Honorarios")
+    if raw_honor is not None and raw_honor != "":
+        try:
+            honor_pct = float(str(raw_honor).replace("%", "").replace(",", ".").strip())
+        except (TypeError, ValueError):
+            honor_pct = None
+        else:
+            if honor_pct < 0:
+                honor_pct = None
+            else:
+                honor_pct = round(min(honor_pct, 100.0), 2)
+    raw_prio = data.get("prioridade")
+    if isinstance(raw_prio, bool):
+        prioridade = raw_prio
+    else:
+        prioridade = str(raw_prio or "").strip().lower() in {
+            "1",
+            "true",
+            "sim",
+            "yes",
+            "on",
+        }
     out, code = _run_calculo_via_fila_async_poll(
         prec_id,
         feito_por=_memoria_feito_por_plataforma(),
         timeout_sec=_calculo_atualizacao_api_timeout(),
+        prioridade=prioridade,
+        percentual_honorarios=honor_pct,
     )
+    if isinstance(out, dict):
+        out = dict(out)
+        out["prioridade"] = bool(out.get("prioridade")) or bool(prioridade)
+    return jsonify(out), code
+
+
+@app.route("/api/memoria-calculo/calculo-manual/caso")
+def api_memoria_calculo_manual_caso():
+    """Carrega os campos do formulário manual a partir de precainfosnew."""
+    raw_id = request.args.get("id_precainfosnew") or request.args.get("id") or ""
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    prec_id = None
+    if str(raw_id).strip():
+        try:
+            prec_id = int(raw_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+        if prec_id <= 0:
+            return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+    elif not proc:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Indique id_precainfosnew ou o nº do processo.",
+                }
+            ),
+            400,
+        )
+    loaded, err = calculo_manual_load(
+        prec_id=prec_id, processo=proc, incidente=inc
+    )
+    if err or not loaded:
+        low = (err or "").lower()
+        if "não configurado" in low:
+            status = 503
+        elif "não existe" in low:
+            status = 404
+        else:
+            status = 400
+        return jsonify({"ok": False, "error": err or "Caso não encontrado."}), status
+    return jsonify({"ok": True, "found": True, **loaded})
+
+
+@app.route("/api/memoria-calculo/calculo-manual", methods=["POST"])
+def api_memoria_calculo_manual():
+    """
+    Se o caso existir em ``precainfosnew``, actualiza o cadastro e dispara a
+    automação. Se não existir, não cria linha nessa tabela: grava só em
+    ``memoria_calculo`` e corre a planilha com os dados do formulário.
+    """
+    payload, err = calculo_manual_normalize(request.get_json(silent=True) or {})
+    if err or payload is None:
+        return jsonify({"ok": False, "error": err or "Formulário inválido."}), 400
+
+    upsert, err = calculo_manual_upsert(payload)
+    if err or not upsert:
+        return jsonify({"ok": False, "error": err or "Falha ao gravar o cadastro."}), 400
+
+    action = str(upsert.get("action") or "")
+    prec_id = int(upsert["id"])
+    form_payload = None
+    feito = _memoria_feito_por_plataforma()
+
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
+        blocked = False
+    if blocked:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Este cálculo já foi atualizado no mês atual. "
+                        + (f"Última atualização: {ultima_iso}." if ultima_iso else "")
+                    ),
+                    "id_precainfosnew": prec_id,
+                    "upsert": action,
+                }
+            ),
+            409,
+        )
+
+    if action == "memoria_only":
+        mem, err = calculo_manual_upsert_memoria(
+            payload, memoria_id=prec_id, feito_por=feito
+        )
+        if err or not mem:
+            return jsonify({"ok": False, "error": err or "Falha ao gravar a memória de cálculo."}), 400
+        prec_id = int(mem["id"])
+        form_payload = calculo_manual_automation_payload(
+            payload, memoria_id=prec_id, feito_por=feito
+        )
+
+    if not _calculo_atualizacao_api_base():
+        if action == "memoria_only":
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "Memória de cálculo gravada. API de cálculo não configurada; a planilha não foi gerada.",
+                    "id_precainfosnew": prec_id,
+                    "upsert": action,
+                    "numero_de_processo": payload["numero_de_processo"],
+                    "numero_do_incidente": payload["numero_do_incidente"],
+                    "requerente": payload["requerente"],
+                }
+            )
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "API de cálculo não configurada. Defina CALCULO_ATUALIZACAO_API_URL no .env "
+                        "e o serviço interno (systemd)."
+                    ),
+                    "id_precainfosnew": prec_id,
+                    "upsert": action,
+                }
+            ),
+            503,
+        )
+
+    prioridade = bool(payload.get("prioridade"))
+    out, code = _run_calculo_via_fila_async_poll(
+        prec_id,
+        feito_por=_memoria_feito_por_plataforma(),
+        timeout_sec=_calculo_atualizacao_api_timeout(),
+        prioridade=prioridade,
+        form_payload=form_payload,
+    )
+    if isinstance(out, dict):
+        out = dict(out)
+        out["id_precainfosnew"] = prec_id
+        out["upsert"] = action
+        out["numero_de_processo"] = payload["numero_de_processo"]
+        out["numero_do_incidente"] = payload["numero_do_incidente"]
+        out["requerente"] = payload["requerente"]
+        out["prioridade"] = prioridade
+        if action == "memoria_only" and out.get("ok"):
+            out["message"] = (
+                "Memória de cálculo gravada (sem cadastro em precainfosnew). "
+                + str(out.get("message") or "Planilha gerada.")
+            )
     return jsonify(out), code
 
 
 @app.route("/api/memoria-calculo/salvar-numero-meses", methods=["POST"])
 def api_memoria_salvar_numero_meses():
     """
-    Grava ``Numero_de_Meses`` em precainfosnew (só se actual for NULL, 0 ou 1)
+    Grava ``Numero_de_Meses`` em precainfosnew (só se atual for NULL, 0 ou 1)
     e executa o mesmo fluxo de «Atualizar Cálculo».
     """
     data = request.get_json(silent=True) or {}
@@ -2423,8 +3198,8 @@ def api_memoria_salvar_numero_meses():
                     "ok": False,
                     "error": (
                         "Número de meses gravado, mas o cálculo não foi executado: "
-                        "este caso já foi actualizado no mês actual. "
-                        + (f"Última actualização: {ultima_iso}." if ultima_iso else "")
+                        "este caso já foi atualizado no mês atual. "
+                        + (f"Última atualização: {ultima_iso}." if ultima_iso else "")
                     ),
                     "numero_de_meses_salvo": meses,
                 }
@@ -2457,10 +3232,9 @@ def api_memoria_salvar_numero_meses():
         out = dict(out)
         out["numero_de_meses_salvo"] = meses
         if out.get("ok"):
-            msg = str(out.get("message") or "Cálculo actualizado.")
+            msg = str(out.get("message") or "Cálculo atualizado.")
             out["message"] = (
-                f"Número de meses ({meses}) gravado em Numero_de_Meses e "
-                f"Numero_de_Meses_TERMO. {msg}"
+                f"Número de meses ({meses}) gravado no cadastro. {msg}"
             )
     return jsonify(out), code
 
@@ -2691,7 +3465,7 @@ def api_memoria_precainfos_detalhes():
                     "ok": True,
                     "found": False,
                     "error": (
-                        "Nenhum registo de precatório com este processo, incidente e requerente."
+                        "Nenhum registro de precatório com este processo, incidente e requerente."
                     ),
                 }
             )
@@ -2703,7 +3477,7 @@ def api_memoria_precainfos_detalhes():
                     "found": True,
                     "ambiguous": True,
                     "error": (
-                        "Mais de um registo corresponde aos três critérios. "
+                        "Mais de um registro corresponde aos três critérios. "
                         f"IDs: {', '.join(str(i) for i in ids if i is not None)}."
                     ),
                 }
@@ -3560,7 +4334,7 @@ def api_atualizacao_imposto_enviar():
     except RuntimeError as e:
         return jsonify({"ok": False, "error": str(e)}), 503
     except OSError as e:
-        return jsonify({"ok": False, "error": f"Falha ao guardar ficheiros: {e}"}), 500
+        return jsonify({"ok": False, "error": f"Falha ao salvar arquivos: {e}"}), 500
     return jsonify(out)
 
 
@@ -3703,7 +4477,7 @@ def _parse_audit_dt(raw: str | None) -> str | None:
 
 
 def _audit_restrict_usuario() -> str | None:
-    """Colaboradores só veem registos do seu username (mapeado para login/nome Syscall)."""
+    """Colaboradores só veem registros do seu username (mapeado para login/nome Syscall)."""
     u = current_user()
     if not u or u.get("role") == "admin":
         return None

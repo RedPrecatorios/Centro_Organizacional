@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import ipaddress
 import re
+import threading
 import traceback
 from typing import Any
 
@@ -15,6 +16,7 @@ from flask import (
     Blueprint,
     abort,
     g,
+    has_request_context,
     redirect,
     render_template,
     request,
@@ -40,7 +42,7 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("index", "Início", "Página inicial e resumo do painel"),
     ("conversas", "Conversas", "WhatsApp, instâncias e histórico de mensagens"),
     ("outro_modulo", "2.º módulo", "Iframe extra na página Conversas (/embedded/)"),
-    ("memoria_calculo", "Memória de cálculo", "Consulta e actualização de memórias"),
+    ("memoria_calculo", "Memória de cálculo", "Consulta e atualização de memórias"),
     (
         "pre_analise_processual",
         "PRÉ Análise Processual",
@@ -50,6 +52,16 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
         "levantamento_processual",
         "Levantamento Processual",
         "Pesquisa por nome, CPF ou processo e listagem de aptos/inaptos (API TJSP)",
+    ),
+    (
+        "autos_export",
+        "Autos e-SAJ",
+        "Baixa pasta digital completa (cumprimento, incidente e DEPRE) sem atualizar cálculo",
+    ),
+    (
+        "solicitacao_inclusao",
+        "Solicitação de Inclusão",
+        "Forms TJSP/Monday: envio e acompanhamento de solicitações",
     ),
     (
         "tabela_juros",
@@ -85,6 +97,11 @@ FEATURE_PERMISSIONS: tuple[tuple[str, str, str], ...] = (
         "Forçar atualizar cálculo",
         "Ignora o bloqueio mensal de «Atualizar Cálculo» quando BLOQUEAR_CALCULO=1",
     ),
+    (
+        "calculo_manual",
+        "Cálculo manual (formulário)",
+        "Aba na Memória de cálculo: pesquisa o caso, altera datas/valores/meses e dispara a automação",
+    ),
 )
 
 # Painéis do menu + funcionalidades extra (checkboxes em Utilizadores).
@@ -98,6 +115,8 @@ PERMISSION_IDS = {p[0] for p in PERMISSION_PANELS}
 SESSION_USER_ID = "plataforma_uid"
 SESSION_VERSION = "plataforma_ver"
 COLLAB_ALLOWED_IPS_META_KEY = "collaborator_allowed_ips"
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_collab_ips_cache: str | None = None
 
 
 def _platform_meta_get(key: str, default: str = "") -> str:
@@ -142,11 +161,26 @@ def _normalize_ip_entries(raw: str) -> str:
 
 
 def collaborator_allowed_ips_raw() -> str:
-    return _platform_meta_get(COLLAB_ALLOWED_IPS_META_KEY, "")
+    cached = getattr(g, "_collab_allowed_ips_raw", None) if has_request_context() else None
+    if cached is not None:
+        return cached
+    # Cache de processo: lista muda raramente (só em Utilizadores).
+    global _collab_ips_cache
+    if _collab_ips_cache is not None:
+        raw = _collab_ips_cache
+    else:
+        raw = _platform_meta_get(COLLAB_ALLOWED_IPS_META_KEY, "")
+        _collab_ips_cache = raw
+    if has_request_context():
+        g._collab_allowed_ips_raw = raw
+    return raw
 
 
 def save_collaborator_allowed_ips(raw: str) -> None:
-    _platform_meta_set(COLLAB_ALLOWED_IPS_META_KEY, _normalize_ip_entries(raw))
+    global _collab_ips_cache
+    normalized = _normalize_ip_entries(raw)
+    _platform_meta_set(COLLAB_ALLOWED_IPS_META_KEY, normalized)
+    _collab_ips_cache = normalized
 
 
 def _ip_matches_entry(ip: ipaddress._BaseAddress, entry: str) -> bool:
@@ -351,6 +385,28 @@ def _migrate_atualizacao_imposto_once() -> None:
         conn.commit()
 
 
+def _migrate_api_calculo_admin_only_once() -> None:
+    """Monitor API Cálculo fica só para admins: remove permissões de colaboradores."""
+    with auth_connection() as conn:
+        cur = auth_cursor(conn)
+        cur.execute(
+            "SELECT 1 FROM plataforma_meta WHERE meta_key = 'migrated_api_calculo_admin_only_v1'"
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            "DELETE FROM plataforma_user_permissions WHERE tab_id = 'api_calculo'"
+        )
+        cur.execute(
+            """
+            INSERT INTO plataforma_meta (meta_key, meta_value)
+            VALUES ('migrated_api_calculo_admin_only_v1', '1')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)
+            """
+        )
+        conn.commit()
+
+
 def init_db() -> None:
     with auth_connection() as conn:
         init_auth_schema(conn)
@@ -361,6 +417,27 @@ def init_db() -> None:
     _migrate_proposta_once()
     _migrate_levantamento_processual_once()
     _migrate_atualizacao_imposto_once()
+    _migrate_api_calculo_admin_only_once()
+
+
+_auth_ready = False
+_auth_ready_lock = threading.Lock()
+
+
+def ensure_auth_ready() -> None:
+    """
+    Schema + migrações + bootstrap: uma vez por processo worker.
+    Barato após a 1ª chamada (só lê flag em memória).
+    """
+    global _auth_ready
+    if _auth_ready:
+        return
+    with _auth_ready_lock:
+        if _auth_ready:
+            return
+        init_db()
+        _bootstrap_admin_if_empty()
+        _auth_ready = True
 
 
 def _bootstrap_admin_if_empty() -> None:
@@ -379,7 +456,7 @@ def _bootstrap_admin_if_empty() -> None:
             (u, generate_password_hash(p)),
         )
         conn.commit()
-        print(f"[plataforma_auth] Utilizador admin inicial criado: {u!r} (defina outro e remova a variável do .env se quiser).")
+        print(f"[plataforma_auth] Usuário admin inicial criado: {u!r} (defina outro e remova a variável do .env se quiser).")
 
 
 def get_user_by_id(uid: int) -> dict | None:
@@ -388,6 +465,40 @@ def get_user_by_id(uid: int) -> dict | None:
         cur.execute("SELECT * FROM plataforma_users WHERE id = %s", (uid,))
         r = cur.fetchone()
     return dict(r) if r else None
+
+
+def _clip_profile(value: Any, max_len: int) -> str:
+    return str(value or "").strip()[:max_len]
+
+
+def parse_user_profile(form, *, prefix: str = "") -> tuple[dict[str, str] | None, str | None]:
+    """Lê nome, sobrenome e e-mail dum formulário admin. prefix ex. 'new_'."""
+    first = _clip_profile(form.get(f"{prefix}first_name"), 120)
+    last = _clip_profile(form.get(f"{prefix}last_name"), 120)
+    email = _clip_profile(form.get(f"{prefix}email"), 255).lower()
+    if not first or not last:
+        return None, "Nome e sobrenome são obrigatórios."
+    if not email or not _EMAIL_RE.match(email):
+        return None, "Informe um e-mail válido."
+    return {"first_name": first, "last_name": last, "email": email}, None
+
+
+def solicitante_from_user(u: dict | None) -> dict | None:
+    """Nome completo + e-mail da sessão para o forms de produção. None se perfil incompleto."""
+    if not u:
+        return None
+    first = _clip_profile(u.get("first_name"), 120)
+    last = _clip_profile(u.get("last_name"), 120)
+    email = _clip_profile(u.get("email"), 255).lower()
+    nome = " ".join(p for p in (first, last) if p).strip()
+    if not nome or not email or not _EMAIL_RE.match(email):
+        return None
+    return {
+        "nome_solicitante": nome,
+        "email_solicitante": email,
+        "first_name": first,
+        "last_name": last,
+    }
 
 
 def get_user_tabs(uid: int) -> set[str]:
@@ -429,7 +540,9 @@ def user_can_tab(tab: str) -> bool:
         return True
     if tab not in PERMISSION_IDS:
         return False
-    return tab in get_user_tabs(int(u["id"]))
+    if not hasattr(g, "_plataforma_tabs"):
+        g._plataforma_tabs = get_user_tabs(int(u["id"]))
+    return tab in g._plataforma_tabs
 
 
 def _first_accessible_url_for_user(u: dict) -> str | None:
@@ -448,6 +561,8 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("memoria_calculo", "memoria_calculo"),
         ("pre_analise_processual", "pre_analise_processual_page"),
         ("levantamento_processual", "levantamento_processual_page"),
+        ("autos_export", "autos_export_page"),
+        ("solicitacao_inclusao", "solicitacao_inclusao_page"),
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
         ("atualizacao_imposto", "atualizacao_imposto_page"),
@@ -476,10 +591,16 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "conversas"
     if path.startswith("/memoria-calculo"):
         return "memoria_calculo"
+    if path.startswith("/api-calculo") or path.startswith("/api/api-calculo"):
+        return "admin"
     if path.startswith("/pre-analise-processual"):
         return "pre_analise_processual"
     if path.startswith("/levantamento-processual"):
         return "levantamento_processual"
+    if path.startswith("/autos-esaj"):
+        return "autos_export"
+    if path.startswith("/solicitacao-inclusao"):
+        return "solicitacao_inclusao"
     if path.startswith("/tabela-juros"):
         return "tabela_juros"
     if path.startswith("/proposta"):
@@ -543,6 +664,8 @@ def _endpoint_to_tab() -> str | None:
         "index": "index",
         "conversas": "conversas",
         "memoria_calculo": "memoria_calculo",
+        "api_calculo_page": "admin",
+        "api_api_calculo_monitor": "admin",
         "pre_analise_processual_page": "pre_analise_processual",
         "api_pre_analise_iniciar": "pre_analise_processual",
         "api_pre_analise_casos": "pre_analise_processual",
@@ -565,6 +688,21 @@ def _endpoint_to_tab() -> str | None:
         "api_levantamento_health": "levantamento_processual",
         "api_levantamento_iniciar": "levantamento_processual",
         "api_levantamento_status": "levantamento_processual",
+        "autos_export_page": "autos_export",
+        "api_autos_export_start": "autos_export",
+        "api_autos_export_status": "autos_export",
+        "api_autos_export_zip": "autos_export",
+        "api_autos_export_file": "autos_export",
+        "solicitacao_inclusao_page": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_listar": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_criar": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_detalhe": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_arquivar": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_desarquivar": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_limpar_fila": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_autos": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_autos_texto": "solicitacao_inclusao",
+        "api_solicitacao_inclusao_auto_indice": "solicitacao_inclusao",
         "tabela_juros_page": "tabela_juros",
         "api_tabela_juros_calcular": "tabela_juros",
         "proposta_page": "proposta",
@@ -584,6 +722,8 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
         "api_memoria_atualizar_calculo_fila": "memoria_calculo",
+        "api_memoria_calculo_manual": "calculo_manual",
+        "api_memoria_calculo_manual_caso": "calculo_manual",
         "api_memoria_salvar_numero_meses": "salvar_numero_meses",
         "api_memoria_analise_processual_start": "analise_processual",
         "api_memoria_analise_processual_status": "analise_processual",
@@ -679,13 +819,13 @@ def handle_access_denied(needs: str) -> Any:
 
 
 def plataforma_before_request() -> Any | None:
-    init_db()
-    _bootstrap_admin_if_empty()
+    # Schema/migrações só no boot do worker (ensure_auth_ready); aqui só auth.
+    ensure_auth_ready()
 
     if is_public_request():
         return None
 
-    u = _session_user()
+    u = current_user()
     if not u:
         return handle_access_denied("unauth")
     if not u.get("active"):
@@ -709,6 +849,10 @@ def plataforma_before_request() -> Any | None:
         return None
     if needs == "deny":
         return handle_access_denied("deny")
+    if needs == "admin":
+        if u.get("role") != "admin":
+            return handle_access_denied("admin")
+        return None
 
     from messages_viewer.page_maintenance import maintenance_block_for_tab
 
@@ -734,30 +878,39 @@ def wsgi_eda_session_guard(app, inner_wsgi):
     from urllib.parse import quote
     from werkzeug.wrappers import Request, Response
 
-    has_eda = app.config.get("HAS_EDIARIO", False)
+    mounts: list[tuple[str, str, str, str]] = []
+    if app.config.get("HAS_EDIARIO", False):
+        mounts.append(("/eda", "eda", "EDA Diário", "HAS_EDIARIO"))
+
+    def _match_mount(path: str) -> tuple[str, str] | None:
+        for prefix, tab, label, _flag in mounts:
+            if path == prefix or path.startswith(prefix + "/"):
+                return tab, label
+        return None
 
     def application(environ, start_response):
         path = environ.get("PATH_INFO", "")
-        if not (path == "/eda" or path.startswith("/eda/")):
+        matched = _match_mount(path)
+        if not matched:
             return inner_wsgi(environ, start_response)
-        if not has_eda:
-            return inner_wsgi(environ, start_response)
+        tab, label = matched
         u = None
         allowed = False
         ip_forbidden = False
         maint_html: str | None = None
         maint_status = 503
         with app.request_context(environ):
+            ensure_auth_ready()
             u = _session_user()
             if u and u.get("active"):
                 if u.get("role") == "colaborador" and not collaborator_ip_allowed(_current_remote_ip()):
                     ip_forbidden = True
-                elif u.get("role") == "admin" or user_can_tab("eda"):
+                elif u.get("role") == "admin" or user_can_tab(tab):
                     allowed = True
             if allowed:
                 from messages_viewer.page_maintenance import maintenance_block_for_tab
 
-                maint = maintenance_block_for_tab("eda", u)
+                maint = maintenance_block_for_tab(tab, u)
                 if maint is not None:
                     if isinstance(maint, tuple):
                         maint_html, maint_status = maint[0], int(maint[1])
@@ -789,7 +942,7 @@ def wsgi_eda_session_guard(app, inner_wsgi):
         if allowed:
             return inner_wsgi(environ, start_response)
         r = Response(
-            "Acesso negado ao EDA Diário. Peça a um administrador a permissão «EDA Diário».",
+            f"Acesso negado a {label}. Peça a um administrador a permissão «{label}».",
             status=403,
             mimetype="text/html; charset=utf-8",
         )
@@ -825,7 +978,7 @@ def login():
         if r and check_password_hash(r["password_hash"], password):
             login_user(int(r["id"]))
             return redirect(_safe_post_login_url(nxt))
-        err = "Utilizador ou palavra-passe incorretos."
+        err = "Usuário ou senha incorretos."
     n_users = 0
     with auth_connection() as conn:
         cur = auth_cursor(conn)
@@ -856,15 +1009,29 @@ def admin_usuarios():
                 role = (request.form.get("new_role") or "colaborador").strip()
                 if role not in ("admin", "colaborador"):
                     role = "colaborador"
+                profile, profile_err = parse_user_profile(request.form, prefix="new_")
                 if len(new_u) < 2 or len(new_p) < 4:
-                    err = "Utilizador (≥2 caracteres) e palavra-passe (≥4) obrigatórios."
+                    err = "Usuário (≥2 caracteres) e senha (≥4) obrigatórios."
+                elif profile_err:
+                    err = profile_err
                 else:
                     with auth_connection() as conn:
                         cur = auth_cursor(conn)
                         try:
                             cur.execute(
-                                "INSERT INTO plataforma_users (username, password_hash, role) VALUES (%s, %s, %s)",
-                                (new_u, generate_password_hash(new_p), role),
+                                """
+                                INSERT INTO plataforma_users
+                                    (username, password_hash, role, first_name, last_name, email)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    new_u,
+                                    generate_password_hash(new_p),
+                                    role,
+                                    profile["first_name"],
+                                    profile["last_name"],
+                                    profile["email"],
+                                ),
                             )
                             new_id = int(cur.lastrowid or 0)
                             if role == "colaborador" and new_id:
@@ -875,9 +1042,13 @@ def admin_usuarios():
                                             (new_id, k),
                                         )
                             conn.commit()
-                            ok = f"Utilizador {new_u!r} criado."
-                        except mysql.connector.errors.IntegrityError:
-                            err = "Esse nome de utilizador já existe."
+                            ok = f"Usuário {new_u!r} criado."
+                        except mysql.connector.errors.IntegrityError as ie:
+                            msg = str(ie).lower()
+                            if "email" in msg:
+                                err = "Esse e-mail já está associado a outro usuário."
+                            else:
+                                err = "Esse nome de usuário já existe."
             elif act == "delete":
                 del_id = int(request.form.get("user_id", 0))
                 if del_id and del_id != int(u0["id"]):
@@ -885,7 +1056,7 @@ def admin_usuarios():
                         cur = auth_cursor(conn)
                         cur.execute("DELETE FROM plataforma_users WHERE id = %s", (del_id,))
                         conn.commit()
-                    ok = "Utilizador removido."
+                    ok = "Usuário removido."
             elif act == "toggle":
                 t_id = int(request.form.get("user_id", 0))
                 if t_id and t_id != int(u0["id"]):
@@ -896,11 +1067,17 @@ def admin_usuarios():
                             (t_id,),
                         )
                         conn.commit()
-                    ok = "Estado actualizado."
+                    ok = "Estado atualizado."
             elif act == "set_password":
                 sp_id = int(request.form.get("user_id", 0))
                 sp = request.form.get("new_pass") or ""
-                if sp_id and len(sp) >= 4:
+                if not sp_id:
+                    err = "Usuário inválido."
+                elif not sp.strip():
+                    err = "Informe a nova senha para alterá-la."
+                elif len(sp) < 4:
+                    err = "A senha deve ter pelo menos 4 caracteres."
+                else:
                     with auth_connection() as conn:
                         cur = auth_cursor(conn)
                         cur.execute(
@@ -912,7 +1089,36 @@ def admin_usuarios():
                             (generate_password_hash(sp), sp_id),
                         )
                         conn.commit()
-                    ok = "Palavra-passe actualizada."
+                    ok = "Senha atualizada."
+            elif act == "save_profile":
+                puid = int(request.form.get("user_id", 0))
+                profile, profile_err = parse_user_profile(request.form)
+                if not puid:
+                    err = "Usuário inválido."
+                elif profile_err:
+                    err = profile_err
+                else:
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        try:
+                            cur.execute(
+                                """
+                                UPDATE plataforma_users
+                                SET first_name = %s, last_name = %s, email = %s,
+                                    perms_version = perms_version + 1
+                                WHERE id = %s
+                                """,
+                                (
+                                    profile["first_name"],
+                                    profile["last_name"],
+                                    profile["email"],
+                                    puid,
+                                ),
+                            )
+                            conn.commit()
+                            ok = "Perfil atualizado."
+                        except mysql.connector.errors.IntegrityError:
+                            err = "Esse e-mail já está associado a outro usuário."
             elif act == "save_perms":
                 puid = int(request.form.get("user_id", 0))
                 if puid and puid != int(u0["id"]):
@@ -994,6 +1200,5 @@ def init_plataforma_auth(app) -> None:
     _sec = (os.getenv("SESSION_COOKIE_SECURE") or "").strip().lower()
     if _sec in ("1", "true", "yes", "on"):
         app.config["SESSION_COOKIE_SECURE"] = True
-    init_db()
-    _bootstrap_admin_if_empty()
+    ensure_auth_ready()
     app.context_processor(inject_plataforma_template_globals)
