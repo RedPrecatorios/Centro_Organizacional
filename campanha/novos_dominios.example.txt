@@ -1,0 +1,8 @@
+# Um domínio por linha (sem http://, sem www).
+# Depois, na raiz do Centro_Organizacional:
+#
+#   python -m campanha.cli replace-domains --file campanha/novos_dominios.txt --dry-run
+#   python -m campanha.cli replace-domains --file campanha/novos_dominios.txt
+#
+# exemplo1.online
+# exemplo2.online

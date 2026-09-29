@@ -22,9 +22,9 @@ enabled = true
 jsonl_log_enabled = false
 
 [sending]
-# true = só simula (não chama Mailgun). false = envia de verdade.
+# true = só simula (não chama a API). false = envia de verdade.
 dry_run = false
-method = "mailgun"
+method = "elasticemail"
 per_domain_per_minute = 60
 smtp_timeout_seconds = 30
 max_retries = 3
@@ -36,6 +36,10 @@ api_key = ""
 # "us" se o painel for US; "eu" se for EU (precisa bater com a região da conta).
 region = "us"
 
+[elasticemail]
+# Painel: https://app.elasticemail.com  |  chave no .env: ELASTICEMAIL_API_KEY
+api_key = ""
+
 [content]
 subject = "Antecipação do Crédito Jurídico"
 html_template = "campanha/templates/default.html"
@@ -46,12 +50,12 @@ company_name = "RED PRECATÓRIOS"
 support_email = "contato@redprecatorios.com.br"
 
 # Cada bloco = um remetente. Com Mailgun: from_email DEVE ser do domínio VERIFICADO no Mailgun.
-# Pode repetir vários [[domains]] para round-robin (só os que estiverem aqui entram no rodízio).
+# Pode repetir vários
 
 [[domains]]
-name = "comunicared50"
+name = "comunicared"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared50.online"
+from_email = "contato@comunicared.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -60,9 +64,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared49"
+name = "redcomunica1"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared49.online"
+from_email = "contato@redcomunica1.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -71,9 +75,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared48"
+name = "redcomunica2"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared48.online"
+from_email = "contato@redcomunica2.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -82,9 +86,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared47"
+name = "redcomunica3"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared47.online"
+from_email = "contato@redcomunica3.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -93,9 +97,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared46"
+name = "redcomunica4"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared46.online"
+from_email = "contato@redcomunica4.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -104,9 +108,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared45"
+name = "redcomunica5"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared45.online"
+from_email = "contato@redcomunica5.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -115,9 +119,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared44"
+name = "redcomunica6"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared44.online"
+from_email = "contato@redcomunica6.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -126,9 +130,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared43"
+name = "redcomunica7"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared43.online"
+from_email = "contato@redcomunica7.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -137,9 +141,9 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared42"
+name = "redcomunica8"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared42.online"
+from_email = "contato@redcomunica8.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
@@ -148,145 +152,12 @@ smtp_password = ""
 smtp_starttls = true
 
 [[domains]]
-name = "comunicared41"
+name = "redcomunica9"
 from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared41.online"
+from_email = "contato@redcomunica9.online"
 # Com method = "mailgun" não precisa preencher SMTP abaixo.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
 smtp_password = ""
 smtp_starttls = true
-
-[[domains]]
-name = "comunicared40"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared40.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared39"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared39.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared38"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared38.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared37"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared37.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared36"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared36.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared35"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared35.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared34"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared34.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared33"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared33.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared32"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared32.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared31"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared31.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared30"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared30.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-
-[[domains]]
-name = "comunicared29"
-from_name = "RED PRECATÓRIOS"
-from_email = "contato@comunicared29.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
-smtp_host = ""
-smtp_port = 587
-smtp_user = ""
-smtp_password = ""
-smtp_starttls = true
-

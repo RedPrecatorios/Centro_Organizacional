@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blacklist — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Blacklist</h1>
+        <p class="dash-sub">Consulta paginada de <strong>flaskdb.blacklist</strong> e inclusão de novos registros. A chave única é montada no servidor.</p>
+      </div>
+      <div class="bl-power">
+        <div>
+          <span class="bl-power-kicker">Exclusão automática</span>
+          <strong id="bl-power-label">Ligada</strong>
+          <p id="bl-power-msg" class="camp-hint"></p>
+        </div>
+        <label class="bl-switch">
+          <input type="checkbox" id="bl-power" checked role="switch" aria-checked="true" aria-label="Blacklist ligada" />
+          <span class="bl-switch-ui" aria-hidden="true"></span>
+        </label>
+      </div>
+    </header>
+
+    <main class="dash-content bl-page">
+      <div class="bl-tabs" role="tablist">
+        <button type="button" class="bl-tab is-active" id="bl-tab-cadastro" role="tab" aria-selected="true">Blacklist</button>
+        <button type="button" class="bl-tab" id="bl-tab-excluidos" role="tab" aria-selected="false">Casos excluídos</button>
+      </div>
+      <div id="bl-panel-cadastro">
+      <form class="camp-form-card" id="bl-form" autocomplete="off">
+        <h2 class="dash-h1" style="font-size:1.05rem;margin:0 0 0.75rem">Novo registro</h2>
+        <div class="camp-form-grid">
+          <div class="camp-field">
+            <label for="bl-tipo">Tipo</label>
+            <select id="bl-tipo" class="auth-input" required>
+              <option value="CREDOR">CREDOR</option>
+              <option value="COMPLETO">COMPLETO</option>
+            </select>
+          </div>
+          <div class="camp-field" id="bl-subtipo-wrap">
+            <label for="bl-subtipo">Subtipo (chave CREDOR)</label>
+            <select id="bl-subtipo" class="auth-input">
+              <option value="NOME">NOME</option>
+              <option value="CPF">CPF</option>
+            </select>
+          </div>
+          <div class="camp-field">
+            <label for="bl-origem">Origem</label>
+            {% set origem_nome = ((plataforma_user.first_name or '') ~ ' ' ~ (plataforma_user.last_name or ''))|trim %}
+            <input id="bl-origem" class="auth-input" value="{{ (origem_nome or plataforma_user.username) }} - Plataforma" readonly tabindex="-1" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-nome">Nome</label>
+            <input id="bl-nome" class="auth-input" maxlength="255" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-cpf">CPF</label>
+            <input id="bl-cpf" class="auth-input" maxlength="14" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-processo-codigo">Processo código</label>
+            <input id="bl-processo-codigo" class="auth-input" maxlength="64" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-processo">Processo</label>
+            <input id="bl-processo" class="auth-input" maxlength="64" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-incidente">Incidente</label>
+            <input id="bl-incidente" class="auth-input" maxlength="20" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-advogado">Advogado</label>
+            <input id="bl-advogado" class="auth-input" maxlength="255" />
+          </div>
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.75rem">
+          <button type="submit" class="camp-btn camp-btn-primary" id="bl-salvar">Inserir</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="bl-limpar-form">Limpar</button>
+        </div>
+        <p id="bl-form-msg" class="camp-hint" style="margin:0.6rem 0 0"></p>
+      </form>
+
+      <div class="camp-form-card" style="margin-top:1rem">
+        <div class="camp-form-grid">
+          <div class="camp-field">
+            <label for="bl-q">Pesquisar</label>
+            <input type="search" id="bl-q" class="auth-input" placeholder="Nome, CPF, processo, incidente ou advogado" />
+          </div>
+          <div class="camp-field">
+            <label for="bl-filtro-tipo">Filtrar tipo</label>
+            <select id="bl-filtro-tipo" class="auth-input">
+              <option value="">Todos</option>
+              <option value="CREDOR">CREDOR</option>
+              <option value="COMPLETO">COMPLETO</option>
+            </select>
+          </div>
+          <div class="camp-field">
+            <label for="bl-filtro-origem">Filtrar origem</label>
+            <input id="bl-filtro-origem" class="auth-input" maxlength="255" placeholder="ex.: planilha" />
+          </div>
+        </div>
+        <div class="camp-form-actions" style="margin-top:0.75rem">
+          <button type="button" class="camp-btn camp-btn-primary" id="bl-buscar">Pesquisar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="bl-limpar-busca">Limpar</button>
+        </div>
+      </div>
+
+      <p id="bl-summary" class="camp-hint" style="margin:0.75rem 0">25 registros por página.</p>
+      <div id="bl-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+      <div id="bl-err" class="camp-msg camp-msg-err" style="display:none"></div>
+      <div class="bl-table-wrap">
+        <table class="camp-table" id="bl-table">
+          <colgroup>
+            <col style="width:4.2rem" />
+            <col style="width:6.2rem" />
+            <col style="width:14%" />
+            <col style="width:7.2rem" />
+            <col style="width:8%" />
+            <col style="width:11%" />
+            <col style="width:5.2rem" />
+            <col style="width:8%" />
+            <col style="width:8.5rem" />
+            <col style="width:11%" />
+            <col style="width:11%" />
+            <col style="width:4.5rem" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th><button type="button" class="bl-sort" data-sort="id">ID</button></th>
+              <th><button type="button" class="bl-sort" data-sort="tipo">Tipo</button></th>
+              <th><button type="button" class="bl-sort" data-sort="nome">Nome</button></th>
+              <th><button type="button" class="bl-sort" data-sort="cpf">CPF</button></th>
+              <th><button type="button" class="bl-sort" data-sort="processo_codigo">Proc. código</button></th>
+              <th><button type="button" class="bl-sort" data-sort="processo">Processo</button></th>
+              <th><button type="button" class="bl-sort" data-sort="incidente">Incidente</button></th>
+              <th><button type="button" class="bl-sort" data-sort="advogado">Advogado</button></th>
+              <th><button type="button" class="bl-sort" data-sort="origem">Origem</button></th>
+              <th><button type="button" class="bl-sort" data-sort="criado_em">Criado em</button></th>
+              <th><button type="button" class="bl-sort" data-sort="atualizado_em">Atualizado em</button></th>
+              <th class="bl-actions-col">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="bl-tbody"></tbody>
+        </table>
+      </div>
+      <p id="bl-empty" class="camp-empty" style="display:none">Nenhum registro encontrado.</p>
+      <div class="audit-pager" id="bl-pager">
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="bl-prev">Anterior</button>
+        <span id="bl-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
+        <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="bl-next">Seguinte</button>
+      </div>
+      </div>
+
+      <div id="bl-panel-excluidos" hidden>
+        <div class="bl-expira-aviso" role="note">
+          O backup destes casos expira 30 dias após a data e a hora da remoção. Depois desse prazo o caso deixa de estar disponível.
+        </div>
+        <div class="camp-form-card">
+          <p class="camp-hint" style="margin:0 0 0.75rem">Casos removidos da base por causa da blacklist. A API está <strong id="ex-status">a verificar…</strong></p>
+          <div class="camp-form-grid">
+            <div class="camp-field">
+              <label for="ex-data">Dia</label>
+              <select id="ex-data" class="auth-input">
+                <option value="">Todos os dias</option>
+              </select>
+            </div>
+            <div class="camp-field">
+              <label for="ex-tabela">Tabela</label>
+              <select id="ex-tabela" class="auth-input">
+                <option value="">Todas</option>
+                <option value="precainfosnew">precainfosnew</option>
+              </select>
+            </div>
+            <div class="camp-field">
+              <label for="ex-q">Pesquisar</label>
+              <input type="search" id="ex-q" class="auth-input" placeholder="Nome, CPF ou processo" />
+            </div>
+          </div>
+          <div class="camp-form-actions" style="margin-top:0.75rem">
+            <button type="button" class="camp-btn camp-btn-primary" id="ex-buscar">Pesquisar</button>
+            <button type="button" class="camp-btn camp-btn-ghost" id="ex-limpar">Limpar</button>
+          </div>
+          <div class="ex-export">
+            <label for="ex-escopo">Exportar</label>
+            <select id="ex-escopo" class="auth-input">
+              <option value="pesquisa">Pesquisa atual, todas as páginas</option>
+              <option value="todos">Todos os casos, inclusive os que não estão na tabela</option>
+            </select>
+            <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="ex-csv">Baixar CSV</button>
+            <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="ex-xlsx">Baixar XLSX</button>
+            <span id="ex-export-msg" class="camp-hint"></span>
+          </div>
+        </div>
+        <p id="ex-summary" class="camp-hint" style="margin:0.75rem 0">15 casos por página.</p>
+        <div id="ex-loading" class="camp-loading" style="display:none"><div class="camp-spin"></div> A carregar...</div>
+        <div id="ex-err" class="camp-msg camp-msg-err" style="display:none"></div>
+        <div class="bl-table-wrap">
+          <table class="camp-table" id="ex-table">
+            <thead>
+              <tr>
+                <th><button type="button" class="bl-sort" data-ex-sort="id">ID <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="requerente">Requerente <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="cpf">CPF <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="processo">Processo <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="incidente">Incidente <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="processo_codigo">Proc. código <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="advogado">Advogado <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="removido_em">Removido em <span class="bl-arrow"></span></button></th>
+                <th><button type="button" class="bl-sort" data-ex-sort="expira">Expira em <span class="bl-arrow"></span></button></th>
+              </tr>
+            </thead>
+            <tbody id="ex-tbody"></tbody>
+          </table>
+        </div>
+        <p id="ex-empty" class="camp-empty" style="display:none">Nenhum caso excluído encontrado.</p>
+        <div class="audit-pager" id="ex-pager">
+          <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="ex-prev">Anterior</button>
+          <span id="ex-pager-label" class="camp-hint" style="margin:0 0.75rem"></span>
+          <button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" id="ex-next">Seguinte</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="bl-edit-modal" class="audit-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bl-edit-title">
+    <div class="audit-modal-backdrop" id="bl-edit-backdrop"></div>
+    <div class="audit-modal-panel" style="width:min(40rem,100%)">
+      <div class="audit-modal-head">
+        <h2 id="bl-edit-title">Editar registro</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="bl-edit-close">Fechar</button>
+      </div>
+      <form class="audit-modal-body" id="bl-edit-form">
+        <input type="hidden" id="ed-id" />
+        <div class="camp-form-grid">
+          <div class="camp-field">
+            <label for="ed-tipo">Tipo</label>
+            <select id="ed-tipo" class="auth-input">
+              <option value="CREDOR">CREDOR</option>
+              <option value="COMPLETO">COMPLETO</option>
+            </select>
+          </div>
+          <div class="camp-field" id="ed-subtipo-wrap">
+            <label for="ed-subtipo">Subtipo (chave CREDOR)</label>
+            <select id="ed-subtipo" class="auth-input">
+              <option value="NOME">NOME</option>
+              <option value="CPF">CPF</option>
+            </select>
+          </div>
+          <div class="camp-field">
+            <label for="ed-nome">Nome</label>
+            <input id="ed-nome" class="auth-input" maxlength="255" />
+          </div>
+          <div class="camp-field">
+            <label for="ed-cpf">CPF</label>
+            <input id="ed-cpf" class="auth-input" maxlength="18" />
+          </div>
+          <div class="camp-field">
+            <label for="ed-processo-codigo">Processo código</label>
+            <input id="ed-processo-codigo" class="auth-input" maxlength="64" />
+          </div>
+          <div class="camp-field">
+            <label for="ed-processo">Processo</label>
+            <input id="ed-processo" class="auth-input" maxlength="64" />
+          </div>
+          <div class="camp-field">
+            <label for="ed-incidente">Incidente</label>
+            <input id="ed-incidente" class="auth-input" maxlength="20" />
+          </div>
+          <div class="camp-field">
+            <label for="ed-advogado">Advogado</label>
+            <input id="ed-advogado" class="auth-input" maxlength="255" />
+          </div>
+        </div>
+        <p id="bl-edit-msg" class="camp-hint" style="margin:0.75rem 0 0"></p>
+        <div class="camp-form-actions" style="margin-top:0.75rem">
+          <button type="submit" class="camp-btn camp-btn-primary">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="bl-pause-modal" class="audit-modal bl-existe-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bl-pause-title">
+    <div class="audit-modal-backdrop" id="bl-pause-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="bl-pause-title">Desligar a blacklist</h2>
+      </div>
+      <div class="audit-modal-body">
+        <p>A exclusão automática fica pausada até a blacklist ser ligada de novo. Confirma?</p>
+        <div class="camp-form-actions" style="margin-top:1.1rem">
+          <button type="button" class="camp-btn camp-btn-danger" id="bl-pause-confirm">Confirmar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="bl-pause-cancel">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="bl-del-modal" class="audit-modal bl-existe-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bl-del-title">
+    <div class="audit-modal-backdrop" id="bl-del-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="bl-del-title">Remover registro</h2>
+      </div>
+      <div class="audit-modal-body">
+        <p id="bl-del-text">Remover este registro da blacklist?</p>
+        <div class="camp-form-actions" style="margin-top:1.1rem">
+          <button type="button" class="camp-btn camp-btn-danger" id="bl-del-confirm">Confirmar</button>
+          <button type="button" class="camp-btn camp-btn-ghost" id="bl-del-cancel">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="bl-toast" class="audit-modal bl-existe-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bl-toast-title">
+    <div class="audit-modal-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="bl-toast-title">Registro já existe</h2>
+      </div>
+      <div class="audit-modal-body">
+        <p>Este registro já está na blacklist.</p>
+      </div>
+    </div>
+  </div>
+
+<style>
+  .bl-power {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    flex-shrink: 0;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 12px;
+    background: var(--surface, #fff);
+  }
+  .bl-power-kicker {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted, #6b7280);
+  }
+  #bl-power-label { font-size: 0.95rem; }
+  #bl-power-msg { margin: 0.15rem 0 0; max-width: 220px; }
+  #bl-power-msg.is-err { color: #b91c1c; }
+  .bl-switch { position: relative; display: inline-flex; cursor: pointer; }
+  .bl-switch input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+  .bl-switch-ui {
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: #d1d5db;
+    position: relative;
+    transition: background 0.18s ease;
+  }
+  .bl-switch-ui::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    transition: transform 0.18s ease;
+  }
+  .bl-switch input:checked + .bl-switch-ui { background: #059669; }
+  .bl-switch input:checked + .bl-switch-ui::after { transform: translateX(18px); }
+  .bl-switch input:focus-visible + .bl-switch-ui { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+  .bl-switch input:disabled + .bl-switch-ui { opacity: 0.55; cursor: wait; }
+  .bl-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+  }
+  .bl-tab {
+    appearance: none;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: var(--muted, #6b7280);
+    font: inherit;
+    font-weight: 500;
+    padding: 0.65rem 1rem;
+    cursor: pointer;
+    margin-bottom: -1px;
+    border-radius: 8px 8px 0 0;
+  }
+  .bl-tab.is-active {
+    color: var(--accent-hover, #0f766e);
+    font-weight: 700;
+    background: var(--accent-ghost, #f0fdfa);
+    border-bottom-color: var(--accent, #0d9488);
+  }
+  .bl-expira-aviso {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    margin: 0 0 0.85rem;
+    padding: 0.8rem 1rem;
+    border: 1px solid #fca5a5;
+    border-radius: 10px;
+    background: #fef2f2;
+    color: #991b1b;
+    font-weight: 700;
+  }
+  .ex-export {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+  }
+  .ex-export .auth-input { max-width: 28rem; }
+  .ex-restante { position: relative; font-variant-numeric: tabular-nums; font-weight: 600; color: #9a3412; cursor: help; }
+  .ex-restante--urgente { color: #b91c1c; }
+  .ex-restante--expirado { color: #7f1d1d; }
+  .ex-float-tip {
+    position: fixed;
+    z-index: 40;
+    max-width: 18rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 8px;
+    background: #1f2937;
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.35;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28);
+    pointer-events: none;
+  }
+  .bl-sort {
+    display: inline;
+    width: auto;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    appearance: none;
+    color: inherit;
+    font: inherit;
+    font-size: inherit;
+    font-weight: 600;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .bl-sort.is-active { text-decoration: underline; }
+  #bl-table {
+    table-layout: fixed;
+    width: 100%;
+  }
+  #bl-table th,
+  #bl-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #bl-table td.bl-quando {
+    white-space: normal;
+    line-height: 1.35;
+    overflow: hidden;
+  }
+  #bl-table th.bl-actions-col,
+  #bl-table td.bl-actions {
+    width: 4.5rem;
+    overflow: visible;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .bl-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin: 0 0.1rem;
+    padding: 0;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+  }
+  .bl-icon-btn svg { width: 15px; height: 15px; }
+  .bl-icon-btn.bl-edit:hover { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+  .bl-icon-btn.bl-del { color: #b91c1c; }
+  .bl-icon-btn.bl-del:hover { background: #fef2f2; border-color: #fecaca; }
+  #bl-origem[readonly] { background: #f3f4f6; color: #374151; cursor: default; }
+  .bl-page { min-width: 0; }
+  .bl-table-wrap { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; }
+  .bl-existe-modal {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+  }
+  .bl-existe-modal.is-in {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .bl-existe-modal .audit-modal-backdrop {
+    background: rgba(15, 23, 42, 0.62);
+    opacity: 0;
+    transition: opacity 0.28s ease;
+  }
+  .bl-existe-modal.is-in .audit-modal-backdrop { opacity: 1; }
+  .bl-existe-modal .audit-modal-panel {
+    width: min(32rem, 100%);
+    max-height: none;
+    transform: translateY(12px) scale(0.98);
+    transition: transform 0.28s ease;
+  }
+  .bl-existe-modal.is-in .audit-modal-panel { transform: none; }
+  .bl-existe-modal .audit-modal-body p {
+    margin: 0.15rem 0 0.35rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .bl-tipo {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .bl-tipo--credor { background: #dbeafe; color: #1e40af; }
+  .bl-tipo--completo { background: #ede9fe; color: #5b21b6; }
+  .bl-tipo--outro { background: #f3f4f6; color: #374151; }
+  .bl-origem-tag--guilherme { background: #d1fae5; color: #065f46; }
+  .bl-origem-tag--filipe { background: #ffedd5; color: #9a3412; }
+  .bl-origem-tag--planilha { background: #e2e8f0; color: #334155; }
+  .bl-origem-tag--a { background: #ffe4e6; color: #9f1239; }
+  .bl-origem-tag--b { background: #cffafe; color: #155e75; }
+  .bl-origem-tag--c { background: #fef3c7; color: #92400e; }
+</style>
+
+<script>
+(function () {
+  var lastRows = [];
+  var deleteId = null;
+  var page = 1;
+  var sort = 'id';
+  var dir = 'desc';
+  var pages = 1;
+
+  var DIAS_SEMANA = ['Domingo', 'Segunda-Feira', 'Terça-Feira', 'Quarta-Feira', 'Quinta-Feira', 'Sexta-Feira', 'Sábado'];
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function formatData(value) {
+    var raw = value == null ? '' : String(value).trim();
+    var m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return esc(raw);
+    var dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (isNaN(dt.getTime())) return esc(raw);
+    var hora = '00:00:00';
+    var hm = raw.match(/(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (hm) hora = hm[1] + ':' + hm[2] + ':' + (hm[3] || '00');
+    var texto = DIAS_SEMANA[dt.getDay()] + ', ' + m[3] + '/' + m[2] + '/' + m[1] + ' às ' + hora;
+    return esc(texto);
+  }
+
+  function showErr(msg) {
+    var el = document.getElementById('bl-err');
+    el.textContent = msg || 'Erro';
+    el.style.display = 'block';
+  }
+  function hideErr() {
+    document.getElementById('bl-err').style.display = 'none';
+  }
+
+  function foldNome(value) {
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  function origemTag(origem) {
+    var raw = origem == null ? '' : String(origem).trim();
+    if (!raw) return '';
+    var label = raw.replace(/\s+-\s+Plataforma$/i, '');
+    var key = foldNome(label);
+    var cls = 'bl-origem-tag--planilha';
+    if (key === 'guilherme vitoriano' || key.indexOf('guilherme vitoriano ') === 0) {
+      cls = 'bl-origem-tag--guilherme';
+    } else if (key === 'filipe noberto' || key.indexOf('filipe noberto ') === 0) {
+      cls = 'bl-origem-tag--filipe';
+    } else if (key !== 'planilha') {
+      var palette = ['bl-origem-tag--a', 'bl-origem-tag--b', 'bl-origem-tag--c'];
+      var n = 0;
+      for (var i = 0; i < key.length; i++) n = (n + key.charCodeAt(i)) % palette.length;
+      cls = palette[n];
+    }
+    return '<span class="bl-tipo ' + cls + '" title="' + esc(raw) + '">' + esc(label) + '</span>';
+  }
+
+  function tipoTag(tipo) {
+    var value = tipo == null ? '' : String(tipo);
+    var key = value.toUpperCase();
+    var cls = key === 'CREDOR' ? 'bl-tipo--credor' : (key === 'COMPLETO' ? 'bl-tipo--completo' : 'bl-tipo--outro');
+    if (!value) return '';
+    return '<span class="bl-tipo ' + cls + '">' + esc(value) + '</span>';
+  }
+
+  var toastTimer = null;
+  var toastHideTimer = null;
+
+  function showExisteModal() {
+    var el = document.getElementById('bl-toast');
+    clearTimeout(toastTimer);
+    clearTimeout(toastHideTimer);
+    el.hidden = false;
+    el.classList.remove('is-in');
+    void el.offsetWidth;
+    el.classList.add('is-in');
+    toastTimer = setTimeout(function () {
+      el.classList.remove('is-in');
+      toastHideTimer = setTimeout(function () { el.hidden = true; }, 420);
+    }, 2800);
+  }
+
+  function syncSubtipo() {
+    var credor = document.getElementById('bl-tipo').value === 'CREDOR';
+    document.getElementById('bl-subtipo-wrap').style.display = credor ? '' : 'none';
+  }
+
+  function markSort() {
+    document.querySelectorAll('.bl-sort').forEach(function (btn) {
+      var on = btn.getAttribute('data-sort') === sort;
+      btn.classList.toggle('is-active', on);
+      var label = btn.getAttribute('data-label') || btn.textContent.replace(/ [↑↓]$/, '');
+      btn.setAttribute('data-label', label);
+      btn.textContent = on ? (label + (dir === 'asc' ? ' ↑' : ' ↓')) : label;
+    });
+  }
+
+  function load() {
+    hideErr();
+    document.getElementById('bl-loading').style.display = '';
+    var p = new URLSearchParams();
+    p.set('page', String(page));
+    p.set('sort', sort);
+    p.set('dir', dir);
+    var q = document.getElementById('bl-q').value.trim();
+    var tipo = document.getElementById('bl-filtro-tipo').value;
+    var origem = document.getElementById('bl-filtro-origem').value.trim();
+    if (q) p.set('q', q);
+    if (tipo) p.set('tipo', tipo);
+    if (origem) p.set('origem', origem);
+    fetch('/api/blacklist?' + p.toString(), { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        document.getElementById('bl-loading').style.display = 'none';
+        if (!res.ok || !res.body.ok) {
+          showErr((res.body && res.body.error) || 'Falha ao consultar a blacklist.');
+          return;
+        }
+        pages = res.body.pages || 1;
+        page = res.body.page || 1;
+        var rows = res.body.rows || [];
+        lastRows = rows;
+        var body = document.getElementById('bl-tbody');
+        body.innerHTML = rows.map(function (row) {
+          return '<tr>' +
+            '<td>' + esc(row.id) + '</td>' +
+            '<td>' + tipoTag(row.tipo) + '</td>' +
+            '<td title="' + esc(row.nome) + '">' + esc(row.nome) + '</td>' +
+            '<td>' + esc(row.cpf) + '</td>' +
+            '<td>' + esc(row.processo_codigo) + '</td>' +
+            '<td>' + esc(row.processo) + '</td>' +
+            '<td>' + esc(row.incidente) + '</td>' +
+            '<td title="' + esc(row.advogado) + '">' + esc(row.advogado) + '</td>' +
+            '<td>' + origemTag(row.origem) + '</td>' +
+            '<td class="bl-quando">' + formatData(row.criado_em) + '</td>' +
+            '<td class="bl-quando">' + formatData(row.atualizado_em) + '</td>' +
+            '<td class="bl-actions">' +
+              '<button type="button" class="bl-icon-btn bl-edit" data-id="' + esc(row.id) + '" title="Editar" aria-label="Editar">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+              '</button>' +
+              '<button type="button" class="bl-icon-btn bl-del" data-id="' + esc(row.id) + '" title="Excluir" aria-label="Excluir">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>' +
+              '</button>' +
+            '</td>' +
+            '</tr>';
+        }).join('');
+        document.getElementById('bl-empty').style.display = rows.length ? 'none' : '';
+        document.getElementById('bl-table').style.display = rows.length ? '' : 'none';
+        document.getElementById('bl-summary').textContent =
+          res.body.total + ' registro(s) — página ' + page + ' de ' + pages + ' (' + res.body.page_size + ' por página).';
+        document.getElementById('bl-pager-label').textContent = 'Página ' + page + ' / ' + pages;
+        document.getElementById('bl-prev').disabled = page <= 1;
+        document.getElementById('bl-next').disabled = page >= pages;
+        markSort();
+      })
+      .catch(function () {
+        document.getElementById('bl-loading').style.display = 'none';
+        showErr('Falha de rede ao consultar a blacklist.');
+      });
+  }
+
+  document.getElementById('bl-tipo').addEventListener('change', syncSubtipo);
+  syncSubtipo();
+
+  document.getElementById('bl-buscar').addEventListener('click', function () {
+    page = 1;
+    load();
+  });
+  document.getElementById('bl-q').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      page = 1;
+      load();
+    }
+  });
+  document.getElementById('bl-limpar-busca').addEventListener('click', function () {
+    document.getElementById('bl-q').value = '';
+    document.getElementById('bl-filtro-tipo').value = '';
+    document.getElementById('bl-filtro-origem').value = '';
+    page = 1;
+    sort = 'id';
+    dir = 'desc';
+    load();
+  });
+  document.getElementById('bl-prev').addEventListener('click', function () {
+    if (page > 1) { page -= 1; load(); }
+  });
+  document.getElementById('bl-next').addEventListener('click', function () {
+    if (page < pages) { page += 1; load(); }
+  });
+  document.querySelectorAll('.bl-sort').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var col = btn.getAttribute('data-sort');
+      if (sort === col) dir = dir === 'asc' ? 'desc' : 'asc';
+      else { sort = col; dir = 'asc'; }
+      page = 1;
+      load();
+    });
+  });
+
+  document.getElementById('bl-limpar-form').addEventListener('click', function () {
+    document.getElementById('bl-form').reset();
+    document.getElementById('bl-form-msg').textContent = '';
+    syncSubtipo();
+  });
+
+  document.getElementById('bl-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var msg = document.getElementById('bl-form-msg');
+    msg.textContent = 'A gravar...';
+    var body = {
+      tipo: document.getElementById('bl-tipo').value,
+      subtipo: document.getElementById('bl-subtipo').value,
+      nome: document.getElementById('bl-nome').value.trim(),
+      cpf: document.getElementById('bl-cpf').value.trim(),
+      processo_codigo: document.getElementById('bl-processo-codigo').value.trim(),
+      processo: document.getElementById('bl-processo').value.trim(),
+      incidente: document.getElementById('bl-incidente').value.trim(),
+      advogado: document.getElementById('bl-advogado').value.trim()
+    };
+    fetch('/api/blacklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.body.ok) {
+          var err = (res.body && res.body.error) || 'Não foi possível inserir.';
+          if (err.indexOf('Já existe') !== -1) {
+            msg.textContent = '';
+            showExisteModal();
+            return;
+          }
+          msg.textContent = err;
+          return;
+        }
+        msg.textContent = 'Registro ' + res.body.id + ' inserido.';
+        document.getElementById('bl-form').reset();
+        syncSubtipo();
+        page = 1;
+        sort = 'id';
+        dir = 'desc';
+        load();
+      })
+      .catch(function () {
+        msg.textContent = 'Falha de rede ao inserir.';
+      });
+  });
+
+  function rowById(id) {
+    for (var i = 0; i < lastRows.length; i++) {
+      if (String(lastRows[i].id) === String(id)) return lastRows[i];
+    }
+    return null;
+  }
+
+  function syncEditSubtipo() {
+    var credor = document.getElementById('ed-tipo').value === 'CREDOR';
+    document.getElementById('ed-subtipo-wrap').style.display = credor ? '' : 'none';
+  }
+
+  function openEdit(row) {
+    document.getElementById('ed-id').value = row.id;
+    document.getElementById('ed-tipo').value = row.tipo === 'COMPLETO' ? 'COMPLETO' : 'CREDOR';
+    document.getElementById('ed-subtipo').value = (row.cpf && !row.nome) ? 'CPF' : 'NOME';
+    document.getElementById('ed-nome').value = row.nome || '';
+    document.getElementById('ed-cpf').value = row.cpf || '';
+    document.getElementById('ed-processo-codigo').value = row.processo_codigo || '';
+    document.getElementById('ed-processo').value = row.processo || '';
+    document.getElementById('ed-incidente').value = row.incidente || '';
+    document.getElementById('ed-advogado').value = row.advogado || '';
+    document.getElementById('bl-edit-msg').textContent = '';
+    syncEditSubtipo();
+    document.getElementById('bl-edit-modal').hidden = false;
+  }
+
+  function closeEdit() {
+    document.getElementById('bl-edit-modal').hidden = true;
+  }
+
+  function openModal(el) {
+    el.hidden = false;
+    el.classList.remove('is-in');
+    void el.offsetWidth;
+    el.classList.add('is-in');
+  }
+
+  function closeModal(el, done) {
+    el.classList.remove('is-in');
+    setTimeout(function () {
+      el.hidden = true;
+      if (done) done();
+    }, 280);
+  }
+
+  function openDelete(row) {
+    deleteId = row.id;
+    var quem = row.nome || row.cpf || row.processo || ('ID ' + row.id);
+    document.getElementById('bl-del-text').textContent = 'Remover «' + quem + '» da blacklist? Esta ação não pode ser desfeita.';
+    openModal(document.getElementById('bl-del-modal'));
+  }
+
+  function closeDelete() {
+    closeModal(document.getElementById('bl-del-modal'), function () { deleteId = null; });
+  }
+
+  var powerInput = document.getElementById('bl-power');
+  var powerBusy = false;
+
+  function setPower(ativa) {
+    powerInput.dataset.sync = '1';
+    powerInput.checked = !!ativa;
+    powerInput.dataset.sync = '';
+    powerInput.setAttribute('aria-checked', ativa ? 'true' : 'false');
+    powerInput.setAttribute('aria-label', ativa ? 'Blacklist ligada' : 'Blacklist desligada');
+    document.getElementById('bl-power-label').textContent = ativa ? 'Ligada' : 'Desligada';
+  }
+
+  function powerMsg(text, isErr) {
+    var el = document.getElementById('bl-power-msg');
+    el.textContent = text || '';
+    el.classList.toggle('is-err', !!isErr);
+  }
+
+  function enviarPower(ativa) {
+    powerBusy = true;
+    powerInput.disabled = true;
+    powerMsg('');
+    fetch('/api/blacklist/controle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ ativa: ativa })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        powerBusy = false;
+        powerInput.disabled = false;
+        if (!res.ok || !res.body.ok) {
+          setPower(!ativa);
+          powerMsg((res.body && res.body.error) || 'Não foi possível atualizar a blacklist.', true);
+          return;
+        }
+        setPower(!!res.body.ativa);
+      })
+      .catch(function () {
+        powerBusy = false;
+        powerInput.disabled = false;
+        setPower(!ativa);
+        powerMsg('Falha de rede ao atualizar a blacklist.', true);
+      });
+  }
+
+  function closePause() {
+    closeModal(document.getElementById('bl-pause-modal'));
+  }
+
+  powerInput.addEventListener('change', function () {
+    if (powerInput.dataset.sync || powerBusy) return;
+    if (!powerInput.checked) {
+      setPower(true);
+      openModal(document.getElementById('bl-pause-modal'));
+      return;
+    }
+    enviarPower(true);
+  });
+  document.getElementById('bl-pause-cancel').addEventListener('click', closePause);
+  document.getElementById('bl-pause-backdrop').addEventListener('click', closePause);
+  document.getElementById('bl-pause-confirm').addEventListener('click', function () {
+    closePause();
+    enviarPower(false);
+  });
+  fetch('/api/blacklist/controle', { headers: { 'Accept': 'application/json' } })
+    .then(function (r) { return r.json(); })
+    .then(function (body) {
+      if (body && body.ok) setPower(!!body.ativa);
+    })
+    .catch(function () {});
+
+  document.getElementById('bl-tbody').addEventListener('click', function (ev) {
+    var editBtn = ev.target.closest('.bl-edit');
+    var delBtn = ev.target.closest('.bl-del');
+    if (editBtn) {
+      var row = rowById(editBtn.getAttribute('data-id'));
+      if (row) openEdit(row);
+    } else if (delBtn) {
+      var alvo = rowById(delBtn.getAttribute('data-id'));
+      if (alvo) openDelete(alvo);
+    }
+  });
+  document.getElementById('ed-tipo').addEventListener('change', syncEditSubtipo);
+  document.getElementById('bl-edit-close').addEventListener('click', closeEdit);
+  document.getElementById('bl-edit-backdrop').addEventListener('click', closeEdit);
+  document.getElementById('bl-edit-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var msg = document.getElementById('bl-edit-msg');
+    var id = document.getElementById('ed-id').value;
+    msg.textContent = 'A gravar...';
+    fetch('/api/blacklist/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        tipo: document.getElementById('ed-tipo').value,
+        subtipo: document.getElementById('ed-subtipo').value,
+        nome: document.getElementById('ed-nome').value.trim(),
+        cpf: document.getElementById('ed-cpf').value.trim(),
+        processo_codigo: document.getElementById('ed-processo-codigo').value.trim(),
+        processo: document.getElementById('ed-processo').value.trim(),
+        incidente: document.getElementById('ed-incidente').value.trim(),
+        advogado: document.getElementById('ed-advogado').value.trim()
+      })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.body.ok) {
+          var err = (res.body && res.body.error) || 'Não foi possível salvar.';
+          if (err.indexOf('Já existe') !== -1) {
+            msg.textContent = '';
+            closeEdit();
+            showExisteModal();
+            return;
+          }
+          msg.textContent = err;
+          return;
+        }
+        closeEdit();
+        load();
+      })
+      .catch(function () { msg.textContent = 'Falha de rede ao salvar.'; });
+  });
+  document.getElementById('bl-del-cancel').addEventListener('click', closeDelete);
+  document.getElementById('bl-del-backdrop').addEventListener('click', closeDelete);
+  document.getElementById('bl-del-confirm').addEventListener('click', function () {
+    if (!deleteId) return;
+    var id = deleteId;
+    var btn = document.getElementById('bl-del-confirm');
+    btn.disabled = true;
+    fetch('/api/blacklist/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok || !res.body.ok) {
+          closeDelete();
+          showErr((res.body && res.body.error) || 'Não foi possível excluir.');
+          return;
+        }
+        closeDelete();
+        load();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        closeDelete();
+        showErr('Falha de rede ao excluir.');
+      });
+  });
+
+  var exPage = 1;
+  var exSort = 'id';
+  var exDir = 'desc';
+  var exLoaded = false;
+
+  function markExSort() {
+    document.querySelectorAll('#ex-table .bl-sort').forEach(function (btn) {
+      var on = btn.getAttribute('data-ex-sort') === exSort;
+      btn.classList.toggle('is-active', on);
+      var arrow = btn.querySelector('.bl-arrow');
+      if (arrow) arrow.textContent = on ? (exDir === 'asc' ? '↑' : '↓') : '';
+    });
+  }
+
+  function diaLabel(iso, qtd) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return iso;
+    var dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    var nome = isNaN(dt.getTime()) ? iso : DIAS_SEMANA[dt.getDay()] + ', ' + m[3] + '/' + m[2] + '/' + m[1];
+    return qtd != null ? nome + ' (' + qtd + ')' : nome;
+  }
+
+  function showTab(which) {
+    var cadastro = which === 'cadastro';
+    document.getElementById('bl-panel-cadastro').hidden = !cadastro;
+    document.getElementById('bl-panel-excluidos').hidden = cadastro;
+    document.getElementById('bl-tab-cadastro').classList.toggle('is-active', cadastro);
+    document.getElementById('bl-tab-excluidos').classList.toggle('is-active', !cadastro);
+    document.getElementById('bl-tab-cadastro').setAttribute('aria-selected', cadastro ? 'true' : 'false');
+    document.getElementById('bl-tab-excluidos').setAttribute('aria-selected', cadastro ? 'false' : 'true');
+    if (!cadastro && !exLoaded) {
+      exLoaded = true;
+      carregarExcluidos(true);
+    }
+  }
+
+  function exShowErr(msg) {
+    var el = document.getElementById('ex-err');
+    el.textContent = msg || 'Erro';
+    el.style.display = 'block';
+  }
+
+  function carregarExcluidos(comDatas) {
+    document.getElementById('ex-err').style.display = 'none';
+    document.getElementById('ex-loading').style.display = '';
+    var jobs = [
+      fetch('/api/blacklist/excluidos/health', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); })
+    ];
+    if (comDatas) {
+      jobs.push(fetch('/api/blacklist/excluidos/datas', { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); }));
+    }
+    var p = new URLSearchParams();
+    p.set('pagina', String(exPage));
+    p.set('sort', exSort);
+    p.set('dir', exDir);
+    var data = document.getElementById('ex-data').value;
+    var tabela = document.getElementById('ex-tabela').value;
+    var q = document.getElementById('ex-q').value.trim();
+    if (data) p.set('data', data);
+    if (tabela) p.set('tabela', tabela);
+    if (q) p.set('q', q);
+    jobs.push(fetch('/api/blacklist/excluidos?' + p.toString(), { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); }));
+    Promise.all(jobs).then(function (res) {
+      document.getElementById('ex-loading').style.display = 'none';
+      var health = res[0];
+      var lista = res[res.length - 1];
+      document.getElementById('ex-status').textContent = (health && health.ok) ? 'disponível' : 'indisponível';
+      if (comDatas && res.length === 3 && res[1] && res[1].ok) {
+        var sel = document.getElementById('ex-data');
+        var atual = sel.value;
+        sel.innerHTML = '<option value="">Todos os dias</option>' + (res[1].dias || []).map(function (d) {
+          return '<option value="' + esc(d.data) + '">' + esc(diaLabel(d.data, d.quantidade)) + '</option>';
+        }).join('');
+        if (atual) sel.value = atual;
+      }
+      if (!lista || !lista.ok) {
+        exShowErr((lista && lista.error) || 'Falha ao listar os casos excluídos.');
+        return;
+      }
+      var itens = lista.itens || [];
+      document.getElementById('ex-tbody').innerHTML = itens.map(function (row) {
+        return '<tr>' +
+          '<td>' + esc(row.id) + '</td>' +
+          '<td title="' + esc(row.requerente) + '">' + esc(row.requerente) + '</td>' +
+          '<td>' + esc(row.cpf) + '</td>' +
+          '<td>' + esc(row.processo) + '</td>' +
+          '<td>' + esc(row.incidente) + '</td>' +
+          '<td>' + esc(row.processo_codigo) + '</td>' +
+          '<td title="' + esc(row.advogado) + '">' + esc(row.advogado) + '</td>' +
+          '<td class="bl-quando">' + formatData(String(row.removido_em || '').replace('T', ' ')) + '</td>' +
+          '<td class="ex-restante" data-expira="' + expiraEm(row.removido_em) + '" data-quando="' + esc(quandoExpira(row.removido_em)) + '"></td>' +
+          '</tr>';
+      }).join('');
+      document.getElementById('ex-empty').style.display = itens.length ? 'none' : '';
+      document.getElementById('ex-table').style.display = itens.length ? '' : 'none';
+      var total = lista.total || 0;
+      var limite = lista.limite || 15;
+      var pagina = lista.pagina || exPage;
+      exPage = pagina;
+      var temProxima = pagina * limite < total;
+      document.getElementById('ex-summary').textContent =
+        total + ' caso(s) excluído(s) — página ' + pagina + ' (' + limite + ' por página).';
+      document.getElementById('ex-pager-label').textContent = 'Página ' + pagina;
+      document.getElementById('ex-prev').disabled = pagina <= 1;
+      document.getElementById('ex-next').disabled = !temProxima;
+      markExSort();
+      tickExpiracao();
+    }).catch(function () {
+      document.getElementById('ex-loading').style.display = 'none';
+      exShowErr('Falha de rede ao consultar os casos excluídos.');
+    });
+  }
+
+  document.getElementById('bl-tab-cadastro').addEventListener('click', function () { showTab('cadastro'); });
+  document.getElementById('bl-tab-excluidos').addEventListener('click', function () { showTab('excluidos'); });
+  document.getElementById('ex-table').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.bl-sort');
+    if (!btn) return;
+    var col = btn.getAttribute('data-ex-sort');
+    if (col === exSort) {
+      exDir = exDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      exSort = col;
+      exDir = (col === 'id' || col === 'removido_em' || col === 'expira') ? 'desc' : 'asc';
+    }
+    exPage = 1;
+    markExSort();
+    carregarExcluidos(false);
+  });
+  markExSort();
+  document.getElementById('ex-buscar').addEventListener('click', function () { exPage = 1; carregarExcluidos(false); });
+  document.getElementById('ex-q').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); exPage = 1; carregarExcluidos(false); }
+  });
+  document.getElementById('ex-limpar').addEventListener('click', function () {
+    document.getElementById('ex-data').value = '';
+    document.getElementById('ex-tabela').value = '';
+    document.getElementById('ex-q').value = '';
+    exPage = 1;
+    carregarExcluidos(true);
+  });
+  document.getElementById('ex-prev').addEventListener('click', function () {
+    if (exPage > 1) { exPage -= 1; carregarExcluidos(false); }
+  });
+  function quandoExpira(removido) {
+    var m = String(removido || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return '';
+    var inicio = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+    var fim = new Date(inicio.getTime() + 30 * 24 * 60 * 60 * 1000);
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    return 'Exclusão em ' + DIAS_SEMANA[fim.getDay()] + ', ' + pad(fim.getDate()) + '/' + pad(fim.getMonth() + 1) + '/' + fim.getFullYear() + ' às ' + pad(fim.getHours()) + ':' + pad(fim.getMinutes()) + ':' + pad(fim.getSeconds());
+  }
+
+  function expiraEm(removido) {
+    var m = String(removido || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return '';
+    var inicio = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+    return String(inicio.getTime() + 30 * 24 * 60 * 60 * 1000);
+  }
+
+  function textoRestante(ms) {
+    if (ms <= 0) return 'Expirado';
+    var s = Math.floor(ms / 1000);
+    var d = Math.floor(s / 86400);
+    s -= d * 86400;
+    var h = Math.floor(s / 3600);
+    s -= h * 3600;
+    var min = Math.floor(s / 60);
+    s -= min * 60;
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    if (d) return d + 'd ' + pad(h) + 'h ' + pad(min) + 'min';
+    return pad(h) + 'h ' + pad(min) + 'min ' + pad(s) + 's';
+  }
+
+  function tickExpiracao() {
+    var now = Date.now();
+    document.querySelectorAll('.ex-restante').forEach(function (el) {
+      var fim = Number(el.getAttribute('data-expira'));
+      if (!fim) { el.textContent = ''; return; }
+      var left = fim - now;
+      el.textContent = textoRestante(left);
+      el.classList.toggle('ex-restante--expirado', left <= 0);
+      el.classList.toggle('ex-restante--urgente', left > 0 && left < 3 * 86400000);
+    });
+  }
+  setInterval(tickExpiracao, 1000);
+
+  var exTip = document.createElement('div');
+  exTip.className = 'ex-float-tip';
+  exTip.hidden = true;
+  document.body.appendChild(exTip);
+  document.getElementById('ex-tbody').addEventListener('mouseover', function (ev) {
+    var cell = ev.target.closest('.ex-restante');
+    if (!cell || !cell.getAttribute('data-quando')) {
+      exTip.hidden = true;
+      return;
+    }
+    exTip.textContent = cell.getAttribute('data-quando');
+    exTip.hidden = false;
+    var box = cell.getBoundingClientRect();
+    var left = Math.min(box.left, window.innerWidth - exTip.offsetWidth - 12);
+    exTip.style.left = Math.max(8, left) + 'px';
+    exTip.style.top = Math.max(8, box.top - exTip.offsetHeight - 8) + 'px';
+  });
+  document.getElementById('ex-tbody').addEventListener('mouseout', function (ev) {
+    if (ev.target.closest('.ex-restante')) exTip.hidden = true;
+  });
+
+  function baixarExcluidos(formato) {
+    var msg = document.getElementById('ex-export-msg');
+    var escopo = document.getElementById('ex-escopo').value;
+    var p = new URLSearchParams();
+    p.set('formato', formato);
+    p.set('escopo', escopo);
+    if (escopo !== 'todos') {
+      var data = document.getElementById('ex-data').value;
+      var tabela = document.getElementById('ex-tabela').value;
+      var q = document.getElementById('ex-q').value.trim();
+      if (data) p.set('data', data);
+      if (tabela) p.set('tabela', tabela);
+      if (q) p.set('q', q);
+    }
+    msg.textContent = 'A preparar o arquivo...';
+    fetch('/api/blacklist/excluidos/export?' + p.toString(), { headers: { 'Accept': '*/*' } })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || 'Falha ao exportar.'); });
+        var match = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
+        var nome = match ? match[1] : ('casos-excluidos.' + formato);
+        return r.blob().then(function (blob) { return { blob: blob, nome: nome }; });
+      })
+      .then(function (file) {
+        var url = URL.createObjectURL(file.blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = file.nome;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        msg.textContent = 'Download iniciado.';
+      })
+      .catch(function (err) { msg.textContent = err.message || 'Falha ao exportar.'; });
+  }
+  document.getElementById('ex-csv').addEventListener('click', function () { baixarExcluidos('csv'); });
+  document.getElementById('ex-xlsx').addEventListener('click', function () { baixarExcluidos('xlsx'); });
+
+  document.getElementById('ex-next').addEventListener('click', function () {
+    exPage += 1;
+    carregarExcluidos(false);
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

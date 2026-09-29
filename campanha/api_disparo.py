@@ -19,12 +19,14 @@ from campanha.core import (
     BlacklistConfig,
     ContentConfig,
     DomainSender,
+    ElasticEmailConfig,
     MailgunConfig,
     MysqlConfig,
     Recipient,
     SendingConfig,
     _build_message,
     _effective_reply_to,
+    _elasticemail_send,
     _idempotency_key,
     _mailgun_send,
     _norm_email,
@@ -116,6 +118,7 @@ def _thread_disparo(
     mysql_cfg: MysqlConfig,
     sending: SendingConfig,
     mailgun: MailgunConfig | None,
+    elasticemail: ElasticEmailConfig | None,
     content: ContentConfig,
     blacklist_cfg: BlacklistConfig,
     criado_por: str,
@@ -242,7 +245,9 @@ def _thread_disparo(
             if _cancelar_flag.is_set():
                 break
             try:
-                if sending.method == "mailgun" and mailgun:
+                if sending.method == "elasticemail" and elasticemail:
+                    _elasticemail_send(domain, sending, elasticemail, msg)
+                elif sending.method == "mailgun" and mailgun:
                     _mailgun_send(domain, sending, mailgun, msg)
                 else:
                     _smtp_send(domain, sending, msg)
@@ -351,11 +356,19 @@ def iniciar_disparo(
             connection_timeout=cfg_dict.get("connection_timeout", 15),
         )
         mg_key = (os.getenv("MAILGUN_API_KEY") or "").strip()
+        ee_key = (os.getenv("ELASTICEMAIL_API_KEY") or "").strip()
         mailgun = MailgunConfig(api_key=mg_key, region="us") if mg_key else None
+        elasticemail = ElasticEmailConfig(api_key=ee_key) if ee_key else None
+        if elasticemail:
+            send_method = "elasticemail"
+        elif mailgun:
+            send_method = "mailgun"
+        else:
+            send_method = "smtp"
         sending = SendingConfig(
             dry_run=False, per_domain_per_minute=60,
             smtp_timeout_seconds=30, max_retries=3,
-            method="mailgun" if mailgun else "smtp",
+            method=send_method,
             reply_to="contato@redprecatorios.com.br",
         )
         project_root = Path(__file__).resolve().parent.parent
@@ -408,7 +421,7 @@ def iniciar_disparo(
             target=_run_and_release,
             args=(
                 campaign_id, recipients, domains, mysql_cfg, sending, mailgun,
-                content, blacklist_cfg, criado_por, map_use,
+                elasticemail, content, blacklist_cfg, criado_por, map_use,
             ),
             daemon=True,
         )

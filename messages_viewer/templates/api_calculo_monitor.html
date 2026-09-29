@@ -78,6 +78,90 @@
       user-select: none;
     }
 
+    #acm-remote-queue {
+      margin-top: 0.4rem;
+    }
+    #acm-remote-queue[hidden] { display: none; }
+
+    .acm-instances {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 0.9rem;
+    }
+    @media (max-width: 900px) {
+      .acm-instances { grid-template-columns: 1fr; }
+    }
+    .acm-instance {
+      display: block;
+      width: 100%;
+      margin: 0;
+      background: var(--acm-panel);
+      border: 1px solid var(--acm-line);
+      border-radius: var(--acm-radius);
+      padding: 0.9rem 1rem;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .acm-instance:hover {
+      border-color: #93c5fd;
+    }
+    .acm-instance--active {
+      border-color: #1d4ed8;
+      background: #f8fbff;
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.16);
+    }
+    .acm-instance:focus-visible {
+      outline: 2px solid #1d4ed8;
+      outline-offset: 2px;
+    }
+    .acm-instance-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .acm-instance-role {
+      margin: 0;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .acm-instance-name {
+      margin: 0.2rem 0 0;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--acm-ink);
+    }
+    .acm-instance-addr {
+      margin: 0.2rem 0 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .acm-instance-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.9rem;
+      margin-top: 0.75rem;
+      font-size: 0.82rem;
+      color: var(--acm-ink);
+    }
+    .acm-instance-metrics b {
+      font-variant-numeric: tabular-nums;
+    }
+    .acm-instance-note {
+      margin: 0.65rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
     .acm-kpis {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -212,7 +296,7 @@
     }
     .acm-cap-row {
       display: grid;
-      grid-template-columns: 5.5rem 1fr auto;
+      grid-template-columns: 6.2rem 1fr auto;
       gap: 0.65rem;
       align-items: center;
     }
@@ -278,7 +362,7 @@
     }
     .acm-cloud {
       display: grid;
-      grid-template-columns: minmax(9rem, 1.1fr) minmax(0, 2fr) auto;
+      grid-template-columns: 16rem minmax(0, 1fr) 17.5rem;
       gap: 0.75rem 1rem;
       align-items: center;
       background: var(--acm-panel);
@@ -286,8 +370,9 @@
       border-radius: var(--acm-radius);
       padding: 0.75rem 0.9rem;
     }
-    @media (max-width: 780px) {
+    @media (max-width: 900px) {
       .acm-cloud { grid-template-columns: 1fr; }
+      .acm-cloud-counts { justify-content: flex-start; }
     }
     .acm-cloud-host {
       font-size: 0.9rem;
@@ -303,13 +388,24 @@
     }
     .acm-stack {
       display: flex;
+      align-items: center;
+      width: 100%;
+      min-width: 0;
+    }
+    .acm-stack-track {
+      display: block;
+      width: 100%;
       height: 0.85rem;
       border-radius: 999px;
       overflow: hidden;
       background: #e2e8f0;
-      width: 100%;
     }
-    .acm-stack > i {
+    .acm-stack-fill {
+      display: flex;
+      height: 100%;
+      min-width: 0;
+    }
+    .acm-stack-fill > i {
       display: block;
       height: 100%;
       min-width: 0;
@@ -348,6 +444,7 @@
       min-height: 12rem;
       display: flex;
       flex-direction: column;
+      min-width: 0;
       overflow: hidden;
     }
     .acm-jobs-head {
@@ -376,8 +473,11 @@
       list-style: none;
       margin: 0;
       padding: 0.35rem 0;
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow: auto;
+    }
+    .acm-split .acm-jobs-panel {
       max-height: 22rem;
     }
     .acm-job {
@@ -451,6 +551,31 @@
     }
     .acm-rank--0 { background: #fef3c7; color: #92400e; }
     .acm-rank--1 { background: #dbeafe; color: #1e40af; }
+    .acm-dup {
+      display: inline-block;
+      margin-left: 0.35rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.08rem 0.4rem;
+      border-radius: 999px;
+      background: var(--acm-error-soft);
+      color: var(--acm-error);
+      vertical-align: middle;
+    }
+    .acm-job-details {
+      display: inline-block;
+      margin-top: 0.4rem;
+    }
+    .acm-job-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.3rem;
+      margin-top: 0.4rem;
+    }
+    .acm-job-actions .camp-btn {
+      width: 100%;
+    }
 
     .acm-empty {
       margin: 0;
@@ -462,14 +587,188 @@
 
     .acm-bottom {
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
       gap: 0.85rem;
+      align-items: start;
+    }
+    .acm-bottom .acm-jobs-panel {
+      height: 26rem;
+      min-height: 26rem;
+      max-height: 26rem;
     }
     @media (max-width: 980px) {
       .acm-bottom { grid-template-columns: 1fr; }
     }
 
     .acm-loading .acm-kpi-value { opacity: 0.35; }
+
+    #acm-detail-modal .audit-modal-panel {
+      width: min(920px, 100%);
+      max-height: min(92vh, 960px);
+    }
+    .acm-detail-hero {
+      padding: 0.85rem 1rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #fff7ed 0%, #fef2f2 100%);
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+    }
+    .acm-detail-hero-name {
+      margin: 0 0 0.35rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--acm-ink);
+      line-height: 1.3;
+    }
+    .acm-detail-error {
+      margin: 0.45rem 0 0;
+      font-size: 0.88rem;
+      color: var(--acm-error);
+      font-weight: 600;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .acm-detail-warn {
+      margin: 0.55rem 0 0;
+      padding: 0.45rem 0.6rem;
+      border-radius: 8px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .acm-detail-json-wrap {
+      position: relative;
+    }
+    .acm-detail-json-wrap .acm-copy {
+      position: absolute;
+      top: 0.45rem;
+      right: 0.45rem;
+    }
+    .acm-detail-json {
+      margin: 0;
+      max-height: 22rem;
+      overflow: auto;
+      padding: 0.7rem 0.8rem;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .acm-detail-msg {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .acm-detail-msg--err { color: var(--acm-error); font-weight: 600; }
+
+    #acm-resend-modal .audit-modal-panel {
+      width: min(960px, 100%);
+      max-height: min(92vh, 980px);
+    }
+    #acm-resend-modal .audit-modal-body {
+      padding: 1.15rem 1.25rem 1.2rem;
+    }
+    .acm-resend-copy {
+      margin: 0 0 0.4rem;
+      font-size: 0.95rem;
+      color: var(--acm-ink);
+      line-height: 1.5;
+    }
+    .acm-resend-meta {
+      margin: 0 0 1.15rem;
+      padding: 0.65rem 0.8rem;
+      background: #f8fafc;
+      border: 1px solid var(--acm-line);
+      border-radius: 10px;
+      font-size: 0.84rem;
+      color: #334155;
+      line-height: 1.45;
+    }
+    .acm-resend-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.65rem;
+      margin-top: 1.15rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e2e8f0;
+    }
+    .acm-resend-section {
+      margin: 0 0 1.15rem;
+      padding: 0.95rem 1rem 1.05rem;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+    }
+    .acm-resend-section:last-of-type { margin-bottom: 0; }
+    .acm-resend-section h3 {
+      margin: 0 0 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .acm-resend-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem 1.15rem;
+    }
+    @media (max-width: 720px) {
+      .acm-resend-form { grid-template-columns: 1fr; }
+    }
+    .acm-resend-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+    .acm-resend-field label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      text-transform: none;
+      color: #475569;
+    }
+    .acm-resend-field input,
+    .acm-resend-json {
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      font-size: 0.9rem;
+      line-height: 1.35;
+      font-family: inherit;
+      color: var(--acm-ink);
+      background: #fff;
+    }
+    .acm-resend-field input:focus,
+    .acm-resend-json:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    .acm-resend-json {
+      min-height: 14rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .acm-resend-field--wide { grid-column: 1 / -1; }
+    .acm-resend-status {
+      margin: 0.85rem 0 0;
+      font-size: 0.84rem;
+    }
+    .acm-resend-status--ok { color: var(--acm-done); font-weight: 600; }
+    .acm-resend-status--err { color: var(--acm-error); font-weight: 600; }
   </style>
 </head>
 <body class="dashboard-body acm"
@@ -481,7 +780,7 @@
     <header class="dash-top acm-head">
       <div>
         <h1 class="dash-h1">API Cálculo</h1>
-        <p class="dash-sub">Monitor da fila DEPRE — carga por cloud, execução e saúde dos serviços.</p>
+        <p class="dash-sub">Fila desta máquina e estado da segunda API em 192.81.217.95:9487.</p>
       </div>
       <div class="acm-head-actions">
         <span class="acm-live" id="acm-live"><span class="acm-live-dot" aria-hidden="true"></span><span id="acm-updated">Aguardando…</span></span>
@@ -501,6 +800,13 @@
       </div>
       {% endif %}
 
+      <div class="acm-instances" id="acm-instances" role="group" aria-label="APIs de cálculo"></div>
+
+      <div id="acm-local-view">
+      <div class="acm-section">
+        <h2>Fila desta máquina</h2>
+        <span>calculo_jobs/ no disco local</span>
+      </div>
       <div class="acm-kpis" id="acm-stats">
         <div class="acm-kpi acm-kpi--queued">
           <p class="acm-kpi-label">Na fila</p>
@@ -515,18 +821,18 @@
         <div class="acm-kpi acm-kpi--done">
           <p class="acm-kpi-label">Concluídos</p>
           <p class="acm-kpi-value" id="acm-c-done">—</p>
-          <p class="acm-kpi-sub">retidos no disco</p>
+          <p class="acm-kpi-sub" id="acm-s-done">total observado</p>
         </div>
         <div class="acm-kpi acm-kpi--error">
           <p class="acm-kpi-label">Erros</p>
           <p class="acm-kpi-value" id="acm-c-error">—</p>
-          <p class="acm-kpi-sub">jobs com falha</p>
+          <p class="acm-kpi-sub" id="acm-s-error">total observado</p>
         </div>
       </div>
 
       <div class="acm-status-row">
         <section class="acm-panel">
-          <h2 class="acm-panel-title">Serviços</h2>
+          <h2 class="acm-panel-title">Serviços desta máquina</h2>
           <div class="acm-svc-list">
             <div class="acm-svc">
               <div>
@@ -558,6 +864,12 @@
               <div class="acm-cap-track"><div class="acm-cap-fill" id="acm-q-fill" style="background:linear-gradient(90deg,#1d4ed8,#60a5fa)"></div></div>
               <span class="acm-cap-val" id="acm-q-val">—</span>
             </div>
+            <div class="acm-cap-row">
+              <span class="acm-cap-label">Retidos</span>
+              <div class="acm-cap-track"><div class="acm-cap-fill" id="acm-keep-fill"></div></div>
+              <span class="acm-cap-val" id="acm-keep-val">—</span>
+            </div>
+            <p class="acm-meta" id="acm-keep-hint" style="margin-top:0.15rem">Jobs finalizados que a API ainda guarda no disco</p>
             <p class="acm-meta" id="acm-rr" style="margin-top:0.15rem"></p>
           </div>
         </section>
@@ -607,7 +919,36 @@
           <p class="acm-empty" id="acm-errors-empty">Sem erros recentes.</p>
         </section>
       </div>
+      </div>
+
+      <div id="acm-remote-queue" hidden></div>
     </main>
+  </div>
+
+  <div id="acm-detail-modal" class="audit-modal" hidden aria-modal="true" role="dialog" aria-labelledby="acm-detail-title">
+    <div class="audit-modal-backdrop" id="acm-detail-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="acm-detail-title">Detalhes do erro</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="acm-detail-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body" id="acm-detail-body">
+        <p class="acm-detail-msg">Carregando…</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="acm-resend-modal" class="audit-modal" hidden aria-modal="true" role="dialog" aria-labelledby="acm-resend-title">
+    <div class="audit-modal-backdrop" id="acm-resend-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <h2 id="acm-resend-title">Reenviar para o cálculo</h2>
+        <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="acm-resend-close">Fechar</button>
+      </div>
+      <div class="audit-modal-body" id="acm-resend-body">
+        <p class="acm-detail-msg">Carregando…</p>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -620,6 +961,11 @@
     let timer = null;
     let loading = false;
     let lastCounts = null;
+    let selectedApi = "local";
+    try {
+      const savedApi = sessionStorage.getItem("acm-selected-api");
+      if (savedApi === "local" || savedApi === "remote") selectedApi = savedApi;
+    } catch (err) {}
 
     function esc(s) {
       return String(s == null ? "" : s)
@@ -685,18 +1031,29 @@
       el.className = "acm-badge " + badgeClass(state);
     }
 
-    function jobItem(row, kind, timeField) {
+    function jobItem(row, kind, timeField, opts) {
+      opts = opts || {};
       const name = row.requerente || "Sem requerente";
       const age = relAge(row[timeField]);
       const rank = Number(row.priority_rank);
       const rankCls = rank === 0 ? "acm-rank--0" : rank === 1 ? "acm-rank--1" : "";
+      const errorCount = Number(row.error_count) || 1;
+      const details = (opts.actions !== false && kind === "error" && row.job_id)
+        ? '<div class="acm-job-actions">' +
+            '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm acm-job-details" data-job-id="' + esc(row.job_id) + '">Detalhes</button>' +
+            '<button type="button" class="camp-btn camp-btn-primary camp-btn-sm acm-job-resend" data-job-id="' + esc(row.job_id) + '">Reenviar</button>' +
+          '</div>'
+        : "";
+      const dup = (kind === "error" && errorCount > 1)
+        ? '<span class="acm-dup">' + esc(errorCount) + ' erros</span>'
+        : "";
       return (
         '<li class="acm-job acm-job--' + kind + '">' +
           '<span class="acm-job-dot" aria-hidden="true"></span>' +
           '<div>' +
-            '<div class="acm-job-title">' + esc(name) + '</div>' +
+            '<div class="acm-job-title">' + esc(name) + dup + '</div>' +
             '<div class="acm-job-meta">' +
-              '<span>' + esc(row.host || "—") + '</span>' +
+              '<span>' + esc(row.host || row.source_ip || "—") + '</span>' +
               (row.processo ? '<code>' + esc(row.processo) + '</code>' : '') +
               (row.incidente ? '<span>inc. ' + esc(row.incidente) + '</span>' : '') +
               (row.error ? '<span title="' + esc(row.error) + '">' + esc(String(row.error).slice(0, 60)) + (String(row.error).length > 60 ? "…" : "") + '</span>' : '') +
@@ -706,12 +1063,13 @@
             '<strong>' + esc(age || shortTs(row[timeField])) + '</strong>' +
             esc(shortTs(row[timeField])) +
             '<span class="acm-rank ' + rankCls + '">rank ' + esc(row.priority_rank) + '</span>' +
+            details +
           '</div>' +
         '</li>'
       );
     }
 
-    function fillJobs(listId, emptyId, countId, rows, kind, timeField) {
+    function fillJobs(listId, emptyId, countId, rows, kind, timeField, opts) {
       const list = document.getElementById(listId);
       const empty = document.getElementById(emptyId);
       const count = document.getElementById(countId);
@@ -724,12 +1082,127 @@
         return;
       }
       if (empty) empty.hidden = true;
-      list.innerHTML = items.map((r) => jobItem(r, kind, timeField)).join("");
+      list.innerHTML = items.map((r) => jobItem(r, kind, timeField, opts)).join("");
     }
 
-    function renderClouds(rows, totals) {
-      const wrap = document.getElementById("acm-clouds");
-      const empty = document.getElementById("acm-clouds-empty");
+    function remotePanel(title, listId, emptyId, countId, emptyText) {
+      return (
+        '<section class="acm-jobs-panel">' +
+          '<div class="acm-jobs-head"><h2>' + esc(title) + '</h2>' +
+            '<span class="acm-jobs-count" id="' + esc(countId) + '">0</span></div>' +
+          '<ul class="acm-jobs-list" id="' + esc(listId) + '"></ul>' +
+          '<p class="acm-empty" id="' + esc(emptyId) + '">' + esc(emptyText) + '</p>' +
+        "</section>"
+      );
+    }
+
+    function remoteKpi(kind, label, value, sub) {
+      return (
+        '<div class="acm-kpi acm-kpi--' + kind + '">' +
+          '<p class="acm-kpi-label">' + esc(label) + '</p>' +
+          '<p class="acm-kpi-value">' + esc(value) + '</p>' +
+          '<p class="acm-kpi-sub">' + esc(sub) + '</p>' +
+        "</div>"
+      );
+    }
+
+    function renderRemoteQueue(instances) {
+      const wrap = document.getElementById("acm-remote-queue");
+      if (!wrap) return;
+      const inst = (instances || []).find(function (item) {
+        return item && item.id === "remote" && item.queue_visible;
+      });
+      if (!inst) {
+        const remote = (instances || []).find(function (item) { return item && item.id === "remote"; });
+        wrap.innerHTML = remote
+          ? '<p class="acm-empty">' + esc(remote.note || remote.error || "Fila desta API indisponível.") + "</p>"
+          : "";
+        return;
+      }
+      const c = inst.counts || {};
+      const lo = inst.libreoffice_max_concurrent;
+      const running = Number(c.running) || 0;
+      const queued = Number(c.queued) || 0;
+      const doneN = Number(c.done) || 0;
+      const errorN = Number(c.error) || 0;
+      const loPct = lo ? Math.min(100, Math.round((100 * running) / lo)) : 0;
+      const keepMax = Number(inst.jobs_keep_count) || 200;
+      const kept = doneN + errorN;
+      const keepPct = keepMax ? Math.min(100, Math.round((100 * kept) / keepMax)) : 0;
+      const qVis = Math.min(100, Math.round((100 * queued) / Math.max(20, queued)));
+      const qWidth = queued ? Math.max(8, qVis) : 0;
+      const drive = inst.drive_worker || "active";
+      const apiState = inst.service || (inst.reachable ? "active" : "inactive");
+      const pathBits = [];
+      if (inst.index_queued != null) pathBits.push("índice " + inst.index_queued);
+      if (inst.address) pathBits.push(inst.address);
+      const rrText = inst.rr_last_source_key
+        ? "Round-robin · último IP: " + inst.rr_last_source_key
+        : "Round-robin · sem estado";
+      wrap.innerHTML =
+        '<div class="acm-section">' +
+          "<h2>Fila · " + esc(inst.label || "outro host") + "</h2>" +
+          "<span>" + esc(inst.address || "") + "</span>" +
+        "</div>" +
+        '<div class="acm-kpis">' +
+          remoteKpi("queued", "Na fila", queued, queued === 0 ? "fila limpa" : "aguardando slot") +
+          remoteKpi("running", "Em execução", running, lo != null ? running + " / " + lo + " slots LO" : "em processamento") +
+          remoteKpi("done", "Concluídos", doneN, "retidos nesta API") +
+          remoteKpi("error", "Erros", errorN, "retidos nesta API") +
+        "</div>" +
+        '<div class="acm-status-row">' +
+          '<section class="acm-panel">' +
+            '<h2 class="acm-panel-title">Serviços desta API</h2>' +
+            '<div class="acm-svc-list">' +
+              '<div class="acm-svc"><div><div class="acm-svc-name">api-calculo</div>' +
+                '<div class="acm-svc-meta">FastAPI · porta 9487 · workers de cálculo</div></div>' +
+                '<span class="acm-badge ' + badgeClass(apiState) + '">' + esc(apiState) + '</span></div>' +
+              '<div class="acm-svc"><div><div class="acm-svc-name">drive-worker</div>' +
+                '<div class="acm-svc-meta">Upload das planilhas para o Google Drive</div></div>' +
+                '<span class="acm-badge ' + badgeClass(drive) + '">' + esc(drive) + '</span></div>' +
+            "</div>" +
+            '<p class="acm-meta">' + esc(pathBits.join(" · ")) + "</p>" +
+          "</section>" +
+          '<section class="acm-panel">' +
+            '<h2 class="acm-panel-title">Capacidade</h2>' +
+            '<div class="acm-capacity">' +
+              '<div class="acm-cap-row"><span class="acm-cap-label">LibreOffice</span>' +
+                '<div class="acm-cap-track"><div class="acm-cap-fill' + (loPct >= 85 ? " acm-cap-fill--hot" : "") + '" style="width:' + loPct + '%"></div></div>' +
+                '<span class="acm-cap-val">' + esc(lo != null ? running + "/" + lo : "—") + "</span></div>" +
+              '<div class="acm-cap-row"><span class="acm-cap-label">Fila ativa</span>' +
+                '<div class="acm-cap-track"><div class="acm-cap-fill" style="width:' + qWidth + '%;background:linear-gradient(90deg,#1d4ed8,#60a5fa)"></div></div>' +
+                '<span class="acm-cap-val">' + esc(queued) + "</span></div>" +
+              '<div class="acm-cap-row"><span class="acm-cap-label">Retidos</span>' +
+                '<div class="acm-cap-track"><div class="acm-cap-fill' + (keepPct >= 90 ? " acm-cap-fill--hot" : "") + '" style="width:' + (kept ? Math.max(6, keepPct) : 0) + '%"></div></div>' +
+                '<span class="acm-cap-val">' + esc(kept + "/" + keepMax) + "</span></div>" +
+              '<p class="acm-meta" style="margin-top:0.15rem">' + esc(doneN + " concluídos e " + errorN + " erros ainda no disco (limite da API: " + keepMax + ")") + "</p>" +
+              '<p class="acm-meta" style="margin-top:0.15rem">' + esc(rrText) + "</p>" +
+            "</div>" +
+          "</section>" +
+        "</div>" +
+        '<div class="acm-section"><h2>Por cloud / máquina</h2><span id="acm-r-clouds-hint"></span></div>' +
+        '<div class="acm-clouds" id="acm-r-clouds"></div>' +
+        '<p class="acm-empty" id="acm-r-clouds-empty" hidden>Nenhum job nesta API.</p>' +
+        '<div class="acm-split">' +
+          remotePanel("Em execução", "acm-r-running", "acm-r-running-empty", "acm-r-running-count", "Nenhum job a correr.") +
+          remotePanel("Mais antigos na fila", "acm-r-queued", "acm-r-queued-empty", "acm-r-queued-count", "Fila vazia.") +
+        "</div>" +
+        '<div class="acm-bottom">' +
+          remotePanel("Concluídos recentes", "acm-r-done", "acm-r-done-empty", "acm-r-done-count", "Sem concluídos retidos.") +
+          remotePanel("Erros recentes", "acm-r-errors", "acm-r-errors-empty", "acm-r-errors-count", "Sem erros recentes.") +
+        "</div>";
+      const noActions = { actions: false };
+      fillJobs("acm-r-running", "acm-r-running-empty", "acm-r-running-count", inst.running_jobs, "running", "started_at", noActions);
+      fillJobs("acm-r-queued", "acm-r-queued-empty", "acm-r-queued-count", inst.queued_oldest, "queued", "enqueued_at", noActions);
+      fillJobs("acm-r-done", "acm-r-done-empty", "acm-r-done-count", inst.recent_done, "done", "finished_at", noActions);
+      fillJobs("acm-r-errors", "acm-r-errors-empty", "acm-r-errors-count", inst.recent_errors, "error", "finished_at", noActions);
+      renderClouds(inst.by_source, c, "acm-r-clouds", "acm-r-clouds-empty");
+      setText("acm-r-clouds-hint", (inst.by_source || []).length + " origem(ns)");
+    }
+
+    function renderClouds(rows, totals, wrapId, emptyId) {
+      const wrap = document.getElementById(wrapId || "acm-clouds");
+      const empty = document.getElementById(emptyId || "acm-clouds-empty");
       if (!wrap) return;
       const list = rows || [];
       if (!list.length) {
@@ -753,27 +1226,99 @@
         const shareQ = totals.queued ? Math.round((100 * q) / Math.max(1, totals.queued)) : 0;
         return (
           '<article class="acm-cloud">' +
-            '<div>' +
+            '<div class="acm-cloud-id">' +
               '<div class="acm-cloud-host">' + esc(row.host) + '</div>' +
               '<div class="acm-cloud-ip">' + esc(row.source_ip) +
                 (totals.queued ? ' · ' + shareQ + '% da fila' : '') +
               '</div>' +
             '</div>' +
-            '<div class="acm-stack" style="width:' + Math.max(18, scale) + '%" title="queued/running/done/error">' +
-              '<i class="q" style="width:' + pq + '%"></i>' +
-              '<i class="r" style="width:' + pr + '%"></i>' +
-              '<i class="d" style="width:' + pd + '%"></i>' +
-              '<i class="e" style="width:' + pe + '%"></i>' +
+            '<div class="acm-stack" title="queued/running/done/error">' +
+              '<div class="acm-stack-track">' +
+                '<div class="acm-stack-fill" style="width:' + scale + '%">' +
+                  '<i class="q" style="width:' + pq + '%"></i>' +
+                  '<i class="r" style="width:' + pr + '%"></i>' +
+                  '<i class="d" style="width:' + pd + '%"></i>' +
+                  '<i class="e" style="width:' + pe + '%"></i>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
             '<div class="acm-cloud-counts">' +
               '<span class="acm-c-q"><b>' + q + '</b> fila</span>' +
               '<span class="acm-c-r"><b>' + r + '</b> run</span>' +
-              '<span class="acm-c-d"><b>' + d + '</b> done</span>' +
-              '<span class="acm-c-e"><b>' + e + '</b> err</span>' +
+              '<span class="acm-c-d"><b>' + d + '</b> done' +
+                (row.history_done ? ' · ' + row.history_done + ' hist' : '') + '</span>' +
+              '<span class="acm-c-e"><b>' + e + '</b> err' +
+                (row.history_error ? ' · ' + row.history_error + ' hist' : '') + '</span>' +
             '</div>' +
           '</article>'
         );
       }).join("");
+    }
+
+    function renderInstances(instances) {
+      const wrap = document.getElementById("acm-instances");
+      if (!wrap) return;
+      const list = instances || [];
+      if (!list.length) {
+        wrap.innerHTML = "";
+        return;
+      }
+      wrap.innerHTML = list.map(function (inst) {
+        const up = !!inst.reachable;
+        const counts = inst.counts || null;
+        const active = (inst.id || "") === selectedApi;
+        let metrics = "";
+        if (inst.queue_visible && counts) {
+          const lo = inst.libreoffice_max_concurrent;
+          metrics =
+            "<span><b>" + (Number(counts.queued) || 0) + "</b> na fila</span>" +
+            "<span><b>" + (Number(counts.running) || 0) + "</b> em execução" +
+              (lo != null ? " / " + esc(lo) : "") + "</span>" +
+            "<span><b>" + (Number(counts.done) || 0) + "</b> concluídos</span>" +
+            "<span><b>" + (Number(counts.error) || 0) + "</b> erros</span>";
+          if (inst.drive_worker) {
+            metrics += "<span>drive-worker " + esc(inst.drive_worker) + "</span>";
+          }
+        } else {
+          const health = inst.health_status ? esc(inst.health_status) : (up ? "ok" : "sem resposta");
+          const latency = inst.latency_ms != null ? " · " + esc(inst.latency_ms) + " ms" : "";
+          metrics = "<span>saúde <b>" + health + "</b>" + latency + "</span>";
+          if (inst.error && !up) metrics += "<span>" + esc(inst.error) + "</span>";
+        }
+        return (
+          '<button type="button" class="acm-instance' + (active ? " acm-instance--active" : "") + '" data-api-id="' + esc(inst.id || "") + '" aria-pressed="' + (active ? "true" : "false") + '">' +
+            '<div class="acm-instance-head">' +
+              "<div>" +
+                '<p class="acm-instance-role">' + esc(inst.role || "instância") + "</p>" +
+                '<p class="acm-instance-name">' + esc(inst.label || "API") + "</p>" +
+                '<p class="acm-instance-addr">' + esc(inst.address || "") + "</p>" +
+              "</div>" +
+              '<span class="acm-badge ' + (up ? "acm-badge--ok" : "acm-badge--bad") + '">' +
+                (up ? "no ar" : "indisponível") +
+              "</span>" +
+            "</div>" +
+            '<div class="acm-instance-metrics">' + metrics + "</div>" +
+            (inst.note ? '<p class="acm-instance-note">' + esc(inst.note) + "</p>" : "") +
+          "</button>"
+        );
+      }).join("");
+    }
+
+    function applyApiSelection(instances) {
+      const list = instances || [];
+      if (list.length && !list.some(function (inst) { return inst.id === selectedApi; })) {
+        selectedApi = list[0].id || "local";
+      }
+      const localView = document.getElementById("acm-local-view");
+      const remoteView = document.getElementById("acm-remote-queue");
+      if (localView) localView.hidden = selectedApi === "remote";
+      if (remoteView) remoteView.hidden = selectedApi !== "remote";
+      document.querySelectorAll("#acm-instances [data-api-id]").forEach(function (el) {
+        const on = el.getAttribute("data-api-id") === selectedApi;
+        el.classList.toggle("acm-instance--active", on);
+        el.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      try { sessionStorage.setItem("acm-selected-api", selectedApi); } catch (err) {}
     }
 
     function render(data) {
@@ -783,14 +1328,20 @@
         return;
       }
       const c = data.counts || {};
+      const hist = data.history || {};
+      const ret = data.retention || {};
       const queued = Number(c.queued) || 0;
       const running = Number(c.running) || 0;
-      const done = Number(c.done) || 0;
-      const error = Number(c.error) || 0;
+      const doneDisk = Number(c.done) || 0;
+      const errorDisk = Number(c.error) || 0;
+      const done = Number(hist.done != null ? hist.done : doneDisk) || 0;
+      const error = Number(hist.error != null ? hist.error : errorDisk) || 0;
       setKpi("acm-c-queued", queued);
       setKpi("acm-c-running", running);
       setKpi("acm-c-done", done);
       setKpi("acm-c-error", error);
+      setText("acm-s-done", doneDisk + " no disco agora");
+      setText("acm-s-error", errorDisk + " no disco agora");
 
       const loMax = data.libreoffice_max_concurrent;
       setText("acm-s-queued", queued === 0 ? "fila limpa" : "jobs à espera");
@@ -808,11 +1359,17 @@
       const svc = data.services || {};
       setBadge("acm-svc-api", svc.api_calculo);
       setBadge("acm-svc-drive", svc.api_calculo_drive_worker);
+      renderInstances(data.instances);
+      renderRemoteQueue(data.instances);
+      applyApiSelection(data.instances);
 
       const apiOk = svc.api_calculo === "active";
       const drvOk = svc.api_calculo_drive_worker === "active";
+      const remote = (data.instances || []).find(function (inst) { return inst.id === "remote"; });
+      const remoteOk = !remote || !!remote.reachable;
       if (live) {
-        live.className = "acm-live " + (apiOk && drvOk ? "acm-live--ok" : apiOk ? "acm-live--warn" : "acm-live--bad");
+        const both = apiOk && drvOk && remoteOk;
+        live.className = "acm-live " + (both ? "acm-live--ok" : apiOk ? "acm-live--warn" : "acm-live--bad");
       }
 
       const loPct = loMax ? Math.min(100, Math.round((100 * running) / loMax)) : 0;
@@ -828,6 +1385,22 @@
       if (qFill) qFill.style.width = (queued ? Math.max(8, qVis) : 0) + "%";
       setText("acm-q-val", String(queued));
 
+      const keepMax = Number(ret.keep) || 200;
+      const kept = Number(ret.finished_on_disk != null ? ret.finished_on_disk : (doneDisk + errorDisk)) || 0;
+      const keepPct = keepMax ? Math.min(100, Math.round((100 * kept) / keepMax)) : 0;
+      const keepFill = document.getElementById("acm-keep-fill");
+      if (keepFill) {
+        keepFill.style.width = (kept ? Math.max(6, keepPct) : 0) + "%";
+        keepFill.classList.toggle("acm-cap-fill--hot", keepPct >= 90);
+      }
+      setText("acm-keep-val", kept + "/" + keepMax);
+      setText(
+        "acm-keep-hint",
+        (Number(ret.done_on_disk) || doneDisk) + " concluídos e " +
+          (Number(ret.error_on_disk) || errorDisk) +
+          " erros ainda no disco (limite da API: " + keepMax + ")"
+      );
+
       const rr = data.rr_state;
       setText(
         "acm-rr",
@@ -842,13 +1415,15 @@
       fillJobs("acm-running", "acm-running-empty", "acm-running-count", data.running_jobs, "running", "started_at");
       fillJobs("acm-queued", "acm-queued-empty", "acm-queued-count", data.queued_oldest, "queued", "enqueued_at");
       fillJobs("acm-done", "acm-done-empty", "acm-done-count", data.recent_done, "done", "finished_at");
-      fillJobs("acm-errors", "acm-errors-empty", "acm-error-count", data.recent_errors, "error", "finished_at");
+      lastErrorRows = data.recent_errors || [];
+      fillJobs("acm-errors", "acm-errors-empty", "acm-error-count", lastErrorRows, "error", "finished_at");
 
       lastCounts = c;
     }
 
     async function refresh() {
       if (!configured || loading) return;
+      if (resendModal && !resendModal.hidden) return;
       loading = true;
       document.body.classList.add("acm-loading");
       if (btn) btn.disabled = true;
@@ -874,6 +1449,463 @@
       }
     }
 
+    let lastErrorRows = [];
+
+    function findErrorGroup(jobId) {
+      if (!jobId) return null;
+      return lastErrorRows.find(function (row) {
+        if (row.job_id === jobId) return true;
+        return Array.isArray(row.error_job_ids) && row.error_job_ids.indexOf(jobId) >= 0;
+      }) || null;
+    }
+
+    function prettyJson(value) {
+      if (value == null) return "";
+      try { return JSON.stringify(value, null, 2); }
+      catch (err) { return String(value); }
+    }
+
+    function kv(label, value) {
+      if (value == null || value === "") return "";
+      return "<dt>" + esc(label) + "</dt><dd>" + esc(value) + "</dd>";
+    }
+
+    function jsonBlock(id, value, emptyText) {
+      const text = prettyJson(value);
+      if (!text) {
+        return '<p class="acm-detail-msg">' + esc(emptyText) + "</p>";
+      }
+      return (
+        '<div class="acm-detail-json-wrap">' +
+          '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm acm-copy" data-copy="' + esc(id) + '">Copiar</button>' +
+          '<pre class="acm-detail-json" id="' + esc(id) + '">' + esc(text) + "</pre>" +
+        "</div>"
+      );
+    }
+
+    function renderDetail(data) {
+      const body = document.getElementById("acm-detail-body");
+      if (!body) return;
+      if (!data || !data.ok) {
+        body.innerHTML = '<p class="acm-detail-msg acm-detail-msg--err">' +
+          esc((data && data.error) || "Não foi possível carregar o job.") + "</p>";
+        return;
+      }
+      const d = data.destaques || {};
+      const group = findErrorGroup(data.job_id);
+      const errorCount = Number((group && group.error_count) || data.error_count) || 1;
+      const occurrences = (group && Array.isArray(group.error_occurrences))
+        ? group.error_occurrences
+        : [];
+      const sameDate = d.data_base && d.data_nascimento && d.data_base === d.data_nascimento;
+      const title = d.requerente || "Job sem requerente";
+      const rows = [
+        kv("Job", data.job_id),
+        kv("Status", data.status),
+        kv("HTTP", data.http_status),
+        kv("Host", data.host),
+        kv("IP", data.source_ip),
+        kv("Rank", data.priority_rank),
+        kv("Enfileirado", data.enqueued_at),
+        kv("Início", data.started_at),
+        kv("Fim", data.finished_at),
+        kv("Processo", d.processo),
+        kv("Incidente", d.incidente),
+        kv("CPF", d.cpf),
+        kv("Entidade", d.entidade),
+        kv("Natureza", d.natureza),
+        kv("Data-base", d.data_base),
+        kv("Nascimento", d.data_nascimento),
+        kv("Decisão", d.data_decisao),
+        kv("Principal líquido", d.principal_liquido),
+        kv("Juros moratórios", d.juros_moratorios),
+        kv("Valor requisitado", d.valor_requisitado),
+        kv("Nº de meses", d.numero_de_meses),
+        kv("Prioridade", d.prioridade_status),
+      ].join("");
+      body.innerHTML =
+        '<div class="acm-detail-hero">' +
+          '<p class="acm-detail-hero-name">' + esc(title) + "</p>" +
+          (data.error ? '<p class="acm-detail-error">' + esc(data.error) + "</p>" : "") +
+          (sameDate
+            ? '<p class="acm-detail-warn">Data-base coincide com a data de nascimento — isso costuma quebrar a célula R36 da planilha.</p>'
+            : "") +
+          (errorCount > 1
+            ? '<p class="acm-detail-warn">Este mesmo caso (requerente, processo e incidente) retornou erro <strong>' +
+              esc(errorCount) + "</strong> vezes. Abaixo está o job mais recente; as demais ocorrências ainda retidas no disco estão listadas em seguida.</p>"
+            : "") +
+        "</div>" +
+        (occurrences.length > 1
+          ? '<section class="audit-detail-section">' +
+              '<h3 class="audit-detail-section-title">Ocorrências (' + esc(errorCount) + ")</h3>" +
+              '<dl class="audit-detail-grid">' +
+                occurrences.map(function (item, idx) {
+                  return kv(
+                    "#" + (idx + 1),
+                    (item.finished_at || "sem data") +
+                      (item.host ? " · " + item.host : "") +
+                      (item.error ? " — " + item.error : "") +
+                      (item.job_id ? " · " + item.job_id : "")
+                  );
+                }).join("") +
+              "</dl>" +
+            "</section>"
+          : "") +
+        '<section class="audit-detail-section">' +
+          '<h3 class="audit-detail-section-title">Identificação</h3>' +
+          '<dl class="audit-detail-grid">' + rows + "</dl>" +
+        "</section>" +
+        '<section class="audit-detail-section">' +
+          '<h3 class="audit-detail-section-title">Payload enviado pelo cliente</h3>' +
+          jsonBlock("acm-json-payload", data.payload, "Este job não tem payload gravado.") +
+        "</section>" +
+        '<section class="audit-detail-section">' +
+          '<h3 class="audit-detail-section-title">Output / resultado da API</h3>' +
+          jsonBlock("acm-json-result", data.result, "A API não devolveu resultado (result = null).") +
+        "</section>";
+    }
+
+    const detailModal = document.getElementById("acm-detail-modal");
+    const detailBody = document.getElementById("acm-detail-body");
+    const errorsList = document.getElementById("acm-errors");
+    const resendModal = document.getElementById("acm-resend-modal");
+    const resendBody = document.getElementById("acm-resend-body");
+    const RESEND_SECTIONS = [
+      {
+        title: "Identificação",
+        fields: [
+          ["requerente", "Requerente", true],
+          ["cpf", "CPF"],
+          ["processo", "Processo"],
+          ["incidente", "Incidente"],
+          ["entidade", "Entidade"],
+          ["natureza", "Natureza"],
+        ],
+      },
+      {
+        title: "Datas",
+        fields: [
+          ["data_base", "Data-base"],
+          ["data_nascimento", "Nascimento"],
+          ["data_decisao", "Decisão"],
+        ],
+      },
+      {
+        title: "Valores",
+        fields: [
+          ["principal_liquido", "Principal líquido"],
+          ["juros_moratorios", "Juros moratórios"],
+          ["valor_requisitado", "Valor requisitado"],
+          ["numero_de_meses", "Nº de meses"],
+        ],
+      },
+    ];
+    let resendState = null;
+    let resendBusy = false;
+
+    function closeDetail() {
+      if (!detailModal) return;
+      detailModal.hidden = true;
+      if (!resendModal || resendModal.hidden) document.body.style.overflow = "";
+    }
+
+    function closeResend() {
+      if (!resendModal) return;
+      resendModal.hidden = true;
+      resendState = null;
+      resendBusy = false;
+      if (!detailModal || detailModal.hidden) document.body.style.overflow = "";
+    }
+
+    async function fetchJob(jobId) {
+      const res = await fetch("/api/api-calculo/monitor/" + encodeURIComponent(jobId), {
+        credentials: "same-origin",
+      });
+      return res.json();
+    }
+
+    async function openDetail(jobId) {
+      if (!detailModal || !detailBody || !jobId) return;
+      closeResend();
+      detailModal.hidden = false;
+      document.body.style.overflow = "hidden";
+      detailBody.innerHTML = '<p class="acm-detail-msg">Carregando…</p>';
+      try {
+        renderDetail(await fetchJob(jobId));
+      } catch (err) {
+        renderDetail({ ok: false, error: "Erro de rede ao carregar o detalhe." });
+      }
+    }
+
+    function applyFieldToPayload(payload, key, value) {
+      if (!payload || typeof payload !== "object") return payload;
+      const record = payload.record && typeof payload.record === "object" ? payload.record : (payload.record = {});
+      const credor = payload.credor && typeof payload.credor === "object" ? payload.credor : (payload.credor = {});
+      const valores = payload.valores && typeof payload.valores === "object" ? payload.valores : (payload.valores = {});
+      const processo = payload.processo && typeof payload.processo === "object" ? payload.processo : (payload.processo = {});
+      if (key === "requerente") { record.Requerente = value; credor.nome = value; }
+      else if (key === "cpf") { record.CPF = value; credor.cpf = value; }
+      else if (key === "processo") { record.Numero_de_Processo = value; processo.numero_processo = value; }
+      else if (key === "incidente") { record.Numero_do_Incidente = value; processo.numero_incidente = value; }
+      else if (key === "entidade") { record.Entidade_Devedora = value; processo.entidade_devedora = value; }
+      else if (key === "natureza") { record.Natureza = value; processo.natureza = value; }
+      else if (key === "data_base") { record.Data_Base = value; credor.data_base = value; }
+      else if (key === "data_nascimento") { record.Data_de_Nascimento = value; credor.data_de_nascimento = value; }
+      else if (key === "data_decisao") { record.Data_Decisao = value; processo.data_decisao = value; }
+      else if (key === "principal_liquido") { record.Principal_Liquido = value; valores.principal_liquido = value; }
+      else if (key === "juros_moratorios") { record.Juros_Moratorio = value; valores.juros_moratorios = value; }
+      else if (key === "valor_requisitado") { record.Valor_Requisitado = value; valores.valor_requisitado = value; }
+      else if (key === "numero_de_meses") { record.Numero_de_Meses = value; valores.numero_de_meses = value; }
+      return payload;
+    }
+
+    function resendMeta(data) {
+      const d = (data && data.destaques) || {};
+      const bits = [d.requerente || "Sem requerente"];
+      if (d.processo) bits.push(d.processo);
+      if (d.incidente) bits.push("inc. " + d.incidente);
+      return bits.join(" · ");
+    }
+
+    function renderResendConfirm(data) {
+      if (!resendBody) return;
+      const d = data.destaques || {};
+      const sameDate = d.data_base && d.data_nascimento && d.data_base === d.data_nascimento;
+      resendBody.innerHTML =
+        '<p class="acm-resend-copy">Deseja reenviar para o cálculo com as mesmas informações?</p>' +
+        '<p class="acm-resend-meta">' + esc(resendMeta(data)) + "</p>" +
+        (data.error ? '<p class="acm-detail-error" style="margin-bottom:0.75rem">' + esc(data.error) + "</p>" : "") +
+        (sameDate
+          ? '<p class="acm-detail-warn">Data-base coincide com a data de nascimento — corrija em «Editar e Enviar» se for o caso.</p>'
+          : "") +
+        '<p class="acm-resend-status" id="acm-resend-status" hidden></p>' +
+        '<div class="acm-resend-actions">' +
+          '<button type="button" class="camp-btn camp-btn-ghost" data-resend-act="cancel">Cancelar</button>' +
+          '<button type="button" class="camp-btn camp-btn-secondary" data-resend-act="edit">Editar e Enviar</button>' +
+          '<button type="button" class="camp-btn camp-btn-primary" data-resend-act="send">Enviar</button>' +
+        "</div>";
+    }
+
+    function resendFieldHtml(d, key, label, wide) {
+      return (
+        '<div class="acm-resend-field' + (wide ? " acm-resend-field--wide" : "") + '">' +
+          "<label for=\"acm-edit-" + esc(key) + "\">" + esc(label) + "</label>" +
+          '<input id="acm-edit-' + esc(key) + '" data-resend-field="' + esc(key) + '" value="' + esc(d[key] || "") + '" />' +
+        "</div>"
+      );
+    }
+
+    function renderResendEdit() {
+      if (!resendBody || !resendState) return;
+      const d = resendState.destaques || {};
+      const sections = RESEND_SECTIONS.map(function (section) {
+        const fields = section.fields.map(function (item) {
+          return resendFieldHtml(d, item[0], item[1], !!item[2]);
+        }).join("");
+        return (
+          '<section class="acm-resend-section">' +
+            "<h3>" + esc(section.title) + "</h3>" +
+            '<div class="acm-resend-form">' + fields + "</div>" +
+          "</section>"
+        );
+      }).join("");
+      resendBody.innerHTML =
+        '<p class="acm-resend-copy">Edite os campos do payload e envie de novo para a fila.</p>' +
+        '<p class="acm-resend-meta">' + esc(resendMeta(resendState)) + "</p>" +
+        sections +
+        '<section class="acm-resend-section">' +
+          "<h3>Payload JSON</h3>" +
+          '<div class="acm-resend-field">' +
+            "<label for=\"acm-resend-json\">JSON enviado à API</label>" +
+            '<textarea id="acm-resend-json" class="acm-resend-json" spellcheck="false">' +
+              esc(prettyJson(resendState.payload || {})) +
+            "</textarea>" +
+          "</div>" +
+        "</section>" +
+        '<p class="acm-resend-status" id="acm-resend-status" hidden></p>' +
+        '<div class="acm-resend-actions">' +
+          '<button type="button" class="camp-btn camp-btn-ghost" data-resend-act="back">Voltar</button>' +
+          '<button type="button" class="camp-btn camp-btn-primary" data-resend-act="send-edit">Enviar</button>' +
+        "</div>";
+    }
+
+    function setResendStatus(text, kind) {
+      const el = document.getElementById("acm-resend-status");
+      if (!el) return;
+      el.hidden = !text;
+      el.textContent = text || "";
+      el.className = "acm-resend-status" + (kind ? " acm-resend-status--" + kind : "");
+    }
+
+    function currentEditedPayload() {
+      const ta = document.getElementById("acm-resend-json");
+      if (!ta) return null;
+      const parsed = JSON.parse(ta.value);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("O payload precisa ser um objeto JSON.");
+      }
+      return parsed;
+    }
+
+    async function submitResend(payload) {
+      if (!resendState || resendBusy) return;
+      resendBusy = true;
+      setResendStatus("Enviando…", "");
+      try {
+        const res = await fetch(
+          "/api/api-calculo/monitor/" + encodeURIComponent(resendState.job_id) + "/reenviar",
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(payload ? { payload: payload } : {}),
+          }
+        );
+        const data = await res.json();
+        if (!data || !data.ok) {
+          setResendStatus((data && data.error) || "Falha ao reenviar.", "err");
+          if (!document.getElementById("acm-resend-status")) {
+            if (resendBody) {
+              resendBody.insertAdjacentHTML(
+                "afterbegin",
+                '<p class="acm-resend-status acm-resend-status--err">' +
+                  esc((data && data.error) || "Falha ao reenviar.") +
+                "</p>"
+              );
+            }
+          }
+          return;
+        }
+        closeResend();
+        closeDetail();
+        await refresh();
+      } catch (err) {
+        setResendStatus("Erro de rede ao reenviar.", "err");
+      } finally {
+        resendBusy = false;
+      }
+    }
+
+    async function openResend(jobId) {
+      if (!resendModal || !resendBody || !jobId) return;
+      closeDetail();
+      resendModal.hidden = false;
+      document.body.style.overflow = "hidden";
+      resendBody.innerHTML = '<p class="acm-detail-msg">Carregando…</p>';
+      try {
+        const data = await fetchJob(jobId);
+        if (!data || !data.ok) {
+          resendBody.innerHTML = '<p class="acm-detail-msg acm-detail-msg--err">' +
+            esc((data && data.error) || "Não foi possível carregar o job.") + "</p>";
+          return;
+        }
+        resendState = {
+          job_id: data.job_id || jobId,
+          destaques: data.destaques || {},
+          payload: data.payload && typeof data.payload === "object" ? data.payload : {},
+          error: data.error,
+        };
+        renderResendConfirm(data);
+      } catch (err) {
+        resendBody.innerHTML = '<p class="acm-detail-msg acm-detail-msg--err">Erro de rede ao carregar o job.</p>';
+      }
+    }
+
+    if (errorsList) {
+      errorsList.addEventListener("click", function (ev) {
+        const detailsBtn = ev.target.closest(".acm-job-details");
+        const resendBtn = ev.target.closest(".acm-job-resend");
+        if (detailsBtn) {
+          ev.preventDefault();
+          openDetail(detailsBtn.getAttribute("data-job-id"));
+          return;
+        }
+        if (resendBtn) {
+          ev.preventDefault();
+          openResend(resendBtn.getAttribute("data-job-id"));
+        }
+      });
+    }
+    const closeBtn = document.getElementById("acm-detail-close");
+    const backdrop = document.getElementById("acm-detail-backdrop");
+    if (closeBtn) closeBtn.addEventListener("click", closeDetail);
+    if (backdrop) backdrop.addEventListener("click", closeDetail);
+    const resendClose = document.getElementById("acm-resend-close");
+    const resendBackdrop = document.getElementById("acm-resend-backdrop");
+    if (resendClose) resendClose.addEventListener("click", closeResend);
+    if (resendBackdrop) resendBackdrop.addEventListener("click", closeResend);
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      if (resendModal && !resendModal.hidden) {
+        closeResend();
+        return;
+      }
+      if (detailModal && !detailModal.hidden) closeDetail();
+    });
+    if (detailBody) {
+      detailBody.addEventListener("click", function (ev) {
+        const copyBtn = ev.target.closest(".acm-copy");
+        if (!copyBtn) return;
+        const pre = document.getElementById(copyBtn.getAttribute("data-copy") || "");
+        if (!pre) return;
+        const text = pre.textContent || "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            copyBtn.textContent = "Copiado";
+            setTimeout(function () { copyBtn.textContent = "Copiar"; }, 1200);
+          }).catch(function () {});
+        }
+      });
+    }
+    if (resendBody) {
+      resendBody.addEventListener("click", function (ev) {
+        const act = ev.target.closest("[data-resend-act]");
+        if (!act || resendBusy) return;
+        const kind = act.getAttribute("data-resend-act");
+        if (kind === "cancel") closeResend();
+        else if (kind === "back") renderResendConfirm(resendState || {});
+        else if (kind === "edit") renderResendEdit();
+        else if (kind === "send") submitResend(null);
+        else if (kind === "send-edit") {
+          try {
+            submitResend(currentEditedPayload());
+          } catch (err) {
+            setResendStatus(err && err.message ? err.message : "JSON inválido.", "err");
+          }
+        }
+      });
+      resendBody.addEventListener("input", function (ev) {
+        if (!resendState) return;
+        const field = ev.target.getAttribute && ev.target.getAttribute("data-resend-field");
+        if (field) {
+          resendState.payload = applyFieldToPayload(resendState.payload || {}, field, ev.target.value);
+          if (resendState.destaques) resendState.destaques[field] = ev.target.value;
+          const ta = document.getElementById("acm-resend-json");
+          if (ta) ta.value = prettyJson(resendState.payload);
+          return;
+        }
+        if (ev.target.id === "acm-resend-json") {
+          try {
+            const parsed = JSON.parse(ev.target.value);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              resendState.payload = parsed;
+            }
+          } catch (err) {}
+        }
+      });
+    }
+
+    const instanceCards = document.getElementById("acm-instances");
+    if (instanceCards) {
+      instanceCards.addEventListener("click", function (ev) {
+        const card = ev.target.closest("[data-api-id]");
+        if (!card || !instanceCards.contains(card)) return;
+        const next = card.getAttribute("data-api-id") || "local";
+        if (next === selectedApi) return;
+        selectedApi = next;
+        applyApiSelection();
+      });
+    }
     if (btn) btn.addEventListener("click", refresh);
     if (auto) auto.addEventListener("change", schedule);
     if (configured) {

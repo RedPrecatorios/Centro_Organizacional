@@ -64,10 +64,14 @@ except ImportError:
 from messages_viewer.analise_processual_jobs import get_job_status, start_job
 from messages_viewer.autos_export_jobs import (
     configured as autos_export_configured,
+    delete_job as delete_autos_export_job,
     get_job_status as get_autos_export_job_status,
+    list_jobs as list_autos_export_jobs,
+    retain_hours as autos_export_retain_hours,
     resolve_job_file as resolve_autos_export_file,
     resolve_job_zip as resolve_autos_export_zip,
     start_job as start_autos_export_job,
+    user_can_access_job as autos_export_user_can_access,
 )
 from messages_viewer.pre_analise_processual import (
     api_health as pre_analise_api_health,
@@ -149,7 +153,22 @@ from messages_viewer.calculo_manual import (
 from messages_viewer.api_calculo_monitor import (
     api_calculo_monitor_configured,
     build_api_calculo_monitor_snapshot,
+    load_job_detail as load_api_calculo_job_detail,
     poll_interval_ms as api_calculo_poll_interval_ms,
+    resend_api_calculo_job,
+)
+from messages_viewer.blacklist_admin import (
+    delete_row as blacklist_delete_row,
+    excluidos_datas as blacklist_excluidos_datas,
+    excluidos_exportar as blacklist_excluidos_exportar,
+    excluidos_health as blacklist_excluidos_health,
+    controle_definir as blacklist_controle_definir,
+    controle_ler as blacklist_controle_ler,
+    excluidos_consultar as blacklist_excluidos_consultar,
+    insert_row as blacklist_insert_row,
+    list_rows as blacklist_list_rows,
+    origem_da_plataforma as blacklist_origem_da_plataforma,
+    update_row as blacklist_update_row,
 )
 from messages_viewer.plataforma_auth import (
     auth_bp,
@@ -1577,6 +1596,34 @@ def api_api_calculo_monitor():
     return jsonify(snapshot), status
 
 
+@app.route(
+    "/api/api-calculo/monitor/<job_id>",
+    methods=["GET"],
+    endpoint="api_api_calculo_job_detail",
+)
+def api_api_calculo_job_detail(job_id: str):
+    try:
+        detail, status = load_api_calculo_job_detail(job_id)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    return jsonify(detail), status
+
+
+@app.route(
+    "/api/api-calculo/monitor/<job_id>/reenviar",
+    methods=["POST"],
+    endpoint="api_api_calculo_job_resend",
+)
+def api_api_calculo_job_resend(job_id: str):
+    body = request.get_json(silent=True) or {}
+    payload = body.get("payload") if isinstance(body, dict) else None
+    try:
+        detail, status = resend_api_calculo_job(job_id, payload_override=payload)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    return jsonify(detail), status
+
+
 @app.route("/pre-analise-processual")
 def pre_analise_processual_page():
     health_payload = {"ok": False, "healthy": False}
@@ -1875,6 +1922,46 @@ def api_levantamento_status(job_id: str):
     return jsonify(out), code
 
 
+def _autos_export_actor() -> tuple[int | None, str, bool]:
+    u = current_user() or {}
+    try:
+        uid = int(u["id"]) if u.get("id") is not None else None
+    except (TypeError, ValueError):
+        uid = None
+    name = " ".join(
+        part for part in (u.get("first_name"), u.get("last_name")) if part
+    ).strip()
+    if not name:
+        name = str(u.get("username") or u.get("email") or "").strip()
+    return uid, name, u.get("role") == "admin"
+
+
+def _autos_export_status_payload(job: dict) -> dict:
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else result
+    available = bool(job.get("files_available"))
+    return {
+        "ok": True,
+        "job_id": job.get("job_id"),
+        "status": job.get("status"),
+        "done": bool(job.get("done")),
+        "message": job.get("message") or "A processar…",
+        "percent": float(job.get("percent") or 0.0),
+        "current": job.get("current"),
+        "total": job.get("total"),
+        "error": job.get("error") or (result.get("error") if isinstance(result, dict) else None),
+        "has_zip": bool(job.get("has_zip")) and available,
+        "files_available": available,
+        "created_at": job.get("created_at"),
+        "expires_at": job.get("expires_at"),
+        "retain_hours": job.get("retain_hours") or autos_export_retain_hours(),
+        "processo": job.get("processo"),
+        "incidente": job.get("incidente"),
+        "user_name": job.get("user_name"),
+        "outcome": outcome if job.get("done") and available else None,
+    }
+
+
 @app.route("/autos-esaj")
 def autos_export_page():
     return render_template(
@@ -1883,6 +1970,20 @@ def autos_export_page():
         autos_export_poll_interval_ms=int(
             (os.getenv("AUTOS_EXPORT_POLL_MS") or "1500").strip() or "1500"
         ),
+        autos_export_retain_hours=autos_export_retain_hours(),
+    )
+
+
+@app.route("/api/autos-esaj", methods=["GET"], endpoint="api_autos_export_list")
+def api_autos_export_list():
+    uid, _, is_admin = _autos_export_actor()
+    items = list_autos_export_jobs(user_id=uid, is_admin=is_admin)
+    return jsonify(
+        {
+            "ok": True,
+            "items": items,
+            "retain_hours": autos_export_retain_hours(),
+        }
     )
 
 
@@ -1906,8 +2007,14 @@ def api_autos_export_start():
     incidente = str(data.get("numero_do_incidente") or data.get("incidente") or "").strip()
     if not processo:
         return jsonify({"ok": False, "error": "Número do processo é obrigatório."}), 400
+    uid, uname, _ = _autos_export_actor()
     try:
-        started = start_autos_export_job(processo=processo, incidente=incidente)
+        started = start_autos_export_job(
+            processo=processo,
+            incidente=incidente,
+            user_id=uid,
+            user_name=uname,
+        )
     except FileNotFoundError as e:
         return jsonify({"ok": False, "error": str(e)}), 503
     except Exception as e:
@@ -1915,33 +2022,47 @@ def api_autos_export_start():
     return jsonify({"ok": True, **started})
 
 
-@app.route("/api/autos-esaj/<job_id>", endpoint="api_autos_export_status")
+@app.route("/api/autos-esaj/<job_id>", methods=["GET"], endpoint="api_autos_export_status")
 def api_autos_export_status(job_id: str):
     job = get_autos_export_job_status((job_id or "").strip())
-    if job is None:
+    uid, _, is_admin = _autos_export_actor()
+    if job is None or not autos_export_user_can_access(
+        job, user_id=uid, is_admin=is_admin
+    ):
         return jsonify({"ok": False, "error": "Job não encontrado."}), 404
-    result = job.get("result") if isinstance(job.get("result"), dict) else {}
-    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else result
-    payload = {
-        "ok": True,
-        "job_id": job.get("job_id"),
-        "status": job.get("status"),
-        "done": bool(job.get("done")),
-        "message": job.get("message") or "A processar…",
-        "percent": float(job.get("percent") or 0.0),
-        "error": job.get("error") or (result.get("error") if isinstance(result, dict) else None),
-        "has_zip": bool(job.get("has_zip")),
-        "outcome": outcome if job.get("done") else None,
-    }
-    return jsonify(payload)
+    return jsonify(_autos_export_status_payload(job))
+
+
+@app.route("/api/autos-esaj/<job_id>", methods=["DELETE"], endpoint="api_autos_export_delete")
+def api_autos_export_delete(job_id: str):
+    uid, _, is_admin = _autos_export_actor()
+    payload, code = delete_autos_export_job(
+        (job_id or "").strip(), user_id=uid, is_admin=is_admin
+    )
+    return jsonify(payload), code
 
 
 @app.route("/api/autos-esaj/<job_id>/zip", endpoint="api_autos_export_zip")
 def api_autos_export_zip(job_id: str):
+    uid, _, is_admin = _autos_export_actor()
+    job = get_autos_export_job_status((job_id or "").strip())
+    if job is None or not autos_export_user_can_access(
+        job, user_id=uid, is_admin=is_admin
+    ):
+        return jsonify({"ok": False, "error": "ZIP ainda não está disponível."}), 404
+    if not job.get("files_available"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "O prazo para baixar estes autos já encerrou.",
+                }
+            ),
+            410,
+        )
     zip_path = resolve_autos_export_zip((job_id or "").strip())
     if zip_path is None:
         return jsonify({"ok": False, "error": "ZIP ainda não está disponível."}), 404
-    job = get_autos_export_job_status((job_id or "").strip()) or {}
     processo = str(job.get("processo") or "autos").replace("/", "-")
     incidente = str(job.get("incidente") or "0")
     filename = f"autos_{processo}_{incidente}.zip"
@@ -1955,13 +2076,35 @@ def api_autos_export_zip(job_id: str):
 
 @app.route("/api/autos-esaj/<job_id>/arquivo", endpoint="api_autos_export_file")
 def api_autos_export_file(job_id: str):
+    uid, _, is_admin = _autos_export_actor()
+    job = get_autos_export_job_status((job_id or "").strip())
+    if job is None or not autos_export_user_can_access(
+        job, user_id=uid, is_admin=is_admin
+    ):
+        return jsonify({"ok": False, "error": "Arquivo não encontrado."}), 404
+    if not job.get("files_available"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "O prazo para visualizar estes autos já encerrou.",
+                }
+            ),
+            410,
+        )
     relpath = (request.args.get("path") or "").strip()
     target = resolve_autos_export_file((job_id or "").strip(), relpath)
     if target is None:
         return jsonify({"ok": False, "error": "Arquivo não encontrado."}), 404
+    inline = str(request.args.get("inline") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     return send_file(
         target,
-        as_attachment=True,
+        as_attachment=not inline,
         download_name=target.name,
         mimetype="application/pdf",
     )
@@ -4406,6 +4549,150 @@ def api_atualizacao_imposto_status(job_id: str):
     if not out.get("ok"):
         return jsonify(out), 404
     return jsonify(out)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BLACKLIST — flaskdb.blacklist (consulta paginada e inclusão)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/blacklist")
+def blacklist_page():
+    return render_template("blacklist.html")
+
+
+@app.route("/api/blacklist", methods=["GET"], endpoint="api_blacklist_list")
+def api_blacklist_list():
+    try:
+        page = int(request.args.get("page", "1") or "1")
+    except ValueError:
+        page = 1
+    try:
+        payload = blacklist_list_rows(
+            page=page,
+            q=request.args.get("q") or "",
+            tipo=request.args.get("tipo") or "",
+            origem=request.args.get("origem") or "",
+            sort=request.args.get("sort") or "id",
+            direction=request.args.get("dir") or "desc",
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    return jsonify(payload)
+
+
+@app.route("/api/blacklist", methods=["POST"], endpoint="api_blacklist_create")
+def api_blacklist_create():
+    data = request.get_json(silent=True) or {}
+    try:
+        origem = blacklist_origem_da_plataforma(current_user())
+        return jsonify(blacklist_insert_row(data, origem=origem))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blacklist/<int:row_id>", methods=["PUT"], endpoint="api_blacklist_update")
+def api_blacklist_update(row_id: int):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(blacklist_update_row(row_id, data))
+    except LookupError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blacklist/<int:row_id>", methods=["DELETE"], endpoint="api_blacklist_delete")
+def api_blacklist_delete(row_id: int):
+    try:
+        return jsonify(blacklist_delete_row(row_id))
+    except LookupError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/blacklist/controle", methods=["GET", "POST"], endpoint="api_blacklist_controle")
+def api_blacklist_controle():
+    try:
+        if request.method == "GET":
+            return jsonify(blacklist_controle_ler())
+        data = request.get_json(silent=True) or {}
+        if "ativa" not in data:
+            return jsonify({"ok": False, "error": "Informe se a blacklist deve ficar ativa."}), 400
+        ativa = data.get("ativa")
+        if isinstance(ativa, str):
+            ativa = ativa.strip().lower() in {"1", "true", "sim", "on", "ligada"}
+        elif not isinstance(ativa, bool):
+            ativa = bool(ativa)
+        return jsonify(blacklist_controle_definir(ativa))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/api/blacklist/excluidos/health", methods=["GET"], endpoint="api_blacklist_excluidos_health")
+def api_blacklist_excluidos_health():
+    try:
+        return jsonify(blacklist_excluidos_health())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/api/blacklist/excluidos/datas", methods=["GET"], endpoint="api_blacklist_excluidos_datas")
+def api_blacklist_excluidos_datas():
+    try:
+        return jsonify(blacklist_excluidos_datas())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/api/blacklist/excluidos", methods=["GET"], endpoint="api_blacklist_excluidos")
+def api_blacklist_excluidos():
+    try:
+        pagina = int(request.args.get("pagina", "1") or "1")
+    except ValueError:
+        pagina = 1
+    try:
+        return jsonify(
+            blacklist_excluidos_consultar(
+                data=request.args.get("data") or "",
+                tabela=request.args.get("tabela") or "",
+                q=request.args.get("q") or "",
+                pagina=pagina,
+                limite=15,
+                sort=request.args.get("sort") or "id",
+                direction=request.args.get("dir") or "desc",
+            )
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.route("/api/blacklist/excluidos/export", methods=["GET"], endpoint="api_blacklist_excluidos_export")
+def api_blacklist_excluidos_export():
+    try:
+        payload, filename, mimetype = blacklist_excluidos_exportar(
+            formato=request.args.get("formato") or "",
+            escopo=request.args.get("escopo") or "pesquisa",
+            data=request.args.get("data") or "",
+            tabela=request.args.get("tabela") or "",
+            q=request.args.get("q") or "",
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+    return Response(
+        payload,
+        mimetype=mimetype,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

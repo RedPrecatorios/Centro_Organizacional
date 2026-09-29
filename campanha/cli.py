@@ -6,6 +6,14 @@ from datetime import datetime
 from pathlib import Path
 
 from campanha.core import load_config_toml, load_recipients_csv, run_campaign, run_single_email
+from campanha.replace_domains import (
+    _print_replace,
+    _print_status,
+    domains_status,
+    parse_domain_list,
+    replace_domains,
+    verify_all_active,
+)
 
 
 def _resolve_recipients_path(recipients_arg: str, config_path: str) -> Path:
@@ -91,6 +99,50 @@ def cmd_send_bulk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_replace_domain_list(args: argparse.Namespace) -> list[str]:
+    chunks: list[str] = []
+    if args.file:
+        p = Path(args.file)
+        if not p.is_file():
+            raise SystemExit(f"Arquivo de domínios não encontrado: {p}")
+        chunks.append(p.read_text(encoding="utf-8"))
+    if args.domains:
+        chunks.append(args.domains)
+    return parse_domain_list("\n".join(chunks))
+
+
+def cmd_domains_status(args: argparse.Namespace) -> int:
+    _print_status(domains_status(args.config))
+    return 0
+
+
+def cmd_replace_domains(args: argparse.Namespace) -> int:
+    domains = _load_replace_domain_list(args)
+    if not domains:
+        raise SystemExit("Informe --file e/ou --domains (um domínio por linha, ou separados por vírgula).")
+    result = replace_domains(
+        domains,
+        config_path=args.config,
+        from_name=args.from_name,
+        from_local=args.from_local,
+        reply_to=args.reply_to,
+        deactivate_old=not args.keep_old,
+        delete_old_mailgun=args.delete_old_mailgun,
+        update_toml=not args.skip_toml,
+        verify=not args.skip_verify,
+        dry_run=args.dry_run,
+    )
+    _print_replace(result)
+    return 0 if result.get("ok") else 1
+
+
+def cmd_verify_domains(args: argparse.Namespace) -> int:
+    import json
+
+    print(json.dumps(verify_all_active(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="campanha", description="Disparador de campanhas por e-mail")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -113,6 +165,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_bulk.add_argument("--campaign-id", default="")
     p_bulk.add_argument("--recipients", required=True, help="CSV com colunas Email,nome,processo (aceita também name,email)")
     p_bulk.set_defaults(func=cmd_send_bulk)
+
+    p_st = sub.add_parser("domains-status", help="Lista remetentes no TOML, MySQL e Mailgun")
+    p_st.add_argument("--config", default="campanha/config.toml")
+    p_st.set_defaults(func=cmd_domains_status)
+
+    p_rep = sub.add_parser(
+        "replace-domains",
+        help="Cria os novos remetentes (Mailgun/DNS/MySQL/TOML) e desativa os antigos",
+    )
+    p_rep.add_argument("--config", default="campanha/config.toml")
+    p_rep.add_argument("--file", default="", help="Arquivo texto: 1 domínio por linha")
+    p_rep.add_argument("--domains", default="", help="Lista separada por vírgula ou espaços")
+    p_rep.add_argument("--from-name", default="RED PRECATÓRIOS")
+    p_rep.add_argument("--from-local", default="contato", help="Parte local do From: contato@DOMINIO")
+    p_rep.add_argument("--reply-to", default="contato@redprecatorios.com.br")
+    p_rep.add_argument("--dry-run", action="store_true", help="Só mostra o plano, não altera nada")
+    p_rep.add_argument("--keep-old", action="store_true", help="Não desativa os remetentes atuais")
+    p_rep.add_argument(
+        "--delete-old-mailgun",
+        action="store_true",
+        help="Além de desativar no MySQL, apaga os antigos no Mailgun (irreversível)",
+    )
+    p_rep.add_argument("--skip-toml", action="store_true", help="Não reescreve [[domains]] no config.toml")
+    p_rep.add_argument("--skip-verify", action="store_true", help="Não chama Mailgun verify após criar")
+    p_rep.set_defaults(func=cmd_replace_domains)
+
+    p_ver = sub.add_parser("verify-domains", help="Revalida DNS/Mailgun de todos os remetentes ativos")
+    p_ver.set_defaults(func=cmd_verify_domains)
 
     return p
 

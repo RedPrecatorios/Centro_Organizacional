@@ -10,9 +10,6 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
   <style>
     .ae-grid { display:grid; grid-template-columns: 1fr 8rem; gap: 0.75rem; max-width: 42rem; }
-    .ae-progress { margin: 1rem 0 0; }
-    .ae-bar { height: 8px; background: var(--bg-chat); border-radius: 99px; overflow: hidden; }
-    .ae-bar > span { display:block; height:100%; width:0; background: var(--accent, #2563eb); transition: width .3s ease; }
     .ae-alert { padding: 0.75rem 0.9rem; border-radius: 10px; margin: 0.65rem 0 0; font-size: 0.88rem; line-height: 1.45; }
     .ae-alert--warn { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; }
     .ae-alert--info { background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a; }
@@ -27,18 +24,202 @@
     .ae-file:last-child { border-bottom:0; }
     .ae-bl { color:#9a3412; font-weight:650; font-size:0.72rem; text-transform:uppercase; }
     .ae-section { margin-top: 1.1rem; }
+    .ae-jobs { margin-top: 1.5rem; }
+    .ae-jobs-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem 1rem;
+      margin-bottom: 0.65rem;
+    }
+    .ae-jobs-head h2 { margin: 0; font-size: 1rem; }
+    .ae-jobs-hint { margin: 0; font-size: 0.8rem; color: var(--muted); }
+    .ae-table-wrap { overflow-x: auto; }
+    .ae-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-weight: 650;
+    }
+    .ae-status--run { color: #c2410c; }
+    .ae-status--ok { color: #047857; }
+    .ae-status--err { color: #b91c1c; }
+    .ae-mini-bar {
+      height: 6px;
+      margin-top: 0.35rem;
+      background: #e2e8f0;
+      border-radius: 99px;
+      overflow: hidden;
+      min-width: 8rem;
+    }
+    .ae-mini-bar > span { display: block; height: 100%; width: 0; background: var(--accent, #2563eb); transition: width .25s ease; }
+    .ae-run-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.35rem 0.55rem;
+      margin-top: 0.15rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #475569;
+      font-variant-numeric: tabular-nums;
+    }
+    .ae-row-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .ae-jobs-empty { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.88rem; }
+    #ae-autos-modal .audit-modal-panel {
+      width: min(1120px, calc(100vw - 1.25rem));
+      height: min(92vh, 940px);
+      max-height: min(92vh, 940px);
+    }
+    #ae-autos-modal .audit-modal-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      gap: 0.75rem;
+    }
+    .ae-modal-sub { margin: 0; font-size: 0.82rem; color: var(--muted); }
+    .ae-modal-alerts { display: grid; gap: 0.5rem; }
+    .ae-modal-alerts .ae-alert { margin: 0; }
+    .ae-kpis { margin-top: 0; }
+    .ae-scope-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .ae-scope-tab {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.82rem;
+      font-weight: 650;
+      cursor: pointer;
+      color: #334155;
+    }
+    .ae-scope-tab[aria-selected="true"] {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #fff;
+    }
+    .ae-scope-tab:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .ae-mode-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .ae-mode {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .ae-mode button {
+      border: 0;
+      background: #fff;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 650;
+      cursor: pointer;
+      color: #334155;
+    }
+    .ae-mode button[aria-selected="true"] {
+      background: #0f766e;
+      color: #fff;
+    }
+    .ae-mode button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .ae-view-split {
+      display: grid;
+      grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr);
+      gap: 0.75rem;
+      min-height: 0;
+      flex: 1;
+    }
+    .ae-view-split--single { grid-template-columns: 1fr; }
+    @media (max-width: 800px) {
+      .ae-view-split { grid-template-columns: 1fr; }
+    }
+    .ae-doc-list {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: auto;
+      min-height: 12rem;
+      background: #fff;
+    }
+    .ae-doc-group {
+      padding: 0.45rem 0.7rem 0.15rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+    }
+    .ae-doc-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+      padding: 0.5rem 0.7rem;
+      font-size: 0.84rem;
+      cursor: pointer;
+    }
+    .ae-doc-item:hover { background: #f8fafc; }
+    .ae-doc-item[aria-selected="true"] {
+      background: #ecfdf5;
+      box-shadow: inset 3px 0 0 #0f766e;
+    }
+    .ae-view-split { flex: 1 1 auto; }
+    .ae-viewer {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+      height: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #f1f5f9;
+    }
+    .ae-viewer iframe {
+      width: 100%;
+      flex: 1;
+      min-height: 22rem;
+      border: 0;
+      background: #f1f5f9;
+    }
+    .ae-viewer-empty {
+      margin: auto;
+      padding: 1.25rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      text-align: center;
+    }
+    .ae-head-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
   </style>
 </head>
 <body class="dashboard-body"
   data-ae-configured='{{ autos_export_configured | tojson }}'
-  data-ae-poll-ms='{{ autos_export_poll_interval_ms | tojson }}'>
+  data-ae-poll-ms='{{ autos_export_poll_interval_ms | tojson }}'
+  data-ae-retain-hours='{{ autos_export_retain_hours | tojson }}'>
   {% include 'partials/sidebar_navegacao.html' %}
 
   <div class="dash-main">
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Autos e-SAJ</h1>
-        <p class="dash-sub">Informa o <strong>cumprimento</strong> e o <strong>incidente</strong>. O REFACTOR baixa a pasta digital inteira de cada um e, se houver DEPRE, também a pasta do requisitório. <strong>Não atualiza cálculo</strong>. Acesso restrito: só quem tiver esta aba liberada em Utilizadores.</p>
+        <p class="dash-sub">Informa o <strong>cumprimento</strong> e o <strong>incidente</strong>. O REFACTOR baixa a pasta digital inteira de cada um e, se houver DEPRE, também a pasta do requisitório. <strong>Não atualiza cálculo</strong>. Cada pedido fica na tabela abaixo, mesmo se você sair da aba. Os autos ficam disponíveis por <strong>{{ autos_export_retain_hours }} horas</strong>.</p>
       </div>
     </header>
 
@@ -63,43 +244,78 @@
         <div class="camp-form-actions" style="margin-top:0.75rem">
           <button type="button" class="camp-btn camp-btn-primary" id="ae-enviar"{% if not autos_export_configured %} disabled{% endif %}>Baixar autos</button>
         </div>
-        <div class="ae-progress" id="ae-progress" hidden>
-          <p class="camp-hint" id="ae-progress-label">A iniciar…</p>
-          <div class="ae-bar" aria-hidden="true"><span id="ae-bar"></span></div>
-        </div>
       </div>
+
+      <section class="ae-jobs" aria-labelledby="ae-jobs-title">
+        <div class="ae-jobs-head">
+          <h2 id="ae-jobs-title">Solicitações</h2>
+          <p class="ae-jobs-hint">Download e visualização por {{ autos_export_retain_hours }} h. Depois os arquivos são apagados.</p>
+        </div>
+        <div class="ae-table-wrap">
+          <table class="camp-table camp-table-sm" id="ae-jobs-table">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Processo</th>
+                <th>Inc.</th>
+                <th>Andamento</th>
+                <th>Disponível até</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="ae-jobs-body"></tbody>
+          </table>
+        </div>
+        <p class="ae-jobs-empty" id="ae-jobs-empty">Nenhuma solicitação neste período.</p>
+      </section>
 
       <div id="ae-result"></div>
     </main>
+  </div>
+
+  <div id="ae-autos-modal" class="audit-modal" hidden aria-modal="true" role="dialog" aria-labelledby="ae-autos-title">
+    <div class="audit-modal-backdrop" id="ae-autos-backdrop"></div>
+    <div class="audit-modal-panel">
+      <div class="audit-modal-head">
+        <div>
+          <h2 id="ae-autos-title">Autos baixados</h2>
+          <p class="ae-modal-sub" id="ae-autos-sub"></p>
+        </div>
+        <div class="ae-head-actions">
+          <a class="camp-btn camp-btn-primary camp-btn-sm" id="ae-autos-zip" hidden>ZIP</a>
+          <button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" id="ae-autos-close">Fechar</button>
+        </div>
+      </div>
+      <div class="audit-modal-body" id="ae-autos-body"></div>
+    </div>
   </div>
 
 <script>
 (function () {
   const configured = document.body.dataset.aeConfigured === 'true';
   const pollMs = Math.max(800, parseInt(document.body.dataset.aePollMs || '1500', 10) || 1500);
+  const retainHours = Math.max(1, parseInt(document.body.dataset.aeRetainHours || '24', 10) || 24);
   const btn = document.getElementById('ae-enviar');
-  const progressWrap = document.getElementById('ae-progress');
-  const progressLabel = document.getElementById('ae-progress-label');
-  const bar = document.getElementById('ae-bar');
   const resultEl = document.getElementById('ae-result');
+  const jobsBody = document.getElementById('ae-jobs-body');
+  const jobsEmpty = document.getElementById('ae-jobs-empty');
+  const modal = document.getElementById('ae-autos-modal');
+  const modalBody = document.getElementById('ae-autos-body');
+  const modalSub = document.getElementById('ae-autos-sub');
+  const modalZip = document.getElementById('ae-autos-zip');
   let timer = null;
   let jobId = null;
+  let jobs = [];
+  let openJobId = null;
+  let modalJob = null;
+  let activeScope = 'cumprimento';
+  let activeMode = 'unificado';
+  let activeFile = null;
 
   function esc(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : String(s);
     return d.innerHTML;
-  }
-
-  function setProgress(msg, pct) {
-    progressWrap.hidden = false;
-    progressLabel.textContent = msg || 'A processar…';
-    bar.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%';
-  }
-
-  function stopPoll() {
-    if (timer) { clearInterval(timer); timer = null; }
-    btn.disabled = !configured;
   }
 
   function saldoLabel(v) {
@@ -108,18 +324,89 @@
     return 'Não se aplica';
   }
 
-  function renderOutcome(job) {
+  const SCOPE_META = [
+    { id: 'cumprimento', label: 'Cumprimento' },
+    { id: 'incidente', label: 'Incidente' },
+    { id: 'depre', label: 'DEPRE' }
+  ];
+  const KIND_LABEL = {
+    unificado: 'Unificado',
+    oficios: 'Ofícios',
+    termos: 'Termos',
+    decisoes: 'Decisões',
+    outros: 'Outros',
+    depre_prioridade: 'Prioridade'
+  };
+
+  function isUnified(file) {
+    return !!(file && (file.unified || file.kind === 'unificado'));
+  }
+
+  function filesByScope(files) {
+    const grouped = { cumprimento: [], incidente: [], depre: [] };
+    (files || []).forEach(function (f) {
+      const scope = f.scope || 'outros';
+      if (!grouped[scope]) grouped[scope] = [];
+      grouped[scope].push(f);
+    });
+    return grouped;
+  }
+
+  function fileHref(job, file, inline) {
+    let href = '/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/arquivo?path=' + encodeURIComponent(file.relpath || '');
+    if (inline) href += '&inline=1';
+    return href;
+  }
+
+  function kindLabel(kind) {
+    return KIND_LABEL[kind] || kind || 'Documento';
+  }
+
+  function scopeFiles(job, scopeId) {
+    const grouped = filesByScope((job.outcome || {}).files || []);
+    return grouped[scopeId] || [];
+  }
+
+  function unifiedFile(files) {
+    return (files || []).find(isUnified) || null;
+  }
+
+  function individualFiles(files) {
+    return (files || []).filter(function (f) { return !isUnified(f); });
+  }
+
+  function closeAutosModal() {
+    if (!modal) return;
+    modal.hidden = true;
+    if (modalBody) modalBody.innerHTML = '';
+    if (modalZip) {
+      modalZip.hidden = true;
+      modalZip.removeAttribute('href');
+    }
+    modalJob = null;
+    activeFile = null;
+  }
+
+  function openAutosModal() {
+    if (modal) modal.hidden = false;
+  }
+
+  function renderAlerts(job) {
     const out = job.outcome || {};
     const err = job.error || out.error;
-    if (job.status === 'error' && !out.files) {
-      resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(err || 'Exportação falhou.') + '</div>';
-      return;
-    }
     const bl = out.blacklist || {};
     const pr = out.prioridade || {};
     const warnings = Array.isArray(out.warnings) ? out.warnings : [];
-    const files = Array.isArray(out.files) ? out.files : [];
     let html = '';
+    if (err && job.status === 'error') {
+      html += '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha' +
+        (out.files && out.files.length ? ' parcial' : '') + '</strong>' +
+        esc(err || 'Exportação falhou.') + '</div>';
+    }
+    if (job.done && job.files_available === false) {
+      html += '<div class="ae-alert ae-alert--warn">O prazo de ' + esc(retainHours) +
+        ' horas para visualizar estes autos já encerrou.</div>';
+    }
     if (bl.active) {
       const items = (bl.items || []).map(function (it) {
         return '<div>' + esc(it.mensagem || it.scope) + '</div>';
@@ -139,60 +426,352 @@
     warnings.filter(function (w) { return w.tipo !== 'blacklist'; }).forEach(function (w) {
       html += '<div class="ae-alert ae-alert--info">' + esc(w.mensagem) + '</div>';
     });
+    return html ? '<div class="ae-modal-alerts">' + html + '</div>' : '';
+  }
+
+  function renderKpis(job) {
+    const out = job.outcome || {};
+    const files = Array.isArray(out.files) ? out.files : [];
     const cump = out.cumprimento || {};
     const inc = out.incidente_scope || {};
     const dep = out.depre || {};
-    html += '<dl class="ae-kpis">' +
+    return '<dl class="ae-kpis">' +
       '<div class="ae-kpi"><dt>Cumprimento</dt><dd>' + (cump.found ? (cump.files || 0) + ' PDF(s)' : 'não aberto') + '</dd></div>' +
       '<div class="ae-kpi"><dt>Incidente</dt><dd>' + (inc.found ? (inc.files || 0) + ' PDF(s)' : 'não aberto') + '</dd></div>' +
       '<div class="ae-kpi"><dt>DEPRE</dt><dd>' + (dep.found ? (dep.files || 0) + ' PDF(s)' : 'não localizado') + '</dd></div>' +
       '<div class="ae-kpi"><dt>Total</dt><dd>' + esc(out.file_count || files.length) + '</dd></div>' +
       '</dl>';
-    if (job.has_zip) {
-      html += '<p style="margin-top:1rem"><a class="camp-btn camp-btn-primary" href="/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/zip">Baixar ZIP completo</a></p>';
-    }
-    const byScope = { cumprimento: [], incidente: [], depre: [] };
-    files.forEach(function (f) {
-      const s = f.scope || 'outros';
-      if (!byScope[s]) byScope[s] = [];
-      byScope[s].push(f);
-    });
-    Object.keys(byScope).forEach(function (scope) {
-      const list = byScope[scope];
-      if (!list.length) return;
-      list.sort(function (a, b) { return (b.unified || b.kind === 'unificado') - (a.unified || a.kind === 'unificado'); });
-      html += '<section class="ae-section"><h2 class="dash-section-title">' + esc(scope) + '</h2>';
-      list.forEach(function (f) {
-        const href = '/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/arquivo?path=' + encodeURIComponent(f.relpath || '');
-        html += '<div class="ae-file"><span>' + esc(f.title || f.relpath) +
-          (f.unified || f.kind === 'unificado' ? ' <span class="ae-bl" style="color:#1e3a8a">unificado</span>' : '') +
-          (f.blacklisted ? ' <span class="ae-bl">blacklist</span>' : '') +
-          '</span><a href="' + href + '">PDF</a></div>';
-      });
-      html += '</section>';
-    });
-    if (err && job.status === 'error') {
-      html = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha parcial</strong>' + esc(err) + '</div>' + html;
-    }
-    resultEl.innerHTML = html || '<p class="camp-hint">Nenhum PDF devolvido.</p>';
   }
 
-  async function poll() {
-    if (!jobId) return;
+  function viewerHtml(src, emptyText) {
+    if (!src) {
+      return '<div class="ae-viewer"><p class="ae-viewer-empty">' + esc(emptyText || 'Selecione um documento para visualizar.') + '</p></div>';
+    }
+    return '<div class="ae-viewer"><iframe title="Visualização do PDF" src="' + esc(src) + '"></iframe></div>';
+  }
+
+  function listHtml(job, files) {
+    if (!files.length) {
+      return '<div class="ae-doc-list"><p class="ae-viewer-empty">Nenhum PDF individual nesta pasta.</p></div>';
+    }
+    const groups = {};
+    const order = [];
+    files.forEach(function (f) {
+      const key = f.kind || 'outros';
+      if (!groups[key]) {
+        groups[key] = [];
+        order.push(key);
+      }
+      groups[key].push(f);
+    });
+    let html = '<div class="ae-doc-list">';
+    order.forEach(function (kind) {
+      html += '<div class="ae-doc-group">' + esc(kindLabel(kind)) + '</div>';
+      groups[kind].forEach(function (f, idx) {
+        const key = (f.relpath || kind + '-' + idx);
+        const selected = activeFile && activeFile.relpath === f.relpath;
+        html += '<button type="button" class="ae-doc-item" data-ae-file="' + esc(key) + '" aria-selected="' + (selected ? 'true' : 'false') + '">' +
+          '<span>' + esc(f.title || f.relpath || 'Documento') +
+          (f.blacklisted ? ' <span class="ae-bl">blacklist</span>' : '') +
+          '</span></button>';
+      });
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderModalBody() {
+    if (!modalBody || !modalJob) return;
+    const job = modalJob;
+    const files = scopeFiles(job, activeScope);
+    const unified = unifiedFile(files);
+    const individuais = individualFiles(files);
+    if (activeMode === 'unificado' && !unified) activeMode = 'individuais';
+    const tabs = SCOPE_META.map(function (scope) {
+      const count = individualFiles(scopeFiles(job, scope.id)).length;
+      const disabled = scopeFiles(job, scope.id).length === 0;
+      return '<button type="button" class="ae-scope-tab" data-ae-scope="' + scope.id + '"' +
+        (disabled ? ' disabled' : '') +
+        ' aria-selected="' + (activeScope === scope.id ? 'true' : 'false') + '">' +
+        esc(scope.label) + (count ? ' · ' + count : '') + '</button>';
+    }).join('');
+    const mode = '<div class="ae-mode">' +
+      '<button type="button" data-ae-mode="unificado"' + (unified ? '' : ' disabled') +
+        ' aria-selected="' + (activeMode === 'unificado' ? 'true' : 'false') + '">Unificado</button>' +
+      '<button type="button" data-ae-mode="individuais"' + (individuais.length ? '' : ' disabled') +
+        ' aria-selected="' + (activeMode === 'individuais' ? 'true' : 'false') + '">Individuais</button>' +
+      '</div>';
+    let view = '';
+    if (activeMode === 'unificado') {
+      const src = unified && job.files_available !== false ? fileHref(job, unified, true) : '';
+      view = '<div class="ae-view-split ae-view-split--single">' +
+        viewerHtml(src, unified ? 'O prazo para visualizar estes autos já encerrou.' : 'Não há PDF unificado nesta pasta.') +
+        '</div>';
+    } else {
+      const selected = activeFile && individuais.some(function (f) { return f.relpath === activeFile.relpath; })
+        ? activeFile
+        : null;
+      const src = selected && job.files_available !== false ? fileHref(job, selected, true) : '';
+      view = '<div class="ae-view-split">' +
+        listHtml(job, individuais) +
+        viewerHtml(src, 'Escolha um documento à esquerda para visualizar.') +
+        '</div>';
+    }
+    const openLink = (function () {
+      const file = activeMode === 'unificado' ? unified : (activeFile || null);
+      if (!file || job.files_available === false) return '';
+      return '<a class="camp-btn camp-btn-secondary camp-btn-sm" target="_blank" rel="noopener" href="' +
+        esc(fileHref(job, file, true)) + '">Abrir em nova aba</a>';
+    })();
+    modalBody.innerHTML = renderAlerts(job) + renderKpis(job) +
+      '<div class="ae-scope-tabs">' + tabs + '</div>' +
+      '<div class="ae-mode-row">' + mode + openLink + '</div>' +
+      view;
+  }
+
+  function renderOutcome(job) {
+    modalJob = job;
+    const grouped = filesByScope((job.outcome || {}).files || []);
+    if (!scopeFiles(job, activeScope).length) {
+      const first = SCOPE_META.find(function (scope) { return grouped[scope.id] && grouped[scope.id].length; });
+      activeScope = first ? first.id : 'cumprimento';
+    }
+    const files = scopeFiles(job, activeScope);
+    if (activeMode === 'unificado' && !unifiedFile(files)) activeMode = 'individuais';
+    if (activeMode === 'individuais' && !individualFiles(files).length && unifiedFile(files)) {
+      activeMode = 'unificado';
+    }
+    activeFile = null;
+    if (modalSub) {
+      modalSub.textContent = (job.processo || 'Processo') +
+        (job.incidente ? ' · incidente ' + job.incidente : '');
+    }
+    if (modalZip) {
+      if (job.has_zip && job.files_available !== false) {
+        modalZip.hidden = false;
+        modalZip.href = '/api/autos-esaj/' + encodeURIComponent(job.job_id) + '/zip';
+      } else {
+        modalZip.hidden = true;
+        modalZip.removeAttribute('href');
+      }
+    }
+    renderModalBody();
+    openAutosModal();
+  }
+
+  function fmtWhen(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return '—';
+    const d = new Date(n * 1000);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function parseAutosCount(job) {
+    const current = Number(job.current);
+    const total = Number(job.total);
+    if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+      return { current: Math.max(0, current), total: Math.max(0, total) };
+    }
+    const match = String(job.message || '').match(/(\d+)\s*\/\s*(\d+)/);
+    if (!match) return null;
+    const parsedTotal = Number(match[2]);
+    if (!Number.isFinite(parsedTotal) || parsedTotal <= 0) return null;
+    return { current: Math.max(0, Number(match[1]) || 0), total: parsedTotal };
+  }
+
+  function statusHtml(job) {
+    if (job.status === 'running' || !job.done) {
+      const stagePct = Math.max(0, Math.min(100, Number(job.percent) || 0));
+      const count = parseAutosCount(job);
+      const shownPct = count
+        ? Math.max(0, Math.min(100, Math.round((count.current / count.total) * 100)))
+        : Math.round(stagePct);
+      const message = String(job.message || 'A processar…').replace(/\s+\d+\s*\/\s*\d+\s*$/, '');
+      let meta = '<div class="ae-run-meta">';
+      if (count) {
+        meta += '<span>' + esc(count.current + '/' + count.total) + '</span>';
+      }
+      meta += '<span>' + esc(shownPct + '%') + '</span></div>';
+      return '<div class="ae-status ae-status--run">' + esc(message) + '</div>' +
+        meta +
+        '<div class="ae-mini-bar" aria-hidden="true"><span style="width:' + shownPct + '%"></span></div>';
+    }
+    if (job.status === 'error') {
+      return '<div class="ae-status ae-status--err">Erro</div><div class="camp-hint">' +
+        esc(String(job.error || 'Falha').slice(0, 90)) + '</div>';
+    }
+    const count = job.file_count != null ? job.file_count + ' PDF(s)' : 'Concluído';
+    return '<div class="ae-status ae-status--ok">Concluído · ' + esc(count) + '</div>';
+  }
+
+  function actionsHtml(job) {
+    const id = job.job_id || '';
+    const done = !!job.done;
+    const available = !!job.files_available;
+    let html = '<div class="ae-row-actions">';
+    if (done && available) {
+      html += '<button type="button" class="camp-btn camp-btn-secondary camp-btn-sm" data-ae-view="' + esc(id) + '">Ver autos</button>';
+      if (job.has_zip) {
+        html += '<a class="camp-btn camp-btn-primary camp-btn-sm" href="/api/autos-esaj/' + encodeURIComponent(id) + '/zip">ZIP</a>';
+      }
+    }
+    if (done) {
+      html += '<button type="button" class="camp-btn camp-btn-ghost camp-btn-sm" data-ae-del="' + esc(id) + '">Excluir</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderJobs() {
+    if (!jobsBody) return;
+    if (!jobs.length) {
+      jobsBody.innerHTML = '';
+      if (jobsEmpty) jobsEmpty.hidden = false;
+      return;
+    }
+    if (jobsEmpty) jobsEmpty.hidden = true;
+    jobsBody.innerHTML = jobs.map(function (job) {
+      return '<tr>' +
+        '<td>' + esc(fmtWhen(job.created_at)) +
+          (job.user_name ? '<div class="camp-hint">' + esc(job.user_name) + '</div>' : '') +
+        '</td>' +
+        '<td><code>' + esc(job.processo || '—') + '</code></td>' +
+        '<td>' + esc(job.incidente || '—') + '</td>' +
+        '<td>' + statusHtml(job) + '</td>' +
+        '<td>' + (job.done && job.files_available ? esc(fmtWhen(job.expires_at)) : (job.done ? 'encerrado' : 'após concluir')) + '</td>' +
+        '<td>' + actionsHtml(job) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function schedulePoll() {
+    const hasRunning = jobs.some(function (j) { return !j.done || j.status === 'running'; });
+    if (hasRunning && !timer) {
+      timer = setInterval(refreshJobs, pollMs);
+    }
+    if (!hasRunning && timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (btn) btn.disabled = !configured;
+  }
+
+  async function refreshJobs() {
     try {
-      const res = await fetch('/api/autos-esaj/' + encodeURIComponent(jobId), { credentials: 'same-origin' });
+      const res = await fetch('/api/autos-esaj', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (!data || !data.ok) return;
+      jobs = data.items || [];
+      renderJobs();
+      const current = jobId ? jobs.find(function (j) { return j.job_id === jobId; }) : null;
+      if (current && current.done) {
+        jobId = null;
+        if (openJobId === current.job_id || !openJobId) {
+          openDetail(current.job_id);
+        }
+      } else if (jobId && !jobs.some(function (j) { return j.job_id === jobId; })) {
+        jobId = null;
+      }
+      schedulePoll();
+    } catch (e) {}
+  }
+
+  async function openDetail(id) {
+    if (!id) return;
+    openJobId = id;
+    try {
+      const res = await fetch('/api/autos-esaj/' + encodeURIComponent(id), { credentials: 'same-origin' });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Falha no status');
-      setProgress(data.message, data.percent);
       if (data.done) {
-        stopPoll();
         renderOutcome(data);
+        return;
       }
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--info">Esta solicitação ainda está em andamento.</div>';
     } catch (e) {
-      stopPoll();
       resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(e.message) + '</div>';
     }
   }
+
+  async function deleteJob(id) {
+    if (!id) return;
+    if (!window.confirm('Excluir esta solicitação e os autos baixados?')) return;
+    try {
+      const res = await fetch('/api/autos-esaj/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Não foi possível excluir');
+      if (openJobId === id) {
+        openJobId = null;
+        closeAutosModal();
+        resultEl.innerHTML = '';
+      }
+      await refreshJobs();
+    } catch (e) {
+      resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(e.message) + '</div>';
+    }
+  }
+
+  if (jobsBody) {
+    jobsBody.addEventListener('click', function (ev) {
+      const viewBtn = ev.target.closest('[data-ae-view]');
+      const delBtn = ev.target.closest('[data-ae-del]');
+      if (viewBtn) {
+        ev.preventDefault();
+        openDetail(viewBtn.getAttribute('data-ae-view'));
+        return;
+      }
+      if (delBtn) {
+        ev.preventDefault();
+        deleteJob(delBtn.getAttribute('data-ae-del'));
+      }
+    });
+  }
+
+  if (modalBody) {
+    modalBody.addEventListener('click', function (ev) {
+      const scopeBtn = ev.target.closest('[data-ae-scope]');
+      if (scopeBtn && !scopeBtn.disabled) {
+        activeScope = scopeBtn.getAttribute('data-ae-scope') || 'cumprimento';
+        activeFile = null;
+        const files = scopeFiles(modalJob || {}, activeScope);
+        if (activeMode === 'unificado' && !unifiedFile(files)) activeMode = 'individuais';
+        if (activeMode === 'individuais' && !individualFiles(files).length && unifiedFile(files)) {
+          activeMode = 'unificado';
+        }
+        renderModalBody();
+        return;
+      }
+      const modeBtn = ev.target.closest('[data-ae-mode]');
+      if (modeBtn && !modeBtn.disabled) {
+        activeMode = modeBtn.getAttribute('data-ae-mode') || 'unificado';
+        if (activeMode === 'unificado') activeFile = null;
+        renderModalBody();
+        return;
+      }
+      const fileBtn = ev.target.closest('[data-ae-file]');
+      if (fileBtn && modalJob) {
+        const key = fileBtn.getAttribute('data-ae-file');
+        activeFile = individualFiles(scopeFiles(modalJob, activeScope)).find(function (f, idx) {
+          return (f.relpath || (f.kind || 'outros') + '-' + idx) === key;
+        }) || null;
+        renderModalBody();
+      }
+    });
+  }
+
+  function bindModalClose(el) {
+    if (!el) return;
+    el.addEventListener('click', function () { closeAutosModal(); });
+  }
+  bindModalClose(document.getElementById('ae-autos-close'));
+  bindModalClose(document.getElementById('ae-autos-backdrop'));
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && modal && !modal.hidden) closeAutosModal();
+  });
 
   btn.addEventListener('click', async function () {
     if (!configured) return;
@@ -204,7 +783,6 @@
     }
     btn.disabled = true;
     resultEl.innerHTML = '';
-    setProgress('A iniciar…', 2);
     try {
       const res = await fetch('/api/autos-esaj/iniciar', {
         method: 'POST',
@@ -215,13 +793,18 @@
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Não foi possível iniciar');
       jobId = data.job_id;
-      timer = setInterval(poll, pollMs);
-      poll();
+      openJobId = data.job_id;
+      await refreshJobs();
     } catch (e) {
-      stopPoll();
+      btn.disabled = !configured;
       resultEl.innerHTML = '<div class="ae-alert ae-alert--err" role="alert"><strong>Falha</strong>' + esc(e.message) + '</div>';
     }
   });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshJobs();
+  });
+  refreshJobs();
 })();
 </script>
 </body>

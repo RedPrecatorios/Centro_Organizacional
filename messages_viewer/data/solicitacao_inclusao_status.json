@@ -1,0 +1,24 @@
+{
+  "statuses": [
+    {"code": "RECEBIDO", "label": "Recebido"},
+    {"code": "PROCESSANDO", "label": "Em processamento"},
+    {"code": "INAPTO", "label": "Inapto"},
+    {"code": "SEM_PRECATORIO", "label": "Sem precatório"},
+    {"code": "EM_TRATAMENTO", "label": "Em tratamento"},
+    {"code": "ATRIBUIDO", "label": "Atribuído"},
+    {"code": "CRIADO", "label": "Criado"},
+    {"code": "APTO", "label": "Apto"},
+    {"code": "ANALISE_IA", "label": "Análise da IA"},
+    {"code": "AGUARDAR_CONCLUSAO_JURIDICA", "label": "Aguardar conclusão jurídica"},
+    {"code": "INCIDENTES_EM_PROCESSAMENTO", "label": "Incidentes em processamento"},
+    {"code": "AGUARDANDO_IMPUGNACAO", "label": "Aguardando impugnação"},
+    {"code": "AGUARDANDO_ANALISE_CALCULO", "label": "Aguardando análise do cálculo"},
+    {"code": "ATUALIZACAO_CALCULO_CONCLUIDA", "label": "Atualização do cálculo concluída"},
+    {"code": "ATUALIZACAO_CALCULO_ERRO", "label": "Erro na atualização do cálculo"},
+    {"code": "ANALISE_CALCULO_CONCLUIDA", "label": "Análise do cálculo concluída"},
+    {"code": "CALCULO_CONCLUIDO", "label": "Cálculo concluído"},
+    {"code": "SEM_COMPRADOR", "label": "Sem comprador"},
+    {"code": "ERRO", "label": "Erro"},
+    {"code": "NAO_ENCONTRADO_MONDAY", "label": "Não encontrado na Monday"}
+  ]
+}

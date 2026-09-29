@@ -86,8 +86,17 @@ def mailgun_delete_domain(domain: str) -> dict:
 
 
 def mailgun_list_domains() -> list[dict]:
-    result = _mg_request("GET", "/v4/domains")
-    return result.get("items", [])
+    items: list[dict] = []
+    skip = 0
+    limit = 100
+    while True:
+        result = _mg_request("GET", f"/v4/domains?limit={limit}&skip={skip}")
+        chunk = result.get("items") or []
+        items.extend(chunk)
+        if len(chunk) < limit:
+            break
+        skip += limit
+    return items
 
 
 def _extract_dns_records(mg_response: dict) -> list[dict]:
@@ -325,6 +334,60 @@ def remover_dominio(dominio_id: int, db_config: dict, db_name: str) -> dict:
     conn.close()
 
     return {"ok": True, "dominio": dominio, "mailgun_error": mg_error}
+
+
+def desativar_dominios_exceto(
+    keep_domains: set[str],
+    db_config: dict,
+    db_name: str,
+    *,
+    delete_mailgun: bool = False,
+) -> list[dict]:
+    """
+    Desativa no MySQL os remetentes ativos cujo domínio não está em keep_domains.
+    Só apaga no Mailgun se delete_mailgun=True, e apenas esses (não a conta inteira).
+    """
+    keep = {str(d).strip().lower() for d in keep_domains if str(d).strip()}
+    conn = mysql.connector.connect(**db_config, database=db_name)
+    cur = conn.cursor(dictionary=True)
+    cur.execute("SELECT id, nome, dominio, mailgun_state FROM campanha_dominios WHERE ativo = 1")
+    rows = cur.fetchall() or []
+    out: list[dict] = []
+    for row in rows:
+        dominio = (row.get("dominio") or "").strip()
+        if dominio.lower() in keep:
+            continue
+        mg_error = None
+        mg_deleted = False
+        if delete_mailgun and dominio:
+            try:
+                mailgun_delete_domain(dominio)
+                mg_deleted = True
+            except MailgunError as e:
+                if e.status != 404:
+                    mg_error = str(e)
+                else:
+                    mg_deleted = True
+        if mg_deleted:
+            cur.execute(
+                "UPDATE campanha_dominios SET ativo = 0, mailgun_state = 'deleted' WHERE id = %s",
+                (row["id"],),
+            )
+        else:
+            cur.execute("UPDATE campanha_dominios SET ativo = 0 WHERE id = %s", (row["id"],))
+        out.append(
+            {
+                "id": row["id"],
+                "nome": row.get("nome"),
+                "dominio": dominio,
+                "mailgun_deleted": mg_deleted,
+                "mailgun_error": mg_error,
+            }
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+    return out
 
 
 def listar_dominios(db_config: dict, db_name: str) -> list[dict]:

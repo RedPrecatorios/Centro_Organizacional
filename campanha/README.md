@@ -213,4 +213,27 @@ Variáveis disponíveis (substituição simples `{{var}}`):
 - Faça `send-single` para confirmar entrega real.
 - Só então rode `send-bulk`.
 
+## 10) Trocar todos os remetentes (lote)
+
+Lista os atuais (TOML + MySQL + Mailgun):
+
+```bash
+python -m campanha.cli domains-status
+```
+
+Crie `campanha/novos_dominios.txt` (1 domínio por linha; veja `novos_dominios.example.txt`) e rode:
+
+```bash
+python -m campanha.cli replace-domains --file campanha/novos_dominios.txt --dry-run
+python -m campanha.cli replace-domains --file campanha/novos_dominios.txt
+```
+
+O comando: cria cada domínio no Mailgun, tenta DNS no GoDaddy (se `GODADDY_API_KEY`/`SECRET` estiverem no `.env`), grava em `campanha_dominios`, reescreve `[[domains]]` no `config.toml` e **desativa** os antigos no MySQL. Não apaga os antigos no Mailgun a menos que você passe `--delete-old-mailgun`.
+
+Se o DNS ainda não propagou:
+
+```bash
+python -m campanha.cli verify-domains
+```
+
 ## EXECUÇÃO: python3 -m campanha.cli send-bulk --config campanha/config.toml --recipients campanha/recipients.csv

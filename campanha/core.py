@@ -160,7 +160,7 @@ class SendingConfig:
     per_domain_per_minute: int
     smtp_timeout_seconds: int
     max_retries: int
-    method: str  # "smtp" | "mailgun"
+    method: str  # "smtp" | "mailgun" | "elasticemail"
     # Respostas do cliente: endereço que recebe ao clicar "Responder" (cabeçalho Reply-To).
     reply_to: str | None
 
@@ -173,6 +173,11 @@ class MailgunConfig:
     @property
     def api_base(self) -> str:
         return "https://api.eu.mailgun.net" if self.region.lower() == "eu" else "https://api.mailgun.net"
+
+
+@dataclass(frozen=True)
+class ElasticEmailConfig:
+    api_key: str
 
 
 @dataclass(frozen=True)
@@ -292,6 +297,7 @@ class CampaignConfig:
     source_config_path: str = ""
     # Se true, grava `campanha/logs/<campaign_id>.jsonl`. Se false, não cria arquivo de log.
     jsonl_log_enabled: bool = True
+    elasticemail: ElasticEmailConfig | None = None
 
 
 def _env_strip(key: str) -> str | None:
@@ -450,6 +456,18 @@ def load_config_toml(path: str) -> CampaignConfig:
             raise ValueError("Config inválida: [mailgun].region deve ser 'us' ou 'eu'.")
         mailgun = MailgunConfig(api_key=api_key, region=region)
 
+    elasticemail: ElasticEmailConfig | None = None
+    ee_raw = data.get("elasticemail", {}) or {}
+    if sending.method == "elasticemail":
+        env_ee = os.environ.get("ELASTICEMAIL_API_KEY", "").strip()
+        ee_key = env_ee or str(ee_raw.get("api_key", "")).strip()
+        if not ee_key:
+            raise ValueError(
+                "Config inválida: com sending.method = 'elasticemail' defina ELASTICEMAIL_API_KEY no .env "
+                "(recomendado) ou preencha [elasticemail].api_key no config.toml."
+            )
+        elasticemail = ElasticEmailConfig(api_key=ee_key)
+
     content_raw = data.get("content", {})
     vars_raw = content_raw.get("vars", {}) or {}
     html_rel = str(content_raw.get("html_template", "campanha/templates/default.html"))
@@ -495,6 +513,7 @@ def load_config_toml(path: str) -> CampaignConfig:
         domains=domains,
         source_config_path=str(abs_cfg),
         jsonl_log_enabled=jsonl_log_enabled,
+        elasticemail=elasticemail,
     )
 
 
@@ -849,6 +868,33 @@ def _mailgun_send(domain: DomainSender, cfg: SendingConfig, mg: MailgunConfig, m
         raise RuntimeError(f"Mailgun HTTP {e.code}: {body}") from e
 
 
+def _elasticemail_send(domain: DomainSender, cfg: SendingConfig, ee: ElasticEmailConfig, msg: EmailMessage) -> None:
+    if cfg.dry_run:
+        return
+    from campanha.api_elasticemail import elasticemail_send
+
+    to_addr = str(msg["To"])
+    subject = str(msg["Subject"])
+    from_addr = str(msg["From"])
+    text = msg.get_body(preferencelist=("plain",))
+    html = msg.get_body(preferencelist=("html",))
+    text_content = text.get_content() if text else ""
+    html_content = html.get_content() if html else ""
+    reply = str(msg["Reply-To"]) if msg["Reply-To"] else None
+    # A chave no objeto é a mesma do .env; o cliente lê ELASTICEMAIL_API_KEY.
+    if not os.environ.get("ELASTICEMAIL_API_KEY", "").strip() and ee.api_key:
+        os.environ["ELASTICEMAIL_API_KEY"] = ee.api_key
+    elasticemail_send(
+        from_addr=from_addr,
+        to_addr=to_addr,
+        subject=subject,
+        html=html_content,
+        text=text_content,
+        reply_to=reply,
+        timeout=cfg.smtp_timeout_seconds,
+    )
+
+
 def _build_message(
     domain: DomainSender,
     to_email: str,
@@ -1052,7 +1098,11 @@ def run_campaign(
             error: str | None = None
             for attempt in range(1, cfg.sending.max_retries + 1):
                 try:
-                    if cfg.sending.method == "mailgun":
+                    if cfg.sending.method == "elasticemail":
+                        if not cfg.elasticemail:
+                            raise ValueError("Elastic Email não configurado (cfg.elasticemail=None).")
+                        _elasticemail_send(domain, cfg.sending, cfg.elasticemail, msg)
+                    elif cfg.sending.method == "mailgun":
                         if not cfg.mailgun:
                             raise ValueError("Mailgun não configurado (cfg.mailgun=None).")
                         _mailgun_send(domain, cfg.sending, cfg.mailgun, msg)
@@ -1173,6 +1223,7 @@ def run_single_email(
             campaign_emails_log=cfg.campaign_emails_log,
             sending=cfg.sending,
             mailgun=cfg.mailgun,
+            elasticemail=cfg.elasticemail,
             content=cfg.content,
             domains=domains,
             source_config_path=cfg.source_config_path,

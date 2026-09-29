@@ -615,6 +615,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "auditoria_syscall"
     if path.startswith("/localize"):
         return "localize"
+    if path.startswith("/blacklist") or path.startswith("/api/blacklist"):
+        return "blacklist"
     if path.startswith("/eda"):
         return "eda"
     if path.startswith("/auth"):
@@ -631,6 +633,13 @@ def _safe_post_login_url(nxt: str) -> str:
     if not u or u.get("role") == "admin":
         return nxt
     need = _tab_for_login_path(nxt)
+    if need == "blacklist":
+        from messages_viewer.blacklist_admin import user_can_manage_blacklist
+
+        if user_can_manage_blacklist(u):
+            return nxt
+        alt = _first_accessible_url_for_user(u)
+        return alt or nxt
     if need is not None and user_can_tab(need):
         return nxt
     if need is not None and not user_can_tab(need):
@@ -666,6 +675,8 @@ def _endpoint_to_tab() -> str | None:
         "memoria_calculo": "memoria_calculo",
         "api_calculo_page": "admin",
         "api_api_calculo_monitor": "admin",
+        "api_api_calculo_job_detail": "admin",
+        "api_api_calculo_job_resend": "admin",
         "pre_analise_processual_page": "pre_analise_processual",
         "api_pre_analise_iniciar": "pre_analise_processual",
         "api_pre_analise_casos": "pre_analise_processual",
@@ -689,8 +700,10 @@ def _endpoint_to_tab() -> str | None:
         "api_levantamento_iniciar": "levantamento_processual",
         "api_levantamento_status": "levantamento_processual",
         "autos_export_page": "autos_export",
+        "api_autos_export_list": "autos_export",
         "api_autos_export_start": "autos_export",
         "api_autos_export_status": "autos_export",
+        "api_autos_export_delete": "autos_export",
         "api_autos_export_zip": "autos_export",
         "api_autos_export_file": "autos_export",
         "solicitacao_inclusao_page": "solicitacao_inclusao",
@@ -753,6 +766,16 @@ def _endpoint_to_tab() -> str | None:
         "api_auditoria_syscall_detalhe": "auditoria_syscall",
         "localize_page": "localize",
         "api_localize_pesquisar": "localize",
+        "blacklist_page": "blacklist",
+        "api_blacklist_list": "blacklist",
+        "api_blacklist_create": "blacklist",
+        "api_blacklist_update": "blacklist",
+        "api_blacklist_delete": "blacklist",
+        "api_blacklist_controle": "blacklist",
+        "api_blacklist_excluidos_health": "blacklist",
+        "api_blacklist_excluidos_datas": "blacklist",
+        "api_blacklist_excluidos": "blacklist",
+        "api_blacklist_excluidos_export": "blacklist",
     }
     t = m.get(ep)
     if t is not None:
@@ -859,6 +882,13 @@ def plataforma_before_request() -> Any | None:
     blocked = maintenance_block_for_tab(needs, u)
     if blocked is not None:
         return blocked
+
+    if needs == "blacklist":
+        from messages_viewer.blacklist_admin import user_can_manage_blacklist
+
+        if not user_can_manage_blacklist(u):
+            return handle_access_denied("deny")
+        return None
 
     if u.get("role") == "admin":
         return None
@@ -1185,11 +1215,14 @@ def admin_usuarios():
 def inject_plataforma_template_globals():
     from messages_viewer.page_maintenance import is_tab_in_maintenance
 
+    from messages_viewer.blacklist_admin import user_can_manage_blacklist
+
     u = _session_user()
     return {
         "plataforma_user": u,
         "user_can": user_can_tab,
         "is_plataforma_admin": bool(u and u.get("role") == "admin"),
+        "can_manage_blacklist": user_can_manage_blacklist(u),
         "page_in_maintenance": is_tab_in_maintenance,
     }
 

@@ -31,7 +31,8 @@ jsonl_log_enabled = true
 dry_run = true
 # Método de envio:
 # - "smtp": usa smtp_host/smtp_user/smtp_password por domínio (um login por domínio)
-# - "mailgun": usa Mailgun API (recomendado quando você tem muitos domínios)
+# - "mailgun": usa Mailgun API
+# - "elasticemail": usa Elastic Email API (https://app.elasticemail.com)
 method = "smtp"
 # Quantos emails por domínio por minuto (rate limit simples).
 per_domain_per_minute = 60
@@ -47,6 +48,10 @@ max_retries = 3
 # Chave: defina MAILGUN_API_KEY no .env (recomendado) ou api_key abaixo só na máquina local.
 # api_key = ""
 # region = "us" # "us" ou "eu"
+
+[elasticemail]
+# Usado quando sending.method = "elasticemail"
+# Chave: ELASTICEMAIL_API_KEY no .env (https://app.elasticemail.com)
 
 [content]
 # Assunto da campanha
