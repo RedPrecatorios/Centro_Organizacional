@@ -77,5 +77,6 @@ def test_allowlist_nomes_e_emails():
         {"first_name": "Filipe", "last_name": "Noberto da Silva"}
     )
     assert user_can_manage_blacklist({"username": "guilherme vitoriano"})
-    assert not user_can_manage_blacklist({"username": "admin", "role": "admin"})
+    assert user_can_manage_blacklist({"username": "outro", "role": "admin"})
+    assert not user_can_manage_blacklist({"username": "outro", "role": "colaborador"})
     assert not user_can_manage_blacklist(None)

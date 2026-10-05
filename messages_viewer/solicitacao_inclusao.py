@@ -1050,22 +1050,26 @@ def _user_matches_person_allowlist(
     return False
 
 
+def _user_is_admin(user: dict | None) -> bool:
+    return isinstance(user, dict) and str(user.get("role") or "").strip().lower() == "admin"
+
+
 def user_can_view_autos(user: dict | None) -> bool:
-    """Autos e TXTs baixados só para Guilherme Vitoriano."""
-    return _user_matches_person_allowlist(
+    """Autos e TXTs baixados: administradores e Guilherme Vitoriano."""
+    return _user_is_admin(user) or _user_matches_person_allowlist(
         user, _AUTOS_ALLOWED_EMAILS, _AUTOS_ALLOWED_NAMES
     )
 
 
 def user_can_view_gemini_details(user: dict | None) -> bool:
-    """Detalhe completo da análise Gemini: Guilherme Vitoriano ou Filipe Noberto."""
-    return _user_matches_person_allowlist(
+    """Detalhe completo da análise Gemini: administradores, Guilherme Vitoriano ou Filipe Noberto."""
+    return _user_is_admin(user) or _user_matches_person_allowlist(
         user, _GEMINI_DETAILS_ALLOWED_EMAILS, _GEMINI_DETAILS_ALLOWED_NAMES
     )
 
 
 def user_can_view_other_solicitacoes(user: dict | None) -> bool:
-    """Listar/abrir solicitações de outros usuários: Guilherme Vitoriano ou Filipe Noberto."""
+    """Listar/abrir solicitações de outros usuários: administradores, Guilherme Vitoriano ou Filipe Noberto."""
     return user_can_view_gemini_details(user)
 
 

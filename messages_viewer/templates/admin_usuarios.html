@@ -7,15 +7,34 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}?v=20260824-tabs" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}?v=20260929-bl" />
 </head>
 <body class="dashboard-body">
+  {% macro bl_level_card(prefix, tabs) %}
+  <div class="admin-panel-card admin-panel-card--stack{% if 'blacklist' in tabs %} is-on{% endif %}" data-bl-card>
+    <label class="admin-bl-view">
+      <input type="checkbox" name="{{ prefix }}blacklist" value="1" class="admin-panel-cb" data-bl-view {% if 'blacklist' in tabs %}checked{% endif %} />
+      <span class="admin-panel-card-body">
+        <span class="admin-panel-card-title">Blacklist</span>
+        <span class="admin-panel-card-desc">Ver a aba. Os níveis abaixo só valem com esta opção marcada.</span>
+      </span>
+    </label>
+    <div class="admin-bl-levels">
+      {% for key, title, desc in blacklist_levels %}
+      <label class="admin-bl-level">
+        <input type="checkbox" name="{{ prefix }}{{ key }}" value="1" class="admin-panel-cb" data-bl-level {% if key in tabs %}checked{% endif %} />
+        <span><strong>{{ title }}</strong> — {{ desc }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endmacro %}
   {% include 'partials/sidebar_navegacao.html' %}
   <div class="dash-main">
     <header class="dash-top">
       <div>
         <h1 class="dash-h1">Utilizadores e painéis</h1>
-        <p class="dash-sub">Defina quais <strong>painéis do menu lateral</strong> e funcionalidades extra cada colaborador pode usar. Administradores têm acesso a tudo automaticamente.</p>
+        <p class="dash-sub">Defina quais <strong>painéis do menu lateral</strong> e funcionalidades extra cada colaborador pode usar. Administradores têm acesso a todos os painéis, inclusive a Blacklist (ver, inserir, editar e remover). Para colaboradores, a Blacklist é concedida à parte: ver a aba e, se marcado, inserir, editar e remover.</p>
         <nav class="admin-mod-tabs" aria-label="Abas de utilizadores">
           <button type="button" class="admin-mod-tab" data-mod="add">1. Adicionar usuário</button>
           <button type="button" class="admin-mod-tab" data-mod="ops">2. IP e manutenção</button>
@@ -61,6 +80,9 @@
             </div>
             <div class="admin-panel-grid">
               {% for key, title, desc in panel_defs %}
+              {% if key == 'blacklist' %}
+              {{ bl_level_card('new_tab_', []) }}
+              {% else %}
               <label class="admin-panel-card">
                 <input type="checkbox" name="new_tab_{{ key }}" value="1" class="admin-panel-cb" />
                 <span class="admin-panel-card-body">
@@ -68,6 +90,7 @@
                   <span class="admin-panel-card-desc">{{ desc }}</span>
                 </span>
               </label>
+              {% endif %}
               {% endfor %}
             </div>
           </div>
@@ -220,6 +243,9 @@
                         </div>
                         <div class="admin-panel-grid">
                           {% for key, title, desc in panel_defs %}
+                          {% if key == 'blacklist' %}
+                          {{ bl_level_card('tab_', u.tabs) }}
+                          {% else %}
                           <label class="admin-panel-card">
                             <input type="checkbox" name="tab_{{ key }}" value="1" class="admin-panel-cb" {% if key in u.tabs %}checked{% endif %} />
                             <span class="admin-panel-card-body">
@@ -227,12 +253,13 @@
                               <span class="admin-panel-card-desc">{{ desc }}</span>
                             </span>
                           </label>
+                          {% endif %}
                           {% endfor %}
                         </div>
                         <button class="auth-submit admin-perm-btn" type="submit">Salvar painéis</button>
                       </form>
                       {% else %}
-                      <p class="admin-note">Administrador — acesso a todos os painéis da plataforma.</p>
+                      <p class="admin-note">Administrador — acesso a todos os painéis da plataforma, inclusive a Blacklist.</p>
                       {% endif %}
 
                       <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
@@ -278,12 +305,27 @@
   function rootEl(id) {
     return document.getElementById(id);
   }
+  function syncBlCard(card) {
+    var view = card.querySelector('[data-bl-view]');
+    if (!view) return;
+    var on = view.checked;
+    card.classList.toggle('is-on', on);
+    card.querySelectorAll('[data-bl-level]').forEach(function (lv) {
+      lv.disabled = !on;
+      if (!on) lv.checked = false;
+    });
+  }
   function setAllInRoot(root, checked) {
     if (!root) return;
     root.querySelectorAll('.admin-panel-cb').forEach(function (cb) {
+      cb.disabled = false;
       cb.checked = checked;
-      cb.closest('.admin-panel-card')?.classList.toggle('is-on', checked);
+      var card = cb.closest('.admin-panel-card');
+      if (!card || !card.hasAttribute('data-bl-card')) {
+        card?.classList.toggle('is-on', checked);
+      }
     });
+    root.querySelectorAll('[data-bl-card]').forEach(syncBlCard);
   }
   document.querySelectorAll('[data-panels-action]').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -293,7 +335,12 @@
   });
   document.querySelectorAll('.admin-panel-cb').forEach(function (cb) {
     function sync() {
-      cb.closest('.admin-panel-card')?.classList.toggle('is-on', cb.checked);
+      var card = cb.closest('.admin-panel-card');
+      if (card && card.hasAttribute('data-bl-card')) {
+        syncBlCard(card);
+        return;
+      }
+      card?.classList.toggle('is-on', cb.checked);
     }
     cb.addEventListener('change', sync);
     sync();

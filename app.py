@@ -15,7 +15,7 @@ import mysql.connector
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, url_for
 from werkzeug.exceptions import HTTPException
 
 # cd "c:\Users\justi\OneDrive\Documentos\Python Projects\PycharmProjects\View_Message"
@@ -157,18 +157,17 @@ from messages_viewer.api_calculo_monitor import (
     poll_interval_ms as api_calculo_poll_interval_ms,
     resend_api_calculo_job,
 )
-from messages_viewer.blacklist_admin import (
-    delete_row as blacklist_delete_row,
-    excluidos_datas as blacklist_excluidos_datas,
-    excluidos_exportar as blacklist_excluidos_exportar,
-    excluidos_health as blacklist_excluidos_health,
-    controle_definir as blacklist_controle_definir,
-    controle_ler as blacklist_controle_ler,
-    excluidos_consultar as blacklist_excluidos_consultar,
-    insert_row as blacklist_insert_row,
-    list_rows as blacklist_list_rows,
-    origem_da_plataforma as blacklist_origem_da_plataforma,
-    update_row as blacklist_update_row,
+from messages_viewer.blacklist_pagina import (
+    MOTIVOS as BLACKLIST_MOTIVOS,
+    TIPOS as BLACKLIST_TIPOS,
+    adicionar as blacklist_adicionar_valor,
+    incluir_contatos as blacklist_incluir_contatos,
+    localizar_casos as blacklist_localizar_casos,
+    editar as blacklist_editar_valor,
+    importar_csv as blacklist_importar_csv,
+    listar as blacklist_listar,
+    motivos_na_base as blacklist_motivos_na_base,
+    remover as blacklist_remover_valor,
 )
 from messages_viewer.plataforma_auth import (
     auth_bp,
@@ -4552,147 +4551,186 @@ def api_atualizacao_imposto_status(job_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BLACKLIST — flaskdb.blacklist (consulta paginada e inclusão)
+# BLACKLIST — tabela do EDA (plataforma_central.blacklist)
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+def _blacklist_form():
+    """Formulário cru, para repetir o mesmo campo (vários telefones)."""
+    return request.form
+
+
+def _blacklist_redirect():
+    q = (request.form.get("q") or "").strip()
+    tipo = (request.form.get("filtro_tipo") or "").strip()
+    motivo = (request.form.get("filtro_motivo") or "").strip()
+    sort = (request.form.get("sort") or "").strip()
+    direcao = (request.form.get("dir") or "").strip()
+    try:
+        pagina = int(request.form.get("p") or "1")
+    except ValueError:
+        pagina = 1
+    kwargs: dict[str, str] = {}
+    if q:
+        kwargs["q"] = q
+    if tipo:
+        kwargs["tipo"] = tipo
+    if motivo:
+        kwargs["motivo"] = motivo
+    if sort:
+        kwargs["sort"] = sort
+    if direcao:
+        kwargs["dir"] = direcao
+    if pagina > 1:
+        kwargs["p"] = str(pagina)
+    return redirect(url_for("blacklist_page", **kwargs))
 
 
 @app.route("/blacklist")
 def blacklist_page():
-    return render_template("blacklist.html")
+    from messages_viewer.plataforma_auth import user_blacklist_caps
 
-
-@app.route("/api/blacklist", methods=["GET"], endpoint="api_blacklist_list")
-def api_blacklist_list():
+    busca = (request.args.get("q") or "").strip()
+    filtro_tipo = (request.args.get("tipo") or "").strip()
+    filtro_motivo = (request.args.get("motivo") or "").strip()
+    ordem = (request.args.get("sort") or "data_inclusao").strip()
+    direcao = (request.args.get("dir") or "desc").strip()
     try:
-        page = int(request.args.get("page", "1") or "1")
-    except ValueError:
-        page = 1
-    try:
-        payload = blacklist_list_rows(
-            page=page,
-            q=request.args.get("q") or "",
-            tipo=request.args.get("tipo") or "",
-            origem=request.args.get("origem") or "",
-            sort=request.args.get("sort") or "id",
-            direction=request.args.get("dir") or "desc",
-        )
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-    return jsonify(payload)
-
-
-@app.route("/api/blacklist", methods=["POST"], endpoint="api_blacklist_create")
-def api_blacklist_create():
-    data = request.get_json(silent=True) or {}
-    try:
-        origem = blacklist_origem_da_plataforma(current_user())
-        return jsonify(blacklist_insert_row(data, origem=origem))
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/blacklist/<int:row_id>", methods=["PUT"], endpoint="api_blacklist_update")
-def api_blacklist_update(row_id: int):
-    data = request.get_json(silent=True) or {}
-    try:
-        return jsonify(blacklist_update_row(row_id, data))
-    except LookupError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/blacklist/<int:row_id>", methods=["DELETE"], endpoint="api_blacklist_delete")
-def api_blacklist_delete(row_id: int):
-    try:
-        return jsonify(blacklist_delete_row(row_id))
-    except LookupError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
-
-
-@app.route("/api/blacklist/controle", methods=["GET", "POST"], endpoint="api_blacklist_controle")
-def api_blacklist_controle():
-    try:
-        if request.method == "GET":
-            return jsonify(blacklist_controle_ler())
-        data = request.get_json(silent=True) or {}
-        if "ativa" not in data:
-            return jsonify({"ok": False, "error": "Informe se a blacklist deve ficar ativa."}), 400
-        ativa = data.get("ativa")
-        if isinstance(ativa, str):
-            ativa = ativa.strip().lower() in {"1", "true", "sim", "on", "ligada"}
-        elif not isinstance(ativa, bool):
-            ativa = bool(ativa)
-        return jsonify(blacklist_controle_definir(ativa))
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-
-
-@app.route("/api/blacklist/excluidos/health", methods=["GET"], endpoint="api_blacklist_excluidos_health")
-def api_blacklist_excluidos_health():
-    try:
-        return jsonify(blacklist_excluidos_health())
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-
-
-@app.route("/api/blacklist/excluidos/datas", methods=["GET"], endpoint="api_blacklist_excluidos_datas")
-def api_blacklist_excluidos_datas():
-    try:
-        return jsonify(blacklist_excluidos_datas())
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-
-
-@app.route("/api/blacklist/excluidos", methods=["GET"], endpoint="api_blacklist_excluidos")
-def api_blacklist_excluidos():
-    try:
-        pagina = int(request.args.get("pagina", "1") or "1")
+        pagina = int(request.args.get("p") or "1")
     except ValueError:
         pagina = 1
+    erro = ""
+    motivos_usados: list[str] = []
     try:
-        return jsonify(
-            blacklist_excluidos_consultar(
-                data=request.args.get("data") or "",
-                tabela=request.args.get("tabela") or "",
-                q=request.args.get("q") or "",
-                pagina=pagina,
-                limite=15,
-                sort=request.args.get("sort") or "id",
-                direction=request.args.get("dir") or "desc",
-            )
+        motivos_usados = blacklist_motivos_na_base()
+    except Exception:
+        motivos_usados = []
+    try:
+        dados = blacklist_listar(
+            busca,
+            pagina,
+            tipo=filtro_tipo,
+            motivo=filtro_motivo,
+            sort=ordem,
+            direction=direcao,
         )
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
+        dados = {
+            "registros": [],
+            "total": 0,
+            "pagina": 1,
+            "paginas": 1,
+            "por_pag": 20,
+            "tipo": "",
+            "motivo": "",
+            "sort": "data_inclusao",
+            "dir": "desc",
+        }
+        erro = str(exc)
+    if filtro_motivo and filtro_motivo not in motivos_usados:
+        motivos_usados = [filtro_motivo, *motivos_usados]
+    return render_template(
+        "blacklist.html",
+        busca=busca,
+        erro=erro,
+        tipos=BLACKLIST_TIPOS,
+        motivos=BLACKLIST_MOTIVOS,
+        motivos_usados=motivos_usados,
+        caps=user_blacklist_caps(),
+        **dados,
+    )
 
 
-@app.route("/api/blacklist/excluidos/export", methods=["GET"], endpoint="api_blacklist_excluidos_export")
-def api_blacklist_excluidos_export():
+@app.route("/blacklist/localizar", methods=["GET"], endpoint="blacklist_localizar")
+def blacklist_localizar():
     try:
-        payload, filename, mimetype = blacklist_excluidos_exportar(
-            formato=request.args.get("formato") or "",
-            escopo=request.args.get("escopo") or "pesquisa",
-            data=request.args.get("data") or "",
-            tabela=request.args.get("tabela") or "",
-            q=request.args.get("q") or "",
+        casos = blacklist_localizar_casos(
+            cpf=request.args.get("cpf") or "",
+            processo=request.args.get("processo") or "",
+            incidente=request.args.get("incidente") or "",
         )
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
-    return Response(
-        payload,
-        mimetype=mimetype,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        print(f"[blacklist] localizar: {exc}")
+        return jsonify({"ok": False, "error": "Não foi possível consultar a base."}), 500
+    return jsonify({"ok": True, "casos": casos})
+
+
+@app.route("/blacklist/contatos", methods=["POST"], endpoint="blacklist_contatos")
+def blacklist_contatos():
+    dados = request.get_json(silent=True) or request.form
+    try:
+        resultado = blacklist_incluir_contatos(dados.get("cpf") or "", dados.get("motivo") or "")
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        print(f"[blacklist] contatos: {exc}")
+        return jsonify({"ok": False, "error": "Não foi possível incluir os contatos."}), 500
+    return jsonify({"ok": True, **resultado})
+
+
+@app.route("/blacklist/adicionar", methods=["POST"], endpoint="blacklist_adicionar")
+def blacklist_adicionar():
+    try:
+        flash(blacklist_adicionar_valor(_blacklist_form()), "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        flash(f"Não foi possível gravar: {exc}", "error")
+    return _blacklist_redirect()
+
+
+@app.route("/blacklist/importar-csv", methods=["POST"], endpoint="blacklist_importar_csv")
+def blacklist_importar_csv_view():
+    arquivo = request.files.get("csv")
+    nome = (arquivo.filename if arquivo is not None else "") or ""
+    if arquivo is None or not nome.strip():
+        flash("Selecione um arquivo CSV.", "error")
+        return _blacklist_redirect()
+    if not nome.lower().endswith(".csv"):
+        flash("O arquivo deve ter extensão .csv", "error")
+        return _blacklist_redirect()
+    try:
+        msg, avisos = blacklist_importar_csv(arquivo.read())
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return _blacklist_redirect()
+    except Exception as exc:
+        flash(f"Erro ao ler o CSV: {exc}", "error")
+        return _blacklist_redirect()
+    flash(msg, "success")
+    for aviso in avisos:
+        flash(aviso, "warning")
+    return _blacklist_redirect()
+
+
+@app.route("/blacklist/editar", methods=["POST"], endpoint="blacklist_editar")
+def blacklist_editar():
+    try:
+        row_id = int(request.form.get("id") or "0")
+    except ValueError:
+        row_id = 0
+    try:
+        flash(blacklist_editar_valor(row_id, _blacklist_form()), "success")
+    except LookupError as exc:
+        flash(str(exc), "error")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        flash(f"Não foi possível gravar: {exc}", "error")
+    return _blacklist_redirect()
+
+
+@app.route("/blacklist/remover/<int:row_id>", methods=["POST"], endpoint="blacklist_remover")
+def blacklist_remover(row_id: int):
+    try:
+        flash(blacklist_remover_valor(row_id), "success")
+    except LookupError as exc:
+        flash(str(exc), "error")
+    except Exception as exc:
+        flash(f"Não foi possível remover: {exc}", "error")
+    return _blacklist_redirect()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

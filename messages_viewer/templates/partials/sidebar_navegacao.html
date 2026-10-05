@@ -103,12 +103,12 @@
       Campanha{% if page_in_maintenance('campanha') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
-    {% if can_manage_blacklist %}
-    <a class="dash-nav-item{% if request.endpoint == 'blacklist_page' %} active{% endif %}" href="{{ url_for('blacklist_page') }}">
+    {% if can_view_blacklist %}
+    <a class="dash-nav-item{% if request.endpoint == 'blacklist_page' %} active{% endif %}{% if page_in_maintenance('blacklist') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('blacklist_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
       </span>
-      Blacklist
+      Blacklist{% if page_in_maintenance('blacklist') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
     {% if user_can('localize') %}

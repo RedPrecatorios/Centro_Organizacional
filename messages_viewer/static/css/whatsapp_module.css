@@ -2222,6 +2222,31 @@ body.platform-body #app-toast {
 .admin-panel-card-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .admin-panel-card-title { font-size: 0.88rem; font-weight: 600; color: var(--text); }
 .admin-panel-card-desc { font-size: 0.75rem; color: var(--muted); line-height: 1.35; }
+.admin-panel-card--stack {
+  flex-direction: column;
+  align-items: stretch;
+  cursor: default;
+  grid-column: 1 / -1;
+}
+.admin-bl-view { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; }
+.admin-bl-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+.admin-bl-level {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text);
+  line-height: 1.35;
+}
+.admin-bl-level input:disabled + span { opacity: 0.45; }
 .admin-user-panels-summary {
   display: flex;
   flex-wrap: wrap;

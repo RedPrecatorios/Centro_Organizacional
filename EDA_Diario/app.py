@@ -122,10 +122,8 @@ def _send_download(caminho: Path, nome: str | None = None):
 from modulo_banco import (
     criar_banco_e_tabelas,
     carregar_blacklist,
-    adicionar_blacklist,
     conectar,
     exportar_por_periodo,
-    importar_blacklist_csv,
 )
 from modulo_merge import (
     carregar_planilha_principal_de_workbook,
@@ -160,18 +158,16 @@ app.config["MAX_CONTENT_LENGTH"] = max(
     int(app.config.get("MAX_CONTENT_LENGTH") or 0), _MAX_UPLOAD_BYTES
 )
 
-BLACKLIST_MOTIVOS_PADRAO = (
-    "Solicitou remoção",
-    "Fez Acordo",
-    "Acordo",
-    "Sem Interesse",
-    "Engano",
-    "PF",
-    "Já incluído",
-    "Telefone Incorreto",
-    "Inapto",
-    "Blacklist",
-)
+def _redirect_blacklist_plataforma():
+    """A gestão da lista ficou na aba principal da plataforma (/blacklist).
+
+    Com o EDA montado em /eda, o redirecionamento absoluto sai do prefixo.
+    Sozinho, /blacklist seria esta própria rota, então volta ao painel.
+    """
+    if (request.script_root or "").strip("/"):
+        return redirect("/blacklist")
+    flash("A blacklist passou para a aba principal da plataforma.", "warning")
+    return redirect(url_for("index"))
 
 
 @app.errorhandler(413)
@@ -182,7 +178,7 @@ def _upload_too_large(_exc=None):
         flash(msg, "error")
         return redirect(url_for("relatorio_corrigido")), 413
     flash(msg, "error")
-    return redirect(request.referrer or url_for("blacklist")), 413
+    return redirect(request.referrer or url_for("index")), 413
 
 
 @app.context_processor
@@ -533,146 +529,15 @@ def download_hsm_lemitti():
     return resp
 
 
-# ── Blacklist ─────────────────────────────────────────────────────────────────
+# ── Blacklist (página movida para a aba principal) ───────────────────────────
 
-@app.route("/blacklist")
-def blacklist():
-    criar_banco_e_tabelas()
-    busca   = request.args.get("q", "").strip()
-    pagina  = max(1, int(request.args.get("p", 1)))
-    por_pag = 20
-    offset  = (pagina - 1) * por_pag
-
-    registros, total = _listar_blacklist(busca, por_pag, offset)
-    total_paginas = max(1, -(-total // por_pag))  # ceil division
-
-    return render_template(
-        "blacklist.html",
-        registros=registros,
-        busca=busca,
-        pagina=pagina,
-        total_paginas=total_paginas,
-        total=total,
-        por_pag=por_pag,
-        motivos_padrao=BLACKLIST_MOTIVOS_PADRAO,
-    )
-
-
-@app.route("/blacklist/adicionar", methods=["POST"])
-def blacklist_adicionar():
-    from modulo_blacklist import normalizar_chave_processo_incidente
-
-    tipo   = request.form.get("tipo", "").upper().strip()
-    valor  = request.form.get("valor", "").strip()
-    motivo = request.form.get("motivo", "").strip() or None
-    if motivo and motivo not in BLACKLIST_MOTIVOS_PADRAO:
-        flash("Motivo inválido. Selecione uma opção da lista padronizada.", "error")
-        return redirect(url_for("blacklist"))
-
-    if tipo == "PROCESSO_INCIDENTE":
-        processo = request.form.get("processo", "").strip()
-        incidente = request.form.get("incidente", "").strip()
-        valor = normalizar_chave_processo_incidente(processo, incidente)
-        if not valor:
-            flash("Número de processo é obrigatório para bloqueio por processo/incidente.", "error")
-            return redirect(url_for("blacklist"))
-    elif not tipo or not valor:
-        flash("Tipo e valor são obrigatórios.", "error")
-        return redirect(url_for("blacklist"))
-
-    if tipo not in {"CPF", "NOME", "TELEFONE", "EMAIL", "PROCESSO_INCIDENTE"}:
-        flash(
-            "Tipo inválido. Use CPF, NOME, TELEFONE, EMAIL ou PROCESSO_INCIDENTE.",
-            "error",
-        )
-        return redirect(url_for("blacklist"))
-
-    criar_banco_e_tabelas()
-    adicionar_blacklist(tipo, valor, motivo)
-    if tipo == "PROCESSO_INCIDENTE":
-        flash(f"Adicionado à blacklist: [PROCESSO+INCIDENTE] {valor.replace('|', ' · ')}", "success")
-    else:
-        flash(f"Adicionado à blacklist: [{tipo}] {valor}", "success")
-    return redirect(url_for("blacklist"))
-
-
-@app.route("/blacklist/importar_csv", methods=["POST"])
-def blacklist_importar_csv():
-    f = request.files.get("csv")
-    if f is None or f.filename.strip() == "":
-        flash("Selecione um ficheiro CSV.", "error")
-        return redirect(url_for("blacklist"))
-    nome = (f.filename or "").lower()
-    if not nome.endswith(".csv"):
-        flash("O ficheiro deve ter extensão .csv", "error")
-        return redirect(url_for("blacklist"))
-
-    criar_banco_e_tabelas()
-    buf = io.BytesIO(f.read())
-    try:
-        res = importar_blacklist_csv(buf)
-    except Exception as e:
-        flash(f"Erro ao ler o CSV: {e}", "error")
-        return redirect(url_for("blacklist"))
-
-    dbn = (os.getenv("EDA_MYSQL_DATABASE") or "plataforma_central").strip()
-
-    if not res.get("importados"):
-        if res.get("erros"):
-            for msg in res["erros"][:8]:
-                flash(msg, "error")
-        else:
-            flash(
-                "Nenhuma linha importada. Use colunas tipo e valor como na tabela blacklist; "
-                "tipos CPF, NOME, TELEFONE, EMAIL ou PROCESSO_INCIDENTE.",
-                "warning",
-            )
-        return redirect(url_for("blacklist"))
-
-    ext = ""
-    ignore = res.get("colunas_ignoradas") or []
-    if ignore:
-        amostra = ", ".join(ignore[:12])
-        if len(ignore) > 12:
-            amostra += " …"
-        ext += f" Colunas extra ignoradas: {amostra}."
-
-    msg = (
-        f"CSV aplicado na base MySQL `{dbn}`: {res['importados']} linha(s) gravada(s) "
-        f"(upsert por tipo+valor)."
-    )
-    if res.get("ignorados"):
-        msg += f" {res['ignorados']} ignorada(s) (vazio ou tipo inválido)."
-    if res.get("pulados_ativo"):
-        msg += f" {res['pulados_ativo']} omitida(s) (ativo = 0 / falso)."
-    msg += ext
-    flash(msg, "success")
-
-    if res.get("erros"):
-        for msg_e in res["erros"][:8]:
-            flash(msg_e, "warning")
-
-    return redirect(url_for("blacklist"))
-
-
-@app.route("/blacklist/remover/<int:id_registro>", methods=["POST"])
-def blacklist_remover(id_registro: int):
-    conn = conectar()
-    cur  = conn.cursor()
-    cur.execute("UPDATE blacklist SET ativo = 0 WHERE id = %s", (id_registro,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Entrada removida da blacklist.", "success")
-    return redirect(url_for("blacklist"))
-
-
-@app.route("/api/blacklist")
-def api_blacklist():
-    busca = request.args.get("q", "").strip()
-    limite = min(int(request.args.get("limite", 500)), 2000)
-    registros, total = _listar_blacklist(busca, limite, 0)
-    return jsonify({"total": total, "registros": registros})
+@app.route("/blacklist", methods=["GET", "POST"])
+@app.route("/blacklist/adicionar", methods=["GET", "POST"])
+@app.route("/blacklist/importar_csv", methods=["GET", "POST"])
+@app.route("/blacklist/remover/<int:id_registro>", methods=["GET", "POST"])
+@app.route("/api/blacklist", methods=["GET", "POST"])
+def blacklist(id_registro: int | None = None):
+    return _redirect_blacklist_plataforma()
 
 
 # ── Historico ─────────────────────────────────────────────────────────────────
@@ -705,38 +570,6 @@ def _arquivo_entrada(tipo: str):
     }
     p = ENTRADA / nomes[tipo]
     return p if p.exists() else None
-
-
-
-def _listar_blacklist(busca: str = "", limite: int = 20, offset: int = 0) -> tuple[list[dict], int]:
-    try:
-        conn = conectar()
-        cur  = conn.cursor(dictionary=True)
-        filtro = f"%{busca}%" if busca else "%"
-        cur.execute("""
-            SELECT id, tipo, valor, motivo, data_inclusao
-            FROM blacklist
-            WHERE ativo = 1 AND valor LIKE %s
-            ORDER BY data_inclusao DESC
-            LIMIT %s OFFSET %s
-        """, (filtro, limite, offset))
-        rows = cur.fetchall()
-
-        cur.execute("""
-            SELECT COUNT(*) as total FROM blacklist
-            WHERE ativo = 1 AND valor LIKE %s
-        """, (filtro,))
-        total = cur.fetchone()["total"]
-
-        cur.close()
-        conn.close()
-        for r in rows:
-            if r.get("data_inclusao"):
-                r["data_inclusao"] = r["data_inclusao"].strftime("%d/%m/%Y %H:%M")
-        return rows, total
-    except Exception as e:
-        print(f"[ERRO blacklist] {e}")
-        return [], 0
 
 
 def _listar_execucoes() -> list[dict]:

@@ -58,9 +58,11 @@ def _fold_name(value: str) -> str:
 
 
 def user_can_manage_blacklist(user: dict | None) -> bool:
-    """Só Guilherme Vitoriano e Filipe Noberto."""
+    """Administradores, Guilherme Vitoriano e Filipe Noberto."""
     if not isinstance(user, dict):
         return False
+    if str(user.get("role") or "").strip().lower() == "admin":
+        return True
     email = str(user.get("email") or "").strip().lower()
     if email in _ALLOWED_EMAILS:
         return True

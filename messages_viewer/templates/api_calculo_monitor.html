@@ -551,6 +551,26 @@
     }
     .acm-rank--0 { background: #fef3c7; color: #92400e; }
     .acm-rank--1 { background: #dbeafe; color: #1e40af; }
+    .acm-from {
+      display: inline-block;
+      margin-left: 0.35rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.08rem 0.4rem;
+      border-radius: 999px;
+      background: #ede9fe;
+      color: #5b21b6;
+      vertical-align: middle;
+      font-variant-numeric: tabular-nums;
+    }
+    .acm-from--0 { background: #ede9fe; color: #5b21b6; }
+    .acm-from--1 { background: #dbeafe; color: #1d4ed8; }
+    .acm-from--2 { background: #ccfbf1; color: #0f766e; }
+    .acm-from--3 { background: #fef3c7; color: #92400e; }
+    .acm-from--4 { background: #ffe4e6; color: #9f1239; }
+    .acm-from--5 { background: #e0f2fe; color: #0369a1; }
+    .acm-from--6 { background: #ecfccb; color: #3f6212; }
+    .acm-from--7 { background: #ffedd5; color: #9a3412; }
     .acm-dup {
       display: inline-block;
       margin-left: 0.35rem;
@@ -599,6 +619,75 @@
     @media (max-width: 980px) {
       .acm-bottom { grid-template-columns: 1fr; }
     }
+
+    .acm-offload {
+      margin-bottom: 0.9rem;
+    }
+    .acm-offload-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem 1.25rem;
+      margin-top: 0.75rem;
+    }
+    @media (max-width: 900px) {
+      .acm-offload-grid { grid-template-columns: 1fr; }
+    }
+    .acm-offload-side h3 {
+      margin: 0 0 0.15rem;
+      font-size: 0.92rem;
+    }
+    .acm-offload-side .acm-from {
+      margin: 0.15rem 0 0;
+    }
+    .acm-offload-group:first-of-type {
+      margin-top: 0.55rem;
+    }
+    .acm-offload-group + .acm-offload-group {
+      margin-top: 0.85rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid #e7eef6;
+    }
+    .acm-offload-label {
+      margin: 0 0 0.1rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #334155;
+    }
+    .acm-offload-kpis {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.9rem;
+      margin: 0.35rem 0 0.5rem;
+      font-size: 0.84rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .acm-offload-kpis b { font-weight: 700; }
+    .acm-offload-jobs {
+      list-style: none;
+      margin: 0.35rem 0 0;
+      padding: 0;
+    }
+    .acm-offload-jobs li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.35rem 0;
+      border-top: 1px solid #f1f5f9;
+      font-size: 0.8rem;
+    }
+    .acm-offload-jobs strong { font-weight: 650; }
+    .acm-pill {
+      display: inline-block;
+      margin-left: 0.35rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.08rem 0.4rem;
+      border-radius: 999px;
+      background: #e0e7ff;
+      color: #3730a3;
+      white-space: nowrap;
+    }
+    .acm-pill--wait { background: #ffedd5; color: #9a3412; }
 
     .acm-loading .acm-kpi-value { opacity: 0.35; }
 
@@ -801,6 +890,11 @@
       {% endif %}
 
       <div class="acm-instances" id="acm-instances" role="group" aria-label="APIs de cálculo"></div>
+
+      <section class="acm-panel acm-offload" id="acm-offload" aria-label="Entre as APIs" hidden>
+        <h2 class="acm-panel-title">Entre as APIs</h2>
+        <div class="acm-offload-grid" id="acm-offload-body"></div>
+      </section>
 
       <div id="acm-local-view">
       <div class="acm-section">
@@ -1051,7 +1145,11 @@
         '<li class="acm-job acm-job--' + kind + '">' +
           '<span class="acm-job-dot" aria-hidden="true"></span>' +
           '<div>' +
-            '<div class="acm-job-title">' + esc(name) + dup + '</div>' +
+            '<div class="acm-job-title">' + esc(name) + dup +
+              (row.forwarded_from
+                ? '<span class="acm-from acm-from--' + ipTone(row.forwarded_from) + '" title="Veio da outra API">' + esc(row.forwarded_from) + '</span>'
+                : '') +
+            '</div>' +
             '<div class="acm-job-meta">' +
               '<span>' + esc(row.host || row.source_ip || "—") + '</span>' +
               (row.processo ? '<code>' + esc(row.processo) + '</code>' : '') +
@@ -1279,6 +1377,10 @@
           if (inst.drive_worker) {
             metrics += "<span>drive-worker " + esc(inst.drive_worker) + "</span>";
           }
+          const moved = inst.offload && Number(inst.offload.on_peer);
+          if (moved) {
+            metrics += "<span><b>" + moved + "</b> na outra API</span>";
+          }
         } else {
           const health = inst.health_status ? esc(inst.health_status) : (up ? "ok" : "sem resposta");
           const latency = inst.latency_ms != null ? " · " + esc(inst.latency_ms) + " ms" : "";
@@ -1321,6 +1423,88 @@
       try { sessionStorage.setItem("acm-selected-api", selectedApi); } catch (err) {}
     }
 
+    function peerHost(url) {
+      const text = String(url || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+      return text || "a outra API";
+    }
+
+    function ipTone(address) {
+      const ip = String(address || "").split(":")[0];
+      if (ip === "68.183.23.91") return 0;
+      if (ip === "192.81.217.95") return 1;
+      let hash = 0;
+      for (let i = 0; i < ip.length; i++) hash = (hash * 31 + ip.charCodeAt(i)) >>> 0;
+      return 2 + (hash % 6);
+    }
+
+    function ipTag(address) {
+      const ip = String(address || "").split(":")[0];
+      if (!ip) return "";
+      return '<span class="acm-from acm-from--' + ipTone(ip) + '">' + esc(ip) + "</span>";
+    }
+
+    function offloadJobsHtml(jobs) {
+      const list = jobs || [];
+      if (!list.length) return "";
+      return (
+        '<ul class="acm-offload-jobs">' +
+        list.map(function (row) {
+          const sending = row.status === "offloading";
+          return (
+            "<li><span><strong>" + esc(row.requerente || "Sem requerente") + "</strong>" +
+              (row.processo ? " · " + esc(row.processo) : "") +
+              (row.incidente ? " inc. " + esc(row.incidente) : "") +
+              (sending ? '<span class="acm-pill acm-pill--wait">saindo</span>' : "") +
+              "</span>" +
+              "<span>" + esc(relAge(row.enqueued_at) || "") + "</span></li>"
+          );
+        }).join("") +
+        "</ul>"
+      );
+    }
+
+    function offloadGroup(label, count, jobs) {
+      return (
+        '<div class="acm-offload-group">' +
+          '<p class="acm-offload-label">' + esc(label) + " · " + count + "</p>" +
+          offloadJobsHtml(jobs) +
+        "</div>"
+      );
+    }
+
+    function renderOffload(data) {
+      const box = document.getElementById("acm-offload");
+      const body = document.getElementById("acm-offload-body");
+      if (!box || !body) return;
+      const local = data.offload || {};
+      const localInst = (data.instances || []).find(function (inst) { return inst && inst.id === "local"; });
+      const remoteInst = (data.instances || []).find(function (inst) { return inst && inst.id === "remote"; });
+      if (!local.enabled) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const sent = local.sent || local.jobs || [];
+      const received = local.received || [];
+      const sentCount = local.sent_count != null ? Number(local.sent_count) : sent.length;
+      const receivedCount = local.received_count != null ? Number(local.received_count) : received.length;
+      const here = local.local_address || (localInst && localInst.address) || "";
+      const there = peerHost(local.peer || (remoteInst && remoteInst.address));
+      body.innerHTML =
+        '<div class="acm-offload-side">' +
+          "<h3>" + esc((localInst && localInst.label) || "Esta API") + "</h3>" +
+          ipTag(here) +
+          offloadGroup("Enviou", sentCount, sent) +
+          offloadGroup("Recebeu", receivedCount, received) +
+        "</div>" +
+        '<div class="acm-offload-side">' +
+          "<h3>" + esc((remoteInst && remoteInst.label) || "Outra API") + "</h3>" +
+          ipTag(there) +
+          offloadGroup("Recebeu", sentCount, sent) +
+          offloadGroup("Enviou", receivedCount, received) +
+        "</div>";
+    }
+
     function render(data) {
       if (!data || !data.ok) {
         setText("acm-updated", data && data.error ? data.error : "Falha ao carregar");
@@ -1360,6 +1544,7 @@
       setBadge("acm-svc-api", svc.api_calculo);
       setBadge("acm-svc-drive", svc.api_calculo_drive_worker);
       renderInstances(data.instances);
+      renderOffload(data);
       renderRemoteQueue(data.instances);
       applyApiSelection(data.instances);
 

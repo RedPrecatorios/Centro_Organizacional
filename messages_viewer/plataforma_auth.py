@@ -77,7 +77,19 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
     ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
+    (
+        "blacklist",
+        "Blacklist",
+        "Ver CPF, nome, telefone, e-mail e processo+incidente bloqueados",
+    ),
     ("eda", "EDA Diário", "Processamento e relatórios EDA (/eda/)"),
+)
+
+# Níveis da Blacklist. Só valem junto com a permissão de visualização `blacklist`.
+BLACKLIST_LEVELS: tuple[tuple[str, str, str], ...] = (
+    ("blacklist_inserir", "Inserir", "Incluir registro e importar CSV."),
+    ("blacklist_editar", "Editar", "Alterar tipo, valor e motivo de um registro."),
+    ("blacklist_remover", "Remover", "Desativar um registro da lista."),
 )
 
 # Permissões extra (não aparecem no menu lateral; configuráveis em Utilizadores).
@@ -111,7 +123,13 @@ PERMISSION_PANELS: tuple[tuple[str, str, str], ...] = TAB_PANELS + FEATURE_PERMI
 TAB_KEYS: tuple[tuple[str, str], ...] = tuple((p[0], p[1]) for p in TAB_PANELS)
 
 TAB_IDS = {p[0] for p in TAB_PANELS}
-PERMISSION_IDS = {p[0] for p in PERMISSION_PANELS}
+PERMISSION_IDS = {p[0] for p in PERMISSION_PANELS} | {p[0] for p in BLACKLIST_LEVELS}
+_BLACKLIST_NEED_CAP = {
+    "blacklist": "ver",
+    "blacklist_inserir": "inserir",
+    "blacklist_editar": "editar",
+    "blacklist_remover": "remover",
+}
 SESSION_USER_ID = "plataforma_uid"
 SESSION_VERSION = "plataforma_ver"
 COLLAB_ALLOWED_IPS_META_KEY = "collaborator_allowed_ips"
@@ -532,6 +550,45 @@ def current_user() -> dict | None:
     return g._plataforma_user
 
 
+def user_blacklist_caps(user: dict | None = None) -> frozenset[str]:
+    """ver / inserir / editar / remover. Administrador recebe os quatro."""
+    from messages_viewer.blacklist_admin import user_can_manage_blacklist
+
+    u = current_user() if user is None else user
+    if user_can_manage_blacklist(u):
+        return frozenset({"ver", "inserir", "editar", "remover"})
+    if not isinstance(u, dict) or u.get("role") != "colaborador":
+        return frozenset()
+    try:
+        uid = int(u["id"])
+    except (KeyError, TypeError, ValueError):
+        return frozenset()
+    tabs = get_user_tabs(uid)
+    if "blacklist" not in tabs:
+        return frozenset()
+    caps = {"ver"}
+    if "blacklist_inserir" in tabs:
+        caps.add("inserir")
+    if "blacklist_editar" in tabs:
+        caps.add("editar")
+    if "blacklist_remover" in tabs:
+        caps.add("remover")
+    return frozenset(caps)
+
+
+def permission_ids_from_form(form, prefix: str) -> list[str]:
+    """Painéis marcados. Níveis da blacklist só entram se a visualização estiver marcada."""
+    chosen: list[str] = []
+    for key, _, _ in PERMISSION_PANELS:
+        if form.get(f"{prefix}{key}"):
+            chosen.append(key)
+    if "blacklist" in chosen:
+        for key, _, _ in BLACKLIST_LEVELS:
+            if form.get(f"{prefix}{key}"):
+                chosen.append(key)
+    return chosen
+
+
 def user_can_tab(tab: str) -> bool:
     u = current_user()
     if not u:
@@ -569,6 +626,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
+        ("blacklist", "blacklist_page"),
         ("outro_modulo", "embedded.index"),
     ]
     for tab, endpoint in order:
@@ -634,9 +692,7 @@ def _safe_post_login_url(nxt: str) -> str:
         return nxt
     need = _tab_for_login_path(nxt)
     if need == "blacklist":
-        from messages_viewer.blacklist_admin import user_can_manage_blacklist
-
-        if user_can_manage_blacklist(u):
+        if "ver" in user_blacklist_caps(u):
             return nxt
         alt = _first_accessible_url_for_user(u)
         return alt or nxt
@@ -767,15 +823,12 @@ def _endpoint_to_tab() -> str | None:
         "localize_page": "localize",
         "api_localize_pesquisar": "localize",
         "blacklist_page": "blacklist",
-        "api_blacklist_list": "blacklist",
-        "api_blacklist_create": "blacklist",
-        "api_blacklist_update": "blacklist",
-        "api_blacklist_delete": "blacklist",
-        "api_blacklist_controle": "blacklist",
-        "api_blacklist_excluidos_health": "blacklist",
-        "api_blacklist_excluidos_datas": "blacklist",
-        "api_blacklist_excluidos": "blacklist",
-        "api_blacklist_excluidos_export": "blacklist",
+        "blacklist_adicionar": "blacklist_inserir",
+        "blacklist_localizar": "blacklist_inserir",
+        "blacklist_contatos": "blacklist_inserir",
+        "blacklist_importar_csv": "blacklist_inserir",
+        "blacklist_editar": "blacklist_editar",
+        "blacklist_remover": "blacklist_remover",
     }
     t = m.get(ep)
     if t is not None:
@@ -879,14 +932,13 @@ def plataforma_before_request() -> Any | None:
 
     from messages_viewer.page_maintenance import maintenance_block_for_tab
 
-    blocked = maintenance_block_for_tab(needs, u)
+    maint_needs = "blacklist" if needs in _BLACKLIST_NEED_CAP else needs
+    blocked = maintenance_block_for_tab(maint_needs, u)
     if blocked is not None:
         return blocked
 
-    if needs == "blacklist":
-        from messages_viewer.blacklist_admin import user_can_manage_blacklist
-
-        if not user_can_manage_blacklist(u):
+    if needs in _BLACKLIST_NEED_CAP:
+        if _BLACKLIST_NEED_CAP[needs] not in user_blacklist_caps(u):
             return handle_access_denied("deny")
         return None
 
@@ -1065,12 +1117,11 @@ def admin_usuarios():
                             )
                             new_id = int(cur.lastrowid or 0)
                             if role == "colaborador" and new_id:
-                                for k, _, _ in PERMISSION_PANELS:
-                                    if request.form.get(f"new_tab_{k}"):
-                                        cur.execute(
-                                            "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
-                                            (new_id, k),
-                                        )
+                                for k in permission_ids_from_form(request.form, "new_tab_"):
+                                    cur.execute(
+                                        "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
+                                        (new_id, k),
+                                    )
                             conn.commit()
                             ok = f"Usuário {new_u!r} criado."
                         except mysql.connector.errors.IntegrityError as ie:
@@ -1164,12 +1215,11 @@ def admin_usuarios():
                         )
                         ro = cur.fetchone()
                         if ro and ro["role"] == "colaborador":
-                            for k, _, _ in PERMISSION_PANELS:
-                                if request.form.get(f"tab_{k}"):
-                                    cur.execute(
-                                        "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
-                                        (puid, k),
-                                    )
+                            for k in permission_ids_from_form(request.form, "tab_"):
+                                cur.execute(
+                                    "INSERT INTO plataforma_user_permissions (user_id, tab_id) VALUES (%s, %s)",
+                                    (puid, k),
+                                )
                         cur.execute(
                             "UPDATE plataforma_users SET perms_version = perms_version + 1 WHERE id = %s",
                             (puid,),
@@ -1204,6 +1254,7 @@ def admin_usuarios():
         "admin_usuarios.html",
         users=users,
         panel_defs=PERMISSION_PANELS,
+        blacklist_levels=BLACKLIST_LEVELS,
         maintenance_states=list_maintenance_states(),
         collaborator_allowed_ips=collaborator_allowed_ips_raw(),
         current_remote_ip=_current_remote_ip(),
@@ -1218,11 +1269,14 @@ def inject_plataforma_template_globals():
     from messages_viewer.blacklist_admin import user_can_manage_blacklist
 
     u = _session_user()
+    bl_caps = user_blacklist_caps(u)
     return {
         "plataforma_user": u,
         "user_can": user_can_tab,
         "is_plataforma_admin": bool(u and u.get("role") == "admin"),
         "can_manage_blacklist": user_can_manage_blacklist(u),
+        "can_view_blacklist": "ver" in bl_caps,
+        "blacklist_caps": bl_caps,
         "page_in_maintenance": is_tab_in_maintenance,
     }
 

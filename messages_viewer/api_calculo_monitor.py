@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 _SP = ZoneInfo("America/Sao_Paulo")
 _JOB_ID_RE = re.compile(r"^[a-fA-F0-9]{8,64}$")
+_ENQUEUED_LOG_RE = re.compile(r"Calculo enfileirado job_id=([a-fA-F0-9]+)")
+_PEER_POST_LOG_RE = re.compile(
+    r'uvicorn\.access \| ([0-9.]+):\d+ - "POST /calculo/fila'
+)
 
 DEFAULT_API_CALCULO_ROOT = Path(
     "/mnt/volume_nyc1_1778499775066/API_CALCULO"
@@ -76,6 +80,49 @@ def poll_interval_ms() -> int:
 def _cloud_label(ip: str) -> str:
     ip = (ip or "").strip() or "-"
     return CLOUD_LABELS.get(ip, ip)
+
+
+def _local_public_ip() -> str:
+    raw = (os.getenv("API_CALCULO_PUBLIC_IP") or "").strip()
+    if raw:
+        return raw
+    for ip, label in CLOUD_LABELS.items():
+        if "este host" in label.lower():
+            return ip
+    return ""
+
+
+def _instances_with_forward_tags(
+    offloaded: list[dict[str, Any]],
+    instances: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Marca, na fila da outra API, os jobs cujo id é o peer_job_id de um repasse local."""
+    local_ip = _local_public_ip()
+    origin_by_job_id: dict[str, str] = {}
+    if local_ip:
+        for job in offloaded:
+            peer_job_id = str(job.get("peer_job_id") or "").strip()
+            if peer_job_id:
+                origin_by_job_id[peer_job_id] = local_ip
+    if not origin_by_job_id:
+        return instances
+    for instance in instances:
+        if instance.get("id") != "remote":
+            continue
+        _tag_forwarded_rows(instance.get("running_jobs"), origin_by_job_id)
+        _tag_forwarded_rows(instance.get("queued_oldest"), origin_by_job_id)
+    return instances
+
+
+def _tag_forwarded_rows(rows: Any, origin_by_job_id: dict[str, str]) -> None:
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get("forwarded_from") or "").strip():
+            continue
+        origin = origin_by_job_id.get(str(row.get("job_id") or ""))
+        if origin:
+            row["forwarded_from"] = origin
 
 
 def _now_iso() -> str:
@@ -495,6 +542,7 @@ def _remote_instance() -> dict[str, Any]:
         "recent_errors": fila.get("recent_errors") if queue_visible else [],
         "generated_at": fila.get("generated_at") if queue_visible else None,
         "note": note,
+        "offload": _normalize_remote_offload(fila.get("offload")) if queue_visible else None,
     }
     return _stabilize_remote_health(built, bool(health.get("reachable")))
 
@@ -721,7 +769,7 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
         rank = int(job.get("priority_rank"))
     except (TypeError, ValueError):
         rank = 2
-    return {
+    summary = {
         "job_id": str(job.get("job_id") or ""),
         "status": str(job.get("status") or ""),
         "source_ip": ip,
@@ -733,6 +781,22 @@ def _job_summary(job: dict[str, Any]) -> dict[str, Any]:
         "error": (str(job.get("error") or "")[:200] or None),
         **case,
     }
+    peer_job_id = str(job.get("peer_job_id") or "").strip()
+    if peer_job_id:
+        summary["peer_job_id"] = peer_job_id
+    forwarded_from = str(job.get("forwarded_from") or "").strip()
+    # Caso recebido da outra API: a tag da fila local usa o IP dela.
+    # O painel remoto já marca o inverso pelo peer_job_id do repasse.
+    if not forwarded_from:
+        try:
+            hops = int(job.get("offload_hops") or 0)
+        except (TypeError, ValueError):
+            hops = 0
+        if hops >= 1:
+            forwarded_from = _peer_ip()
+    if forwarded_from:
+        summary["forwarded_from"] = forwarded_from
+    return summary
 
 
 def api_calculo_jobs_keep_count() -> int:
@@ -751,6 +815,118 @@ def api_calculo_log_path() -> Path:
     if raw:
         return Path(raw)
     return api_calculo_root() / "logs" / "api.log"
+
+
+def _peer_base_url() -> str:
+    return (_api_env_value("PEER_CALCULO_BASE_URL") or "").strip().rstrip("/")
+
+
+def _peer_ip() -> str:
+    host = _peer_base_url().split("://", 1)[-1].split("/", 1)[0]
+    return host.split(":", 1)[0].strip()
+
+
+def _public_address() -> str:
+    ip = _local_public_ip() or "127.0.0.1"
+    port_raw = (os.getenv("API_CALCULO_PORT") or _api_env_value("API_PORT") or "9487").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 9487
+    return f"{ip}:{port}"
+
+
+def _log_epoch(line: str) -> float | None:
+    if len(line) < 23:
+        return None
+    try:
+        return datetime.strptime(line[:23], "%Y-%m-%d %H:%M:%S,%f").timestamp()
+    except ValueError:
+        return None
+
+
+def _job_ids_posted_by_peer(peer_ip: str) -> set[str]:
+    """Jobs criados por POST /calculo/fila vindo da outra API."""
+    if not peer_ip:
+        return set()
+    path = api_calculo_log_path()
+    if not path.is_file():
+        return set()
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if size > 8_000_000:
+                handle.seek(size - 8_000_000)
+                handle.readline()
+            text = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return set()
+    found: set[str] = set()
+    pending = ""
+    pending_at: float | None = None
+    for line in text.splitlines():
+        enqueued = _ENQUEUED_LOG_RE.search(line)
+        if enqueued:
+            pending = enqueued.group(1)
+            pending_at = _log_epoch(line)
+            continue
+        posted = _PEER_POST_LOG_RE.search(line)
+        if not posted or not pending:
+            continue
+        posted_at = _log_epoch(line)
+        if (
+            posted.group(1) == peer_ip
+            and pending_at is not None
+            and posted_at is not None
+            and 0 <= (posted_at - pending_at) <= 2
+        ):
+            found.add(pending)
+        pending = ""
+    return found
+
+
+def _offload_block(
+    *,
+    peer: str,
+    sending: list[dict[str, Any]],
+    on_peer: list[dict[str, Any]],
+    received: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sent = on_peer + sending
+    return {
+        "enabled": bool(peer),
+        "peer": peer or None,
+        "local_address": _public_address(),
+        "sending": len(sending),
+        "on_peer": len(on_peer),
+        "jobs": sent[:20],
+        "sent": sent[:20],
+        "sent_count": len(sent),
+        "received": received[:20],
+        "received_count": len(received),
+    }
+
+
+def _normalize_remote_offload(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    jobs = raw.get("jobs") if isinstance(raw.get("jobs"), list) else []
+    try:
+        sending = int(raw.get("sending") or 0)
+    except (TypeError, ValueError):
+        sending = 0
+    try:
+        on_peer = int(raw.get("on_peer") or 0)
+    except (TypeError, ValueError):
+        on_peer = 0
+    peer = str(raw.get("peer") or "").strip() or None
+    return {
+        "enabled": bool(raw.get("enabled")) or bool(peer),
+        "peer": peer,
+        "sending": sending,
+        "on_peer": on_peer,
+        "jobs": [item for item in jobs if isinstance(item, dict)][:8],
+    }
 
 
 def _read_libreoffice_max() -> int | None:
@@ -798,6 +974,8 @@ def build_api_calculo_monitor_snapshot(
     queued: list[dict[str, Any]] = []
     done: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    offloading: list[dict[str, Any]] = []
+    offloaded: list[dict[str, Any]] = []
     unreadable = 0
 
     for path in jobs_dir.glob("*.json"):
@@ -820,6 +998,10 @@ def build_api_calculo_monitor_snapshot(
             done.append(summary)
         elif status == "error":
             errors.append(summary)
+        elif status == "offloading":
+            offloading.append(summary)
+        elif status == "offloaded":
+            offloaded.append(summary)
 
     def _sort_key_enq(item: dict[str, Any]) -> str:
         return str(item.get("enqueued_at") or "")
@@ -831,6 +1013,8 @@ def build_api_calculo_monitor_snapshot(
     queued.sort(key=_sort_key_enq)  # oldest first
     done.sort(key=_sort_key_fin, reverse=True)
     errors.sort(key=_sort_key_fin, reverse=True)
+    offloading.sort(key=_sort_key_enq)
+    offloaded.sort(key=_sort_key_enq)
 
     by_source = []
     for ip, counts in by_ip.items():
@@ -862,6 +1046,19 @@ def build_api_calculo_monitor_snapshot(
         except (OSError, json.JSONDecodeError):
             index_len = None
 
+    from_peer = _job_ids_posted_by_peer(_peer_ip())
+    received = [
+        job
+        for job in (queued + running)
+        if str(job.get("job_id") or "") in from_peer
+    ]
+    received.sort(key=_sort_key_enq)
+    offload = _offload_block(
+        peer=_peer_base_url(),
+        sending=offloading,
+        on_peer=offloaded,
+        received=received,
+    )
     lo_max = _read_libreoffice_max()
     keep = api_calculo_jobs_keep_count()
     disk_done = int(status_counts.get("done", 0))
@@ -889,11 +1086,13 @@ def build_api_calculo_monitor_snapshot(
             "running": int(status_counts.get("running", 0)),
             "done": disk_done,
             "error": disk_error,
+            "offloading": len(offloading),
+            "offloaded": len(offloaded),
             "other": int(
                 sum(
                     v
                     for k, v in status_counts.items()
-                    if k not in {"queued", "running", "done", "error"}
+                    if k not in {"queued", "running", "done", "error", "offloading", "offloaded"}
                 )
             ),
             "unreadable": unreadable,
@@ -916,26 +1115,33 @@ def build_api_calculo_monitor_snapshot(
             "api_calculo": _systemctl_active("api-calculo"),
             "api_calculo_drive_worker": _systemctl_active("api-calculo-drive-worker"),
         },
+        "offload": offload,
         "rr_state": rr_state,
         "by_source": by_source,
         "running_jobs": running[: max(1, running_limit)],
         "queued_oldest": queued[: max(1, queued_sample)],
         "recent_done": done[: max(1, done_sample)],
         "recent_errors": _group_error_jobs(errors),
-        "instances": [
-            _local_instance(
-                {
-                    "queued": int(status_counts.get("queued", 0)),
-                    "running": int(status_counts.get("running", 0)),
-                    "done": disk_done,
-                    "error": disk_error,
-                },
-                {
-                    "api_calculo": _systemctl_active("api-calculo"),
-                    "api_calculo_drive_worker": _systemctl_active("api-calculo-drive-worker"),
-                },
-                lo_max,
-            ),
+        "instances": _instances_with_forward_tags(
+            offloaded,
+            [
+            {
+                **_local_instance(
+                    {
+                        "queued": int(status_counts.get("queued", 0)),
+                        "running": int(status_counts.get("running", 0)),
+                        "done": disk_done,
+                        "error": disk_error,
+                    },
+                    {
+                        "api_calculo": _systemctl_active("api-calculo"),
+                        "api_calculo_drive_worker": _systemctl_active("api-calculo-drive-worker"),
+                    },
+                    lo_max,
+                ),
+                "offload": offload,
+            },
             _remote_instance(),
-        ],
+            ],
+        ),
     }
