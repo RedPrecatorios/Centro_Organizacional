@@ -154,9 +154,9 @@
   (function () {
     var cfgEl = document.getElementById('tj-runtime-config');
     var taxaAtualAnualPct = cfgEl ? parseFloat(cfgEl.dataset.taxaAtualAnualPct) : 5;
-    var taxaVendaAnualPct = cfgEl ? parseFloat(cfgEl.dataset.taxaVendaAnualPct) : 15;
+    var taxaVendaAnualPct = cfgEl ? parseFloat(cfgEl.dataset.taxaVendaAnualPct) : 13.75;
     if (isNaN(taxaAtualAnualPct)) taxaAtualAnualPct = 5;
-    if (isNaN(taxaVendaAnualPct)) taxaVendaAnualPct = 15;
+    if (isNaN(taxaVendaAnualPct)) taxaVendaAnualPct = 13.75;
 
     var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
     var pct6 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 });

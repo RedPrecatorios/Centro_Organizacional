@@ -1492,7 +1492,8 @@ body.platform-body #app-toast {
   flex: 1 1 28rem;
   min-width: 0;
 }
-.memoria-proposta-table-wrap--municipal {
+.memoria-proposta-table-wrap--municipal,
+.memoria-proposta-table-wrap--inss {
   flex: 0 1 300px;
   max-width: 340px;
 }
@@ -1508,19 +1509,31 @@ body.platform-body #app-toast {
   white-space: nowrap;
 }
 .proposta-municipal-table th,
-.proposta-municipal-table td {
+.proposta-municipal-table td,
+.proposta-inss-table th,
+.proposta-inss-table td {
   padding: 8px 14px;
 }
 .proposta-municipal-table th:first-child,
-.proposta-municipal-table td:first-child {
+.proposta-municipal-table td:first-child,
+.proposta-inss-table th:first-child,
+.proposta-inss-table td:first-child {
   min-width: 6.25rem;
 }
 .proposta-municipal-table th:last-child,
-.proposta-municipal-table td:last-child {
+.proposta-municipal-table td:last-child,
+.proposta-inss-table th:last-child,
+.proposta-inss-table td:last-child {
   min-width: 7.5rem;
 }
-.memoria-proposta-table-wrap--municipal .dash-table-scroll {
+.memoria-proposta-table-wrap--municipal .dash-table-scroll,
+.memoria-proposta-table-wrap--inss .dash-table-scroll {
   overflow-x: hidden;
+}
+.proposta-inss-table thead th {
+  background: #ffedd5;
+  color: #9a3412;
+  font-weight: 700;
 }
 
 /* Tabela de Juros (OC x Rendimento) */
@@ -1946,7 +1959,8 @@ body.platform-body #app-toast {
     margin-bottom: 0;
   }
   .memoria-proposta-table-wrap,
-  .memoria-proposta-table-wrap--municipal {
+  .memoria-proposta-table-wrap--municipal,
+  .memoria-proposta-table-wrap--inss {
     flex: 1 1 100%;
     max-width: 100%;
   }
@@ -2509,6 +2523,10 @@ body.platform-body #app-toast {
   color: var(--muted);
   font-size: 0.9rem;
   padding: 1rem 0;
+}
+.camp-loading[hidden],
+.camp-field[hidden] {
+  display: none !important;
 }
 .camp-spin {
   width: 20px; height: 20px;

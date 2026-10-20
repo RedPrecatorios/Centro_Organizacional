@@ -62,6 +62,12 @@
                 <label><input type="radio" name="memoria_modo" id="memoria-modo-nome" value="nome" checked /> Por requerente (nome)</label>
                 <label><input type="radio" name="memoria_modo" id="memoria-modo-proc" value="processo" /> Por processo e incidente</label>
               </div>
+              <div class="memoria-modo-radios">
+                <label for="memoria-pesquisar-cumprimentos">
+                  <input type="checkbox" id="memoria-pesquisar-cumprimentos" name="pesquisar_cumprimentos" />
+                  Pesquisar Cumprimentos
+                </label>
+              </div>
             </fieldset>
             <div class="memoria-modo-panel" id="memoria-panel-nome" aria-labelledby="memoria-modo-nome">
               <label class="memoria-input-label" for="memoria-nome">Pesquisar requerente</label>
@@ -78,7 +84,7 @@
                 </div>
                 <div class="memoria-fld">
                   <label class="memoria-input-label" for="memoria-incidente">Nº do incidente</label>
-                  <input type="text" id="memoria-incidente" name="memoria_incidente" placeholder="Opcional (vazio = sem incidente)" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+                  <input type="text" id="memoria-incidente" name="memoria_incidente" placeholder="Opcional (vazio = todos os incidentes do processo)" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
                 </div>
                 <button type="button" class="memoria-btn-buscar" id="memoria-btn-buscar-proc" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
               </div>
@@ -119,6 +125,13 @@
               <div>
                 <p class="memoria-verificar-meses-tit">Correção de meses necessária</p>
                 <p class="memoria-verificar-meses-txt"><strong>É necessário </strong> conferir o número de meses no cadastro antes de utilizar os valores da memória.</p>
+              </div>
+            </div>
+            <div class="memoria-verificar-meses memoria-removido-blacklist" id="memoria-removido-blacklist" hidden role="alert">
+              <span class="memoria-verificar-meses-icon" aria-hidden="true">!</span>
+              <div>
+                <p class="memoria-verificar-meses-tit">Cadastro removido por blacklist</p>
+                <p class="memoria-verificar-meses-txt">O controle de coleta está com status <strong>REMOVIDO_BLACKLIST</strong>. Os valores da memória podem estar desatualizados: o cadastro em precainfosnew foi apagado pelo limpador externo. Análise / Atualizar Cálculo pode recriar o cadastro e voltar a ser removido.</p>
               </div>
             </div>
           </div>
@@ -197,7 +210,7 @@
         <section class="memoria-proposta-section" aria-labelledby="proposta-heading">
           <h2 class="memoria-h2" id="proposta-heading">Sugestões de proposta</h2>
           <p class="memoria-skeleton-note" style="margin-top:0;">
-            Valores de sugestão: <strong>Total líquido</strong> da memória (acima) × fator (cenário × perfil de credor). Só são calculados depois de carregar um requerente na pesquisa. Os percentuais das regras não são exibidos. A tabela compacta à direita é a precificação <strong>Municipal</strong>.
+            Valores de sugestão: <strong>Total líquido</strong> da memória (acima) × fator do cenário. Só são calculados depois de carregar um requerente na pesquisa. Os percentuais das regras não são exibidos. As tabelas compactas à direita são <strong>Municipal</strong> e <strong>Precatórios INSS 2027</strong>.
           </p>
           <div class="memoria-proposta-tables">
           <div class="dash-table-wrap memoria-proposta-table-wrap">
@@ -206,30 +219,25 @@
                 <thead>
                   <tr>
                     <th scope="col">Cenário</th>
-                    <th scope="col" class="num">Credor original ou herdeiros habilitados</th>
-                    <th scope="col" class="num">Herdeiros não-habilitados</th>
+                    <th scope="col" class="num">SUGESTÃO</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td>OC 2026 ou menor</td>
-                    <td class="num proposta-val" data-pi="0" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, OC 2026 ou menor">—</td>
-                    <td class="num proposta-val" data-pi="0" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, OC 2026 ou menor">—</td>
+                    <td class="num proposta-val" data-pi="0" aria-label="Sugestão, OC 2026 ou menor">—</td>
                   </tr>
                   <tr>
                     <td>OC 2027</td>
-                    <td class="num proposta-val" data-pi="1" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, OC 2027">—</td>
-                    <td class="num proposta-val" data-pi="1" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, OC 2027">—</td>
+                    <td class="num proposta-val" data-pi="1" aria-label="Sugestão, OC 2027">—</td>
                   </tr>
                   <tr>
                     <td>OC 2028 ou C/Ofício</td>
-                    <td class="num proposta-val" data-pi="2" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, OC 2028 ou C/Ofício">—</td>
-                    <td class="num proposta-val" data-pi="2" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, OC 2028 ou C/Ofício">—</td>
+                    <td class="num proposta-val" data-pi="2" aria-label="Sugestão, OC 2028 ou C/Ofício">—</td>
                   </tr>
                   <tr>
                     <td>Sem Ofício ou Cumprimento</td>
-                    <td class="num proposta-val" data-pi="3" data-pj="0" aria-label="Sugestão, credor original ou herdeiros habilitados, Sem Ofício ou Cumprimento">—</td>
-                    <td class="num proposta-val" data-pi="3" data-pj="1" aria-label="Sugestão, herdeiros não-habilitados, Sem Ofício ou Cumprimento">—</td>
+                    <td class="num proposta-val" data-pi="3" aria-label="Sugestão, Sem Ofício ou Cumprimento">—</td>
                   </tr>
                 </tbody>
               </table>
@@ -265,6 +273,24 @@
               </table>
             </div>
           </div>
+          <div class="dash-table-wrap memoria-proposta-table-wrap memoria-proposta-table-wrap--inss">
+            <div class="dash-table-scroll">
+              <table class="dash-table proposta-regras-table proposta-inss-table" id="proposta-inss-table">
+                <thead>
+                  <tr>
+                    <th scope="col" class="proposta-inss-th">Precatórios INSS 2027</th>
+                    <th scope="col" class="num">Sugestão</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>INSS 2027</td>
+                    <td class="num proposta-inss-val" aria-label="Sugestão Precatórios INSS 2027">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           </div>
         </section>
       </div>
@@ -274,7 +300,7 @@
         <section class="memoria-proposta-section memoria-proposta-section--simular" aria-labelledby="proposta-simular-heading">
           <h2 class="memoria-h2" id="proposta-simular-heading">Simular proposta</h2>
           <p class="memoria-skeleton-note" style="margin-top:0;">
-            Um único valor: o <strong>total líquido</strong>. A tabela usa as mesmas regras da memória do caso (cenário × perfil de credor). Os percentuais das regras não são exibidos. A tabela compacta à direita é a precificação <strong>Municipal</strong>.
+            Um único valor: o <strong>total líquido</strong>. A tabela usa as mesmas regras da memória do caso. Os percentuais das regras não são exibidos. As tabelas compactas à direita são <strong>Municipal</strong> e <strong>Precatórios INSS 2027</strong>.
           </p>
           <div class="memoria-simular-field">
             <label class="memoria-input-label" for="memoria-simular-valor">Total líquido (R$)</label>
@@ -288,30 +314,25 @@
                 <thead>
                   <tr>
                     <th scope="col">Cenário</th>
-                    <th scope="col" class="num">Credor original ou herdeiros habilitados</th>
-                    <th scope="col" class="num">Herdeiros não-habilitados</th>
+                    <th scope="col" class="num">SUGESTÃO</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td>OC 2026 ou menor</td>
-                    <td class="num proposta-sim-val" data-pi="0" data-pj="0">—</td>
-                    <td class="num proposta-sim-val" data-pi="0" data-pj="1">—</td>
+                    <td class="num proposta-sim-val" data-pi="0">—</td>
                   </tr>
                   <tr>
                     <td>OC 2027</td>
-                    <td class="num proposta-sim-val" data-pi="1" data-pj="0">—</td>
-                    <td class="num proposta-sim-val" data-pi="1" data-pj="1">—</td>
+                    <td class="num proposta-sim-val" data-pi="1">—</td>
                   </tr>
                   <tr>
                     <td>OC 2028 ou C/Ofício</td>
-                    <td class="num proposta-sim-val" data-pi="2" data-pj="0">—</td>
-                    <td class="num proposta-sim-val" data-pi="2" data-pj="1">—</td>
+                    <td class="num proposta-sim-val" data-pi="2">—</td>
                   </tr>
                   <tr>
                     <td>Sem Ofício ou Cumprimento</td>
-                    <td class="num proposta-sim-val" data-pi="3" data-pj="0">—</td>
-                    <td class="num proposta-sim-val" data-pi="3" data-pj="1">—</td>
+                    <td class="num proposta-sim-val" data-pi="3">—</td>
                   </tr>
                 </tbody>
               </table>
@@ -347,6 +368,24 @@
               </table>
             </div>
           </div>
+          <div class="dash-table-wrap memoria-proposta-table-wrap memoria-proposta-table-wrap--inss">
+            <div class="dash-table-scroll">
+              <table class="dash-table proposta-regras-table proposta-inss-table" id="proposta-simular-inss-table">
+                <thead>
+                  <tr>
+                    <th scope="col" class="proposta-inss-th">Precatórios INSS 2027</th>
+                    <th scope="col" class="num">Sugestão</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>INSS 2027</td>
+                    <td class="num proposta-sim-inss-val">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           </div>
         </section>
       </div>
@@ -376,6 +415,12 @@
                 <label><input type="radio" name="memoria_manual_modo" id="memoria-manual-modo-nome" value="nome" checked /> Por requerente (nome)</label>
                 <label><input type="radio" name="memoria_manual_modo" id="memoria-manual-modo-proc" value="processo" /> Por processo e incidente</label>
               </div>
+              <div class="memoria-modo-radios">
+                <label for="memoria-manual-pesquisar-cumprimentos">
+                  <input type="checkbox" id="memoria-manual-pesquisar-cumprimentos" name="pesquisar_cumprimentos" />
+                  Pesquisar Cumprimentos
+                </label>
+              </div>
             </fieldset>
             <div class="memoria-modo-panel" id="memoria-manual-panel-nome">
               <label class="memoria-input-label" for="memoria-manual-nome">Pesquisar requerente</label>
@@ -392,7 +437,7 @@
                 </div>
                 <div class="memoria-fld">
                   <label class="memoria-input-label" for="memoria-manual-incidente">Nº do incidente</label>
-                  <input type="text" id="memoria-manual-incidente" name="memoria_manual_incidente" placeholder="Opcional (vazio = sem incidente)" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
+                  <input type="text" id="memoria-manual-incidente" name="memoria_manual_incidente" placeholder="Opcional (vazio = todos os incidentes do processo)" inputmode="text" autocomplete="off" {% if not memoria_mysql_configured %}disabled{% endif %} />
                 </div>
                 <button type="button" class="memoria-btn-buscar" id="memoria-manual-btn-buscar-proc" {% if not memoria_mysql_configured %}disabled title="Configure MEMORIA_MYSQL_* no .env"{% endif %}>Pesquisar</button>
               </div>
@@ -408,6 +453,7 @@
 
           <form id="memoria-manual-form" class="memoria-manual-form" autocomplete="off">
             <input type="hidden" name="id_precainfosnew" id="memoria-manual-id" value="" />
+            <input type="hidden" name="origem_dados" id="memoria-manual-origem" value="" />
             <fieldset class="memoria-manual-fs" id="memoria-manual-fs-id" disabled>
               <legend>Identificação</legend>
               <p class="memoria-manual-hint">Se o caso foi encontrado no cadastro, vem daí. Se for novo, o envio grava só na memória de cálculo.</p>
@@ -1281,6 +1327,20 @@
       color: #9a3412;
     }
     .memoria-verificar-meses[hidden]{ display: none !important; }
+    .memoria-removido-blacklist{
+      background: #fef2f2;
+      border-color: #fca5a5;
+      border-left-color: #dc2626;
+      color: #991b1b;
+    }
+    .memoria-removido-blacklist .memoria-verificar-meses-icon{
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+    .memoria-removido-blacklist .memoria-verificar-meses-tit,
+    .memoria-removido-blacklist .memoria-verificar-meses-txt{
+      color: #991b1b;
+    }
     .memoria-verificar-meses-icon{
       flex-shrink: 0;
       width: 28px;
@@ -1447,13 +1507,9 @@
       reservaHonorarios: 0,
       totalLiquido: 0
     };
-    var TAXA_PROPOSTA = [
-      [0.35, 0],
-      [0.35, 0],
-      [0.28, 0],
-      [0.22, 0]
-    ];
+    var TAXA_PROPOSTA = [0.35, 0.35, 0.28, 0.22];
     var TAXA_PROPOSTA_MUNICIPAL = [0.28, 0.26, 0.24, 0.22];
+    var TAXA_PROPOSTA_INSS_2027 = 0.74;
     var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
     var pctInput = document.getElementById('honor-pct');
     var honorLabel = document.getElementById('honor-label');
@@ -1537,6 +1593,7 @@
     var MEMORIA_STATUS_SEM_SALDO = 'Sem Saldo';
     var NUMERO_MESES_VERIFICAR = 'Verificar Meses';
     var verificarMesesAlert = document.getElementById('memoria-verificar-meses');
+    var removidoBlacklistAlert = document.getElementById('memoria-removido-blacklist');
     var modal = document.getElementById('memoria-modal');
     var modalText = document.getElementById('memoria-modal-text');
     var modalSpin = document.getElementById('memoria-modal-spin');
@@ -1582,10 +1639,13 @@
         modalAutoHideT = setTimeout(function () { hideModal(); }, 7000);
       }
     }
-    function hideModal() {
-      if (!modal || modalBlocking) return;
+    function hideModal(force) {
+      if (!modal) return;
+      if (modalBlocking && !force) return;
+      modalBlocking = false;
       modal.setAttribute('hidden', '');
       modal.classList.remove('is-blocking');
+      modal.setAttribute('aria-modal', 'false');
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
     }
     function bindModalClose() {
@@ -1594,6 +1654,18 @@
       document.addEventListener('keydown', function (e) {
         if (e && e.key === 'Escape') hideModal();
       });
+    }
+
+    function rotuloCasoLista(row) {
+      if (row && row.source === 'coleta_cumprimento') {
+        var partes = ['Cumprimento', 'Processo: ' + (row.numero_de_processo || '—')];
+        if (row.cpf) partes.push('CPF: ' + row.cpf);
+        if (row.requerente_coleta) partes.push('Requerente: ' + row.requerente_coleta);
+        return partes.join(' · ');
+      }
+      return 'Processo: ' + (row && row.numero_de_processo ? row.numero_de_processo : '—') +
+        ' · Incidente: ' + (row && row.numero_do_incidente ? row.numero_do_incidente : '—') +
+        (row && row.ultima_atualizacao ? (' · Últ. atual.: ' + formatUltimaAtualizacao(row.ultima_atualizacao)) : '');
     }
 
     function formatUltimaAtualizacao(v) {
@@ -1654,6 +1726,22 @@
         verificarMesesAlert.removeAttribute('hidden');
       } else {
         verificarMesesAlert.setAttribute('hidden', '');
+      }
+    }
+
+    function isRemovidoBlacklistAviso(row) {
+      if (!row) return false;
+      if (row.removido_blacklist_aviso) return true;
+      var st = String(row.controle_coleta_status || row.pipeline_status || '').trim().toUpperCase();
+      return st === 'REMOVIDO_BLACKLIST';
+    }
+
+    function syncRemovidoBlacklistAlert(row) {
+      if (!removidoBlacklistAlert) return;
+      if (row && isRemovidoBlacklistAviso(row)) {
+        removidoBlacklistAlert.removeAttribute('hidden');
+      } else {
+        removidoBlacklistAlert.setAttribute('hidden', '');
       }
     }
 
@@ -1834,6 +1922,11 @@
         btnAtualizarCalculo.title = 'Caso inapto (Sem Saldo).';
         return;
       }
+      if ((row || currentRow) && (row || currentRow).source === 'coleta_cumprimento' && !cumprimentoCalculoPronto(row || currentRow)) {
+        btnAtualizarCalculo.disabled = true;
+        btnAtualizarCalculo.title = 'Cumprimento sem data-base, entidade, valores ou meses completos.';
+        return;
+      }
       if (idPrecainfosnewSelecionado != null && Number(idPrecainfosnewSelecionado) <= 0) {
         btnAtualizarCalculo.disabled = true;
         btnAtualizarCalculo.title = 'Caso só na memória de cálculo. Recalcule na aba Cálculo manual.';
@@ -1848,6 +1941,7 @@
       }
       if (!row || !row.ultima_atualizacao) {
         btnAtualizarCalculo.disabled = false;
+        btnAtualizarCalculo.title = '';
         return;
       }
       if (isUpdatedThisMonth(row.ultima_atualizacao)) {
@@ -1869,6 +1963,24 @@
       if (!searchMsg) return;
       searchMsg.textContent = sanitizePublicText(t || '');
       searchMsg.className = 'memoria-search-msg' + (isErr ? ' memoria-search-msg-err' : '');
+    }
+
+    function cumprimentoCalculoPronto(row) {
+      return !!(row && row.source === 'coleta_cumprimento' && row.calculo_completo && row.form);
+    }
+
+    function dataDecisaoCumprimentoIso() {
+      try {
+        return new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(new Date());
+      } catch (_) {
+        var d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
     }
 
     function honorariosPctFromInput() {
@@ -1908,13 +2020,13 @@
           return;
         }
         var ri = parseInt(el.getAttribute('data-pi'), 10);
-        var cj = parseInt(el.getAttribute('data-pj'), 10);
-        var t = TAXA_PROPOSTA[ri] && TAXA_PROPOSTA[ri][cj];
+        var t = TAXA_PROPOSTA[ri];
         if (t == null) return;
         var v = round2(liq * t);
         el.textContent = brl.format(v);
       });
       fillMunicipalCells('.proposta-mun-val', temRegistoCarregado ? liq : null);
+      fillInssCells('.proposta-inss-val', temRegistoCarregado ? liq : null);
     }
 
     function shouldAutoAnaliseControle(status) {
@@ -1957,6 +2069,9 @@
       } else if (isCasoSemSaldo(currentRow) && !podeAnaliseProcessualMesmoInapto()) {
         btnAnaliseProcessual.disabled = true;
         btnAnaliseProcessual.title = 'Caso inapto (Sem Saldo).';
+      } else if (currentRow && currentRow.source === 'coleta_cumprimento') {
+        btnAnaliseProcessual.disabled = true;
+        btnAnaliseProcessual.title = 'Cumprimento. Análise processual não se aplica a este caso.';
       } else {
         btnAnaliseProcessual.disabled = !show;
         if (!show) {
@@ -1988,6 +2103,7 @@
       pctInput.value = '0';
       showCaseMeta(null);
       syncVerificarMesesAlert(null);
+      syncRemovidoBlacklistAlert(null);
       syncAtualizarCalculoButtonState(null);
       recalc();
     }
@@ -1999,6 +2115,7 @@
         if (metaAtual) metaAtual.textContent = '—';
         syncMaisInfoButton();
         syncVerificarMesesAlert(null);
+        syncRemovidoBlacklistAlert(null);
         return;
       }
       caseMeta.removeAttribute('hidden');
@@ -2010,6 +2127,7 @@
       }
       syncMaisInfoButton();
       syncVerificarMesesAlert(r);
+      syncRemovidoBlacklistAlert(r);
     }
 
     function showInaptoSemSaldoModal(row) {
@@ -2109,6 +2227,7 @@
       currentRow = r;
       syncAtualizarCalculoButtonState(r);
       syncVerificarMesesAlert(r);
+      syncRemovidoBlacklistAlert(r);
       syncAnaliseProcessualButton();
       if (showNotice !== false) showInaptoSemSaldoModal(r);
       else setMsg('Caso mantido bloqueado por blacklist. Cálculo não exibido.', false);
@@ -2156,7 +2275,13 @@
       syncAtualizarCalculoButtonState(r);
       escolher.setAttribute('hidden', '');
       escolherList.innerHTML = '';
-      if (r.source === 'precainfosnew') {
+      if (r.source === 'coleta_cumprimento') {
+        if (cumprimentoCalculoPronto(r)) {
+          setMsg('Cumprimento com dados completos. Clique em “Atualizar Cálculo” para gerar a memória.', false);
+        } else {
+          setMsg('Cumprimento localizado. Faltam dados para atualizar daqui. Na aba Cálculo manual os valores disponíveis já vêm preenchidos.', false);
+        }
+      } else if (r.source === 'precainfosnew') {
         setMsg('Caso encontrado no cadastro. Clique em “Atualizar Cálculo” para gerar a memória.', false);
       } else {
         setMsg('Memória carregada', false);
@@ -2214,6 +2339,8 @@
         }
         u.set('nome', q);
       }
+      var chkCump = document.getElementById('memoria-pesquisar-cumprimentos');
+      if (chkCump && chkCump.checked) u.set('pesquisar_cumprimentos', '1');
       if (opts.blacklistOverride) {
         u.set('blacklist_override', '1');
         u.set('blacklist_override_reason', String(opts.blacklistReason || '').trim());
@@ -2255,7 +2382,7 @@
                     .then(function (r2) { return r2.json().then(function (d2) { return { ok: r2.ok, d: d2 }; }); })
                     .then(function (o2) {
                       if (!o2.ok || !o2.d || !o2.d.ok) {
-                        hideModal();
+                        hideModal(true);
                         markCasoAusenteTodasBases();
                         setMsg('Nenhum registro com este processo e incidente. Memória zerada.', false);
                         return;
@@ -2263,7 +2390,7 @@
                       if (o2.d.found) {
                         resetMemoriaVazia();
                         var ctlStatus = String(o2.d.status || '');
-                        hideModal();
+                        hideModal(true);
                         if (o2.d.pipeline_blocked) {
                           tryApplyRow({
                             source: 'controle_coleta',
@@ -2306,13 +2433,15 @@
                           });
                         }
                       } else {
+                        // Sem linha no controle de coleta: não bloqueia — só confirma
+                        // ausência em memória/cadastro e segue o fluxo normal.
+                        hideModal(true);
                         markCasoAusenteTodasBases();
-                        showModal('Controle de Coleta (Verificar o caso com mais detalhes): não localizado.', false);
                         setMsg('Nenhum registro com este processo e incidente. Memória zerada.', false);
                       }
                     })
                     .catch(function () {
-                      hideModal();
+                      hideModal(true);
                       markCasoAusenteTodasBases();
                       setMsg('Nenhum registro com este processo e incidente. Memória zerada.', false);
                     });
@@ -2347,8 +2476,7 @@
             n1.textContent = row.requerente || '—';
             var n2 = document.createElement('span');
             n2.className = 'memoria-escolher-tag';
-            n2.textContent = 'Processo: ' + (row.numero_de_processo || '—') + ' · Incidente: ' + (row.numero_do_incidente || '—') +
-              (row.ultima_atualizacao ? (' · Últ. atual.: ' + formatUltimaAtualizacao(row.ultima_atualizacao)) : '');
+            n2.textContent = rotuloCasoLista(row);
             b.appendChild(n1);
             b.appendChild(n2);
             if (row && row.source === 'blacklist') {
@@ -2534,102 +2662,187 @@
         .catch(function () { return { ok: false, d: null }; });
     }
 
+    function aplicarResultadoAtualizarCalculo(d) {
+      var okMsg = (d && d.message) ? d.message : 'Cálculo atualizado com sucesso.';
+      if (d && d.fila_ao_entrar && d.fila_ao_entrar.em_execucao) {
+        okMsg += ' (aguardou na fila; operador anterior: ' + String(d.fila_ao_entrar.operador_atual || '—') + ')';
+      }
+      if (d && d.google_drive && d.google_drive.uploaded && d.google_drive.link) {
+        okMsg += ' Drive: ' + String(d.google_drive.link);
+      } else if (d && d.google_drive && d.google_drive.uploaded === false) {
+        okMsg += ' (planilha não enviada ao Drive — verifique logs do serviço 5099.)';
+      }
+      if (d && d.prioridade) {
+        okMsg += ' Nome da planilha: PRIORI.';
+      }
+      setMsg(okMsg, false);
+      setTimeout(function () { doSearch({ skipAutoAnalise: true }); }, 500);
+      return true;
+    }
+
+    function pollAtualizarCalculoStatus(precId, deadlineMs) {
+      var deadline = typeof deadlineMs === 'number' ? deadlineMs : (Date.now() + 1800000);
+      return fetch('/api/memoria-calculo/atualizar-calculo/status/' + encodeURIComponent(String(precId)), {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+        .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
+        .then(function (o) {
+          var d = o.d || {};
+          if (o.status === 200 && d.done) {
+            var result = d.result;
+            if (result && result.ok) {
+              return aplicarResultadoAtualizarCalculo(result);
+            }
+            var errDone = (result && result.error) ? String(result.error) : 'Falha ao atualizar o cálculo.';
+            setMsg(errDone, true);
+            return false;
+          }
+          if (Date.now() >= deadline) {
+            setMsg(
+              'Tempo esgotado à espera do cálculo. O processamento pode continuar na fila; aguarde e pesquise o caso de novo.',
+              true
+            );
+            if (d.fila) showFilaModal(d.fila, null);
+            return false;
+          }
+          var fila = d.fila;
+          if (fila && fila.em_execucao) {
+            setMsg(
+              'Cálculo em curso' +
+                (fila.operador_atual ? ' (operador: ' + String(fila.operador_atual) + ')' : '') +
+                '…',
+              false
+            );
+          } else {
+            setMsg('Aguardando na fila de cálculo…', false);
+          }
+          return new Promise(function (resolve) {
+            setTimeout(function () {
+              resolve(pollAtualizarCalculoStatus(precId, deadline));
+            }, 2500);
+          });
+        });
+    }
+
     function executarAtualizarCalculo(opts) {
       opts = opts || {};
       var prev = btnAtualizarCalculo.textContent;
       btnAtualizarCalculo.disabled = true;
-      setMsg('A atualizar cálculo (pode levar vários minutos se houver fila)… Não feche a página.', false);
-      var ctl;
-      var tmr;
-      try {
-        ctl = new AbortController();
-        tmr = setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 600000);
-      } catch (_) {}
-      return fetch('/api/memoria-calculo/atualizar-calculo', {
+      setMsg('A enfileirar atualização de cálculo…', false);
+      var url = '/api/memoria-calculo/atualizar-calculo';
+      var corpo = {
+        id_precainfosnew: idPrecainfosnewSelecionado,
+        percentual_honorarios: honorariosPctFromInput(),
+        numero_de_processo: currentRow && currentRow.numero_de_processo
+          ? String(currentRow.numero_de_processo) : '',
+        numero_do_incidente: currentRow && currentRow.numero_do_incidente != null
+          ? String(currentRow.numero_do_incidente) : '',
+        requerente: currentRow && currentRow.requerente
+          ? String(currentRow.requerente) : ''
+      };
+      var viaCumprimento = cumprimentoCalculoPronto(currentRow);
+      if (viaCumprimento) {
+        var f = currentRow.form;
+        url = '/api/memoria-calculo/calculo-manual';
+        corpo = {
+          origem_dados: 'coleta_cumprimento',
+          requerente: f.requerente || '',
+          entidade_devedora: f.entidade_devedora || '',
+          numero_de_processo: f.numero_de_processo || '',
+          numero_do_incidente: f.numero_do_incidente || '',
+          cumprimento: f.cumprimento || '',
+          oc: f.oc || '',
+          data_base: f.data_base || '',
+          data_decisao: dataDecisaoCumprimentoIso(),
+          principal_liquido: f.principal_liquido || '',
+          juros_moratorio: f.juros_moratorio || '',
+          numero_de_meses: f.numero_de_meses || '',
+          descontos: f.descontos || '',
+          percentual_honorarios: honorariosPctFromInput()
+        };
+      }
+      return fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({
-          id_precainfosnew: idPrecainfosnewSelecionado,
-          percentual_honorarios: honorariosPctFromInput()
-        }),
-        signal: ctl ? ctl.signal : undefined
+        body: JSON.stringify(corpo)
       })
         .then(function (res) { return res.json().then(function (d) { return { status: res.status, d: d }; }); })
         .then(function (o) {
-          if (o.d && o.d.ok) {
-            var okMsg = (o.d.message) ? o.d.message : 'Cálculo atualizado com sucesso.';
-            if (o.d.fila_ao_entrar && o.d.fila_ao_entrar.em_execucao) {
-              okMsg += ' (aguardou na fila; operador anterior: ' + String(o.d.fila_ao_entrar.operador_atual || '—') + ')';
+          // Cumprimento / cálculo manual ainda responde síncrono (ok final).
+          if (viaCumprimento) {
+            if (o.d && o.d.ok) {
+              return aplicarResultadoAtualizarCalculo(o.d);
             }
-            if (o.d.google_drive && o.d.google_drive.uploaded && o.d.google_drive.link) {
-              okMsg += ' Drive: ' + String(o.d.google_drive.link);
-            } else if (o.d.google_drive && o.d.google_drive.uploaded === false) {
-              okMsg += ' (planilha não enviada ao Drive — verifique logs do serviço 5099.)';
-            }
-            if (o.d.prioridade) {
-              okMsg += ' Nome da planilha: PRIORI.';
-            }
-            setMsg(okMsg, false);
-            setTimeout(function () { doSearch({ skipAutoAnalise: true }); }, 500);
-            return true;
-          } else {
-            var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
-            if (o.status === 504 || (o.d && o.d.timeout)) {
-              setMsg(err, true);
-              if (o.d && o.d.fila) showFilaModal(o.d.fila, null);
-            } else {
-              setMsg(err, true);
-            }
-            if (
-              o.status === 409 &&
-              (err.indexOf('em curso') >= 0 || err.indexOf('atualização') >= 0 || err.indexOf('actualização') >= 0)
-            ) {
-              fetchFilaCalculo().then(function (fo) {
-                if (fo.d && fo.d.ok && fo.d.fila) showFilaModal(fo.d.fila, null);
-              });
-            }
-            if (err.indexOf('Não existe registro com id') >= 0 && currentRow && currentRow.numero_de_processo) {
-              try {
-                var u = new URLSearchParams();
-                u.set('numero_de_processo', String(currentRow.numero_de_processo || '').trim());
-                u.set('numero_do_incidente', String(currentRow.numero_do_incidente || '').trim());
-                showModal('Consultando o controle de coleta…', true);
-                fetch('/api/memoria-calculo/controle-coleta-status?' + u.toString())
-                  .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-                  .then(function (o2) {
-                    if (!o2.ok || !o2.d || !o2.d.ok) {
-                      showModal(err + ' | Não foi possível consultar o controle de coleta.', false);
-                      return;
-                    }
-                    if (o2.d.found) {
-                      showModal('Controle de coleta — status: ' + String(o2.d.status), false);
-                      setMsg(err + ' | Controle de coleta — status: ' + String(o2.d.status), true);
-                    } else {
-                      showModal('Controle de coleta: não localizado.', false);
-                      setMsg(err + ' | Controle de coleta: não localizado.', true);
-                    }
-                  })
-                  .catch(function () {
-                    showModal(err + ' | Erro de rede ao consultar o controle de coleta.', false);
-                  });
-              } catch (_) {}
-            }
+            var errM = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
+            setMsg(errM, true);
             return false;
           }
+          if (o.d && o.d.accepted && o.d.id_precainfosnew != null) {
+            var pid = parseInt(o.d.id_precainfosnew, 10);
+            if (!isNaN(pid) && pid > 0) {
+              idPrecainfosnewSelecionado = pid;
+            }
+            setMsg('Cálculo enfileirado. Acompanhar progresso…', false);
+            if (o.d.fila) {
+              // Informativo; o poll continua automaticamente.
+            }
+            return pollAtualizarCalculoStatus(pid || idPrecainfosnewSelecionado);
+          }
+          if (o.d && o.d.ok && !o.d.async) {
+            return aplicarResultadoAtualizarCalculo(o.d);
+          }
+          var err = (o.d && o.d.error) ? String(o.d.error) : 'Falha ao atualizar o cálculo.';
+          if (o.status === 504 || (o.d && o.d.timeout)) {
+            setMsg(err, true);
+            if (o.d && o.d.fila) showFilaModal(o.d.fila, null);
+          } else {
+            setMsg(err, true);
+          }
+          if (
+            o.status === 409 &&
+            (err.indexOf('em curso') >= 0 || err.indexOf('atualização') >= 0 || err.indexOf('actualização') >= 0)
+          ) {
+            fetchFilaCalculo().then(function (fo) {
+              if (fo.d && fo.d.ok && fo.d.fila) showFilaModal(fo.d.fila, null);
+            });
+          }
+          if (err.indexOf('Não existe registro com id') >= 0 && currentRow && currentRow.numero_de_processo) {
+            try {
+              var u = new URLSearchParams();
+              u.set('numero_de_processo', String(currentRow.numero_de_processo || '').trim());
+              u.set('numero_do_incidente', String(currentRow.numero_do_incidente || '').trim());
+              showModal('Consultando o controle de coleta…', true);
+              fetch('/api/memoria-calculo/controle-coleta-status?' + u.toString())
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+                .then(function (o2) {
+                  if (!o2.ok || !o2.d || !o2.d.ok) {
+                    showModal(err + ' | Não foi possível consultar o controle de coleta.', false);
+                    return;
+                  }
+                  if (o2.d.found) {
+                    showModal('Controle de coleta — status: ' + String(o2.d.status), false);
+                    setMsg(err + ' | Controle de coleta — status: ' + String(o2.d.status), true);
+                  } else {
+                    showModal('Controle de coleta: não localizado.', false);
+                    setMsg(err + ' | Controle de coleta: não localizado.', true);
+                  }
+                })
+                .catch(function () {
+                  showModal(err + ' | Erro de rede ao consultar o controle de coleta.', false);
+                });
+            } catch (_) {}
+          }
+          return false;
         })
         .catch(function (e) {
-          if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {
-            setMsg('Tempo excedido (10 min). Tente de novo; confirme o servidor (LibreOffice, MySQL).', true);
-            return false;
-          }
           setMsg('Falha de rede ou erro no servidor: ' + (e && e.message ? e.message : String(e)), true);
           return false;
         })
         .finally(function () {
-          if (tmr) clearTimeout(tmr);
-          btnAtualizarCalculo.disabled = false;
           btnAtualizarCalculo.textContent = prev;
+          syncAtualizarCalculoButtonState(currentRow);
         });
     }
 
@@ -2650,7 +2863,13 @@
         credentials: 'same-origin',
         body: JSON.stringify({
           id_precainfosnew: idPrecainfosnewSelecionado,
-          numero_de_meses: mesesVal
+          numero_de_meses: mesesVal,
+          numero_de_processo: currentRow && currentRow.numero_de_processo
+            ? String(currentRow.numero_de_processo) : '',
+          numero_do_incidente: currentRow && currentRow.numero_do_incidente != null
+            ? String(currentRow.numero_do_incidente) : '',
+          requerente: currentRow && currentRow.requerente
+            ? String(currentRow.requerente) : ''
         }),
         signal: ctl ? ctl.signal : undefined
       })
@@ -2811,7 +3030,11 @@
           setMsg('Caso inapto (Sem Saldo). Atualização de cálculo não permitida.', true);
           return;
         }
-        if (!temRegistoCarregado || idPrecainfosnewSelecionado == null) {
+        if (currentRow && currentRow.source === 'coleta_cumprimento' && !cumprimentoCalculoPronto(currentRow)) {
+          setMsg('Este cumprimento não tem todos os dados para atualizar o cálculo.', true);
+          return;
+        }
+        if (!cumprimentoCalculoPronto(currentRow) && (!temRegistoCarregado || idPrecainfosnewSelecionado == null)) {
           setMsg('Pesquise e carregue um caso (requerente ou processo) antes de atualizar o cálculo.', true);
           return;
         }
@@ -3139,8 +3362,7 @@
           return;
         }
         var ri = parseInt(el.getAttribute('data-pi'), 10);
-        var cj = parseInt(el.getAttribute('data-pj'), 10);
-        var t = TAXA_PROPOSTA[ri] && TAXA_PROPOSTA[ri][cj];
+        var t = TAXA_PROPOSTA[ri];
         if (t == null) {
           el.textContent = '—';
           return;
@@ -3165,11 +3387,22 @@
       });
     }
 
+    function fillInssCells(selector, liq) {
+      document.querySelectorAll(selector).forEach(function (el) {
+        if (liq == null || liq < 0 || isNaN(liq) || TAXA_PROPOSTA_INSS_2027 == null) {
+          el.textContent = '—';
+          return;
+        }
+        el.textContent = brl.format(round2(liq * TAXA_PROPOSTA_INSS_2027));
+      });
+    }
+
     function recalcSimularProposta() {
       var inputSim = document.getElementById('memoria-simular-valor');
       var liq = parseValorBr(inputSim && inputSim.value);
       fillPropostaCells('.proposta-sim-val', liq);
       fillMunicipalCells('.proposta-sim-mun-val', liq);
+      fillInssCells('.proposta-sim-inss-val', liq);
     }
 
     function suggestLiquidoNoSimular() {
@@ -3352,6 +3585,8 @@
     function fillManualForm(formData) {
       if (!manualForm || !formData) return;
       manualModoNovo = false;
+      var origemEl = document.getElementById('memoria-manual-origem');
+      if (origemEl) origemEl.value = '';
       var names = [
         'id_precainfosnew', 'requerente', 'entidade_devedora', 'numero_de_processo',
         'numero_do_incidente', 'cumprimento', 'oc', 'data_base', 'data_decisao',
@@ -3383,7 +3618,40 @@
       return isNaN(n) ? null : n;
     }
 
+    function loadManualCumprimento(row) {
+      if (!row || !row.form) {
+        setManualSearchMsg('Cumprimento sem dados para preencher o formulário.', true);
+        return;
+      }
+      fillManualForm(row.form);
+      if (manualForm && manualForm.elements.data_decisao) {
+        manualForm.elements.data_decisao.value = dataDecisaoCumprimentoIso();
+      }
+      manualModoNovo = true;
+      var origemEl = document.getElementById('memoria-manual-origem');
+      if (origemEl) origemEl.value = 'coleta_cumprimento';
+      var hid = document.getElementById('memoria-manual-id');
+      if (hid) hid.value = '';
+      setManualLoadedBanner(
+        'Cumprimento: ' + (row.requerente || '—') +
+        (row.cpf ? (' · CPF ' + row.cpf) : '') +
+        ' · Processo ' + (row.numero_de_processo || '—')
+      );
+      setManualFormEnabled(true);
+      var escolher = document.getElementById('memoria-manual-escolher');
+      if (escolher) escolher.setAttribute('hidden', '');
+      setManualSearchMsg('Valores da base de cumprimento carregados. Confira e envie para a automação.', false);
+      setManualMsg('', false);
+      var focusEl = manualForm && manualForm.elements.data_base;
+      if (focusEl && !focusEl.value) focusEl = manualForm.elements.principal_liquido;
+      if (focusEl) focusEl.focus();
+    }
+
     function loadManualCasoFromRow(row) {
+      if (row && row.source === 'coleta_cumprimento') {
+        loadManualCumprimento(row);
+        return;
+      }
       var pid = manualRowId(row);
       if (pid == null) {
         setManualSearchMsg('Este resultado não tem cadastro associado; não é possível preencher o formulário.', true);
@@ -3463,8 +3731,7 @@
         n1.textContent = row.requerente || '—';
         var n2 = document.createElement('span');
         n2.className = 'memoria-escolher-tag';
-        n2.textContent = 'Processo: ' + (row.numero_de_processo || '—') +
-          ' · Incidente: ' + (row.numero_do_incidente || '—');
+        n2.textContent = rotuloCasoLista(row);
         b.appendChild(n1);
         b.appendChild(n2);
         b.addEventListener('click', function () { loadManualCasoFromRow(results[i]); });
@@ -3508,6 +3775,8 @@
         }
         u.set('nome', q);
       }
+      var chkCumpManual = document.getElementById('memoria-manual-pesquisar-cumprimentos');
+      if (chkCumpManual && chkCumpManual.checked) u.set('pesquisar_cumprimentos', '1');
       setManualSearchMsg('A pesquisar…', false);
       if (escolher) {
         escolher.setAttribute('hidden', '');
@@ -3528,7 +3797,9 @@
             return;
           }
           var results = o.d.results || [];
-          var usable = results.filter(function (r) { return manualRowId(r) != null; });
+          var usable = results.filter(function (r) {
+            return (r && r.source === 'coleta_cumprimento' && r.form) || manualRowId(r) != null;
+          });
             if (!usable.length) {
             if (results.length) {
               resetManualForm();

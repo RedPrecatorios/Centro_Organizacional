@@ -60,6 +60,86 @@ from calculation_automation.sheet_constants import (
 )
 
 
+def _norm_nome_memoria(value: object) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _incidente_igual(left: object, right: object) -> bool:
+    a = str(left or "").strip()
+    b = str(right or "").strip()
+    if not a and not b:
+        return True
+    if a.isdigit() and b.isdigit():
+        return int(a) == int(b)
+    return a == b
+
+
+def _consolidate_memoria_keep_pk(
+    cursor,
+    *,
+    prec_id: int,
+    requerente: str,
+    numero_de_processo: str,
+    numero_do_incidente: str,
+) -> int | None:
+    """PK a sobrescrever; remove duplicatas do mesmo processo+incidente+nome."""
+    found: dict[int, tuple] = {}
+    cursor.execute(
+        """
+        SELECT id, id_precainfosnew, requerente, numero_de_processo, numero_do_incidente
+        FROM memoria_calculo
+        WHERE id_precainfosnew = %s
+        """,
+        (int(prec_id),),
+    )
+    for row in cursor.fetchall() or []:
+        found[int(row[0])] = row
+
+    proc = str(numero_de_processo or "").strip()
+    nome_alvo = _norm_nome_memoria(requerente)
+    if proc and nome_alvo:
+        cursor.execute(
+            """
+            SELECT id, id_precainfosnew, requerente, numero_de_processo, numero_do_incidente
+            FROM memoria_calculo
+            WHERE TRIM(COALESCE(numero_de_processo, '')) = %s
+            """,
+            (proc,),
+        )
+        for row in cursor.fetchall() or []:
+            if not _incidente_igual(row[4], numero_do_incidente):
+                continue
+            if _norm_nome_memoria(row[2]) != nome_alvo:
+                continue
+            found[int(row[0])] = row
+
+    if not found:
+        return None
+
+    rows = list(found.values())
+    same_id = [r for r in rows if int(r[1] or 0) == int(prec_id)]
+    pool = same_id or rows
+    keep = max(pool, key=lambda r: int(r[0] or 0))
+    keep_pk = int(keep[0])
+    delete_pks = [int(r[0]) for r in rows if int(r[0]) != keep_pk]
+    if int(keep[1] or 0) != int(prec_id):
+        cursor.execute(
+            "SELECT id FROM memoria_calculo WHERE id_precainfosnew = %s AND id <> %s",
+            (int(prec_id), keep_pk),
+        )
+        for row in cursor.fetchall() or []:
+            pk = int(row[0])
+            if pk not in delete_pks:
+                delete_pks.append(pk)
+    if delete_pks:
+        placeholders = ", ".join(["%s"] * len(delete_pks))
+        cursor.execute(
+            f"DELETE FROM memoria_calculo WHERE id IN ({placeholders})",
+            tuple(delete_pks),
+        )
+    return keep_pk
+
+
 def _libreoffice_enabled() -> bool:
     v = (os.getenv("MEMORIA_LIBREOFFICE") or "1").strip().lower()
     return v not in ("0", "false", "no", "off", "disabled")
@@ -755,7 +835,23 @@ def sync_memoria_calculo_to_db(
                 f"(R30:R36).\n"
             )
 
-    sql = """
+    row = (
+        pid,
+        requerente or None,
+        num_proc or None,
+        num_inc or None,
+        pb,
+        juros,
+        ds,
+        di,
+        pct,
+        round(tb, 2),
+        round(reserva, 2),
+        round(tliq, 2),
+        numero_de_meses,
+        fp_txt,
+    )
+    insert_sql = """
         INSERT INTO memoria_calculo (
             id_precainfosnew,
             requerente,
@@ -791,24 +887,27 @@ def sync_memoria_calculo_to_db(
             -- ON UPDATE CURRENT_TIMESTAMP só dispara se uma coluna mudar de valor;
             -- como recálculos costumam dar números idênticos, forçamos NOW(6) aqui
             -- para reflectir a "hora do último disparo" na UI da plataforma.
-            atualizado_em = NOW(6);
+            atualizado_em = NOW(6)
     """
-    row = (
-        pid,
-        requerente or None,
-        num_proc or None,
-        num_inc or None,
-        pb,
-        juros,
-        ds,
-        di,
-        pct,
-        round(tb, 2),
-        round(reserva, 2),
-        round(tliq, 2),
-        numero_de_meses,
-        fp_txt,
-    )
+    update_sql = """
+        UPDATE memoria_calculo SET
+            id_precainfosnew = %s,
+            requerente = %s,
+            numero_de_processo = %s,
+            numero_do_incidente = %s,
+            principal_bruto = %s,
+            juros = %s,
+            desc_saude_prev = %s,
+            desc_ir = %s,
+            percentual_honorarios = %s,
+            total_bruto = %s,
+            reserva_honorarios = %s,
+            total_liquido = %s,
+            numero_de_meses = %s,
+            feito_por = %s,
+            atualizado_em = NOW(6)
+        WHERE id = %s
+    """
 
     ct = _memoria_mysql_connect_timeout()
     ok_any = False
@@ -825,7 +924,17 @@ def sync_memoria_calculo_to_db(
                 connect_timeout=ct,
             )
             with config.cursor() as cur:
-                cur.execute(sql, row)
+                keep_pk = _consolidate_memoria_keep_pk(
+                    cur,
+                    prec_id=int(pid),
+                    requerente=str(requerente or ""),
+                    numero_de_processo=str(num_proc or ""),
+                    numero_do_incidente=str(num_inc or ""),
+                )
+                if keep_pk is not None:
+                    cur.execute(update_sql, (*row, keep_pk))
+                else:
+                    cur.execute(insert_sql, row)
             config.commit()
             ok_any = True
             if print_ok:

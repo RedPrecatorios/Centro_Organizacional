@@ -6,6 +6,7 @@ from messages_viewer.calculo_manual import (
     _format_db_date,
     _format_money_br,
     _format_money_db,
+    _parse_date,
     _parse_money,
     _persist_values,
     form_fields_from_row,
@@ -23,6 +24,13 @@ def test_parse_money_banco_precainfosnew():
     assert _parse_money("150.000,50") == Decimal("150000.50")
     assert _parse_money("150000.50") == Decimal("150000.50")
     assert _parse_money("R$ 1.234,56") == Decimal("1234.56")
+
+
+def test_parse_date_mes_ano_usa_ultimo_dia():
+    assert _parse_date("04/2011") == date(2011, 4, 30)
+    assert _parse_date("05/2025") == date(2025, 5, 31)
+    assert _parse_date("02/2024") == date(2024, 2, 29)
+    assert _parse_date("01/08/2023") == date(2023, 8, 1)
 
 
 def test_format_money_br():
@@ -81,6 +89,10 @@ def test_synthetic_memoria_id_negativo_e_estavel():
     b = synthetic_memoria_id("00235638720258260053", "09")
     assert a < 0
     assert a == b
+    c = synthetic_memoria_id("0023563-87.2025.8.26.0053", "9", "Maria")
+    d = synthetic_memoria_id("0023563-87.2025.8.26.0053", "9", "João")
+    assert c != d
+    assert c != a
 
 
 def test_memoria_valores_from_form():

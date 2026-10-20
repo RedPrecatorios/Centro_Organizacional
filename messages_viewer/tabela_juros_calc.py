@@ -20,7 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "valor_atual": 50_000.0,
     "valor_venda": 15_980.0,
     "taxa_atual_anual_pct": 5.0,
-    "taxa_venda_anual_pct": 15.0,
+    "taxa_venda_anual_pct": 13.75,
     "rotulo_atual": "IPCA",
     "rotulo_venda": "100% CDI CDB Banco",
 }

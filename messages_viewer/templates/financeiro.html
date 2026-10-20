@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financeiro — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}?v=fin5" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Financeiro</h1>
+      </div>
+    </header>
+
+    <main class="dash-content">
+      <nav class="camp-tabs" role="tablist" aria-label="Custos">
+        <button type="button" class="camp-tab active" id="fin-tab-geral" data-tab="geral" role="tab" aria-selected="true">Custo Geral</button>
+        <button type="button" class="camp-tab" id="fin-tab-comercial" data-tab="comercial" role="tab" aria-selected="false">Custo Dep. Comercial</button>
+        <button type="button" class="camp-tab" id="fin-tab-juridico" data-tab="juridico" role="tab" aria-selected="false">Custo Dep. Jurídico</button>
+        <button type="button" class="camp-tab" id="fin-tab-ti" data-tab="ti" role="tab" aria-selected="false">Custo Dep. TI</button>
+      </nav>
+
+      <section class="camp-panel active" id="panel-geral" role="tabpanel"></section>
+      <section class="camp-panel" id="panel-comercial" role="tabpanel" hidden></section>
+      <section class="camp-panel" id="panel-juridico" role="tabpanel" hidden></section>
+      <section class="camp-panel" id="panel-ti" role="tabpanel" hidden></section>
+    </main>
+  </div>
+
+<script>
+(function () {
+  var tabs = document.querySelectorAll(".dash-content .camp-tab");
+  var panels = document.querySelectorAll(".dash-content .camp-panel");
+  tabs.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var id = btn.getAttribute("data-tab");
+      tabs.forEach(function (t) {
+        var on = t === btn;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      panels.forEach(function (panel) {
+        panel.hidden = panel.id !== "panel-" + id;
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

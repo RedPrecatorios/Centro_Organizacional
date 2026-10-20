@@ -95,6 +95,14 @@
       Atualização De Imposto{% if page_in_maintenance('atualizacao_imposto') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
+    {% if user_can('financeiro') %}
+    <a class="dash-nav-item{% if request.endpoint == 'financeiro_page' %} active{% endif %}{% if page_in_maintenance('financeiro') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('financeiro_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 15h3"/></svg>
+      </span>
+      Financeiro{% if page_in_maintenance('financeiro') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
     {% if user_can('campanha') %}
     <a class="dash-nav-item{% if request.endpoint == 'campanha_page' %} active{% endif %}{% if page_in_maintenance('campanha') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('campanha_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">

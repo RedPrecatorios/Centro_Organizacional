@@ -6,6 +6,7 @@ em ``memoria_calculo``.
 """
 from __future__ import annotations
 
+import calendar
 import hashlib
 import logging
 import os
@@ -197,6 +198,11 @@ def _parse_date(raw: Any) -> date | None:
             return datetime.strptime(s[:10], fmt).date()
         except ValueError:
             continue
+    month_year = re.fullmatch(r"(\d{1,2})/(\d{4})", s)
+    if month_year:
+        month, year = int(month_year.group(1)), int(month_year.group(2))
+        if 1 <= month <= 12:
+            return date(year, month, calendar.monthrange(year, month)[1])
     return None
 
 
@@ -297,15 +303,23 @@ def _digits(value: str) -> str:
     return re.sub(r"\D", "", str(value or ""))
 
 
-def synthetic_memoria_id(processo: str, incidente: str) -> int:
-    """Id negativo estável para casos que só existem em ``memoria_calculo``."""
+def synthetic_memoria_id(processo: str, incidente: str, requerente: str = "") -> int:
+    """Id negativo estável para casos que só existem em ``memoria_calculo``.
+
+    Com requerente, cada pessoa do mesmo processo fica numa linha própria.
+    Sem requerente, o id continua o de processo e incidente.
+    """
     proc_d = _digits(processo)
     raw_inc = str(incidente or "").strip()
     try:
         inc_n = str(int(raw_inc or "0"))
     except ValueError:
         inc_n = raw_inc or "0"
-    digest = hashlib.sha256(f"{proc_d}|{inc_n}".encode("utf-8")).digest()
+    chave = f"{proc_d}|{inc_n}"
+    pessoa = " ".join(str(requerente or "").split()).casefold()
+    if pessoa:
+        chave += "|" + pessoa
+    digest = hashlib.sha256(chave.encode("utf-8")).digest()
     n = int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
     return -n if n else -1
 
@@ -636,10 +650,11 @@ def upsert_memoria_from_form(
             FROM memoria_calculo
             WHERE TRIM(COALESCE(numero_de_processo, '')) = %s
               AND TRIM(COALESCE(numero_do_incidente, '')) IN (%s, %s)
+              AND TRIM(COALESCE(requerente, '')) = %s
             ORDER BY id DESC
             LIMIT 1
             """,
-            (proc, inc, inc_raw or inc),
+            (proc, inc, inc_raw or inc, req),
         )
         found = cur.fetchone() or {}
         if found.get("id_precainfosnew") is not None:

@@ -74,6 +74,11 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
         "Atualização De Imposto",
         "Envio de 2 PDFs para atualização automática de valores de imposto",
     ),
+    (
+        "financeiro",
+        "Financeiro",
+        "Custos gerais e dos departamentos Comercial, Jurídico e TI",
+    ),
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
     ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
@@ -623,6 +628,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
         ("atualizacao_imposto", "atualizacao_imposto_page"),
+        ("financeiro", "financeiro_page"),
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
@@ -665,6 +671,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "proposta"
     if path.startswith("/atualizacao-imposto"):
         return "atualizacao_imposto"
+    if path.startswith("/financeiro"):
+        return "financeiro"
     if path.startswith("/embedded"):
         return "outro_modulo"
     if path.startswith("/campanha"):
@@ -783,6 +791,12 @@ def _endpoint_to_tab() -> str | None:
         "api_atualizacao_imposto_historico": "atualizacao_imposto",
         "api_atualizacao_imposto_delete": "atualizacao_imposto",
         "api_atualizacao_imposto_pdf": "atualizacao_imposto",
+        "financeiro_page": "financeiro",
+        "api_financeiro_custos_listar": "financeiro",
+        "api_financeiro_custos_criar": "financeiro",
+        "api_financeiro_custos_atualizar": "financeiro",
+        "api_financeiro_custos_excluir": "financeiro",
+        "api_financeiro_custos_pdf": "financeiro",
         "embedded.index": "outro_modulo",
         "get_summary": "index",
         "get_instances": "conversas",
@@ -791,6 +805,7 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_buscar": "memoria_calculo",
         "api_memoria_atualizar_calculo": "memoria_calculo",
         "api_memoria_atualizar_calculo_fila": "memoria_calculo",
+        "api_memoria_atualizar_calculo_status": "memoria_calculo",
         "api_memoria_calculo_manual": "calculo_manual",
         "api_memoria_calculo_manual_caso": "calculo_manual",
         "api_memoria_salvar_numero_meses": "salvar_numero_meses",

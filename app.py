@@ -143,12 +143,26 @@ from messages_viewer.tabela_juros_calc import (
     calcular_comparativo,
     resultado_para_api,
 )
+from messages_viewer.financeiro_custos import atualizar as financeiro_atualizar
+from messages_viewer.financeiro_custos import caminho_pdf as financeiro_caminho_pdf
+from messages_viewer.financeiro_custos import criar as financeiro_criar
+from messages_viewer.financeiro_custos import desativar as financeiro_desativar
+from messages_viewer.financeiro_custos import listar as financeiro_listar
 from messages_viewer.calculo_manual import (
     automation_payload_from_form as calculo_manual_automation_payload,
     load_caso_for_form as calculo_manual_load,
     normalize_form as calculo_manual_normalize,
+    synthetic_memoria_id as calculo_manual_synthetic_id,
     upsert_memoria_from_form as calculo_manual_upsert_memoria,
     upsert_precainfos_from_form as calculo_manual_upsert,
+)
+from messages_viewer.cumprimento_busca import (
+    buscar_cumprimentos,
+    incidente_lista_ampla,
+    incidente_match_variants,
+    mesclar_sem_duplicar,
+    normalizar_incidente,
+    normalizar_processo_incidente_chave,
 )
 from messages_viewer.api_calculo_monitor import (
     api_calculo_monitor_configured,
@@ -450,6 +464,318 @@ def _norm_credor_key(value: object) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
 
+def _precainfos_id_exists(cur, prec_id: int) -> bool:
+    cur.execute("SELECT 1 AS ok FROM precainfosnew WHERE id = %s LIMIT 1", (prec_id,))
+    return bool(cur.fetchone())
+
+
+def _find_precainfos_id_by_caso(
+    cur,
+    *,
+    processo: str,
+    incidente: str,
+    requerente: str,
+    fields: set[str] | None = None,
+) -> int | None:
+    """Localiza cadastro por processo + incidente + nome (credor).
+
+    O nome é obrigatório: o mesmo processo/incidente pode ter vários credores.
+    """
+    proc = str(processo or "").strip()
+    nome_alvo = _norm_credor_key(requerente)
+    if not proc or not nome_alvo:
+        return None
+    cols = fields if fields is not None else _precainfosnew_columns(cur)
+    f_proc = _pick_field(
+        cols,
+        "numero_de_processo",
+        "Numero_de_processo",
+        "Numero_de_Processo",
+        "processo",
+        "Processo",
+    )
+    f_inc = _pick_field(
+        cols,
+        "numero_do_incidente",
+        "Numero_do_incidente",
+        "Numero_do_Incidente",
+        "numero_de_incidente",
+        "Numero_de_incidente",
+        "incidente",
+        "Incidente",
+    )
+    f_req = _pick_field(cols, "requerente", "Requerente")
+    if not f_proc or not f_req:
+        return None
+    params: list = [proc]
+    where = [f"TRIM(COALESCE(`{f_proc}`, '')) = %s"]
+    inc = str(incidente or "").strip()
+    if inc and f_inc:
+        inc_sql, inc_params = _sql_trim_in(f"`{f_inc}`", incidente_match_variants(inc))
+        where.append(inc_sql)
+        params.extend(inc_params)
+    cur.execute(
+        f"""
+        SELECT id, `{f_req}` AS requerente
+        FROM precainfosnew
+        WHERE {" AND ".join(where)}
+        ORDER BY id DESC
+        LIMIT 40
+        """,
+        tuple(params),
+    )
+    for row in cur.fetchall() or []:
+        if _norm_credor_key(row.get("requerente")) != nome_alvo:
+            continue
+        try:
+            return int(row["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+    return None
+
+
+def _resolve_live_precainfos_id(
+    prec_id: int,
+    *,
+    processo: str = "",
+    incidente: str = "",
+    requerente: str = "",
+) -> tuple[int | None, str | None]:
+    """Garante um id de cadastro vivo.
+
+    Se ``prec_id`` existir, devolve-o. Senão tenta processo+incidente+nome
+    (via argumentos ou meta na memória ligada ao id antigo).
+    """
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return None, "MySQL do flaskdb não configurado (FLASK_MYSQL_*)."
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'precainfosnew'")
+        if not cur.fetchone():
+            return None, "Tabela precainfosnew não existe."
+        if _precainfos_id_exists(cur, prec_id):
+            return prec_id, None
+
+        proc = str(processo or "").strip()
+        inc = str(incidente or "").strip()
+        nome = str(requerente or "").strip()
+        if not (proc and nome):
+            mcfg = _memoria_mysql_config()
+            if mcfg:
+                mconn = None
+                mcur = None
+                try:
+                    mconn = mysql.connector.connect(
+                        **mcfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+                    )
+                    mcur = mconn.cursor(dictionary=True)
+                    mcur.execute(
+                        """
+                        SELECT requerente, numero_de_processo, numero_do_incidente
+                        FROM memoria_calculo
+                        WHERE id_precainfosnew = %s
+                        LIMIT 1
+                        """,
+                        (prec_id,),
+                    )
+                    meta = mcur.fetchone() or {}
+                    proc = proc or str(meta.get("numero_de_processo") or "").strip()
+                    inc = inc or str(meta.get("numero_do_incidente") or "").strip()
+                    nome = nome or str(meta.get("requerente") or "").strip()
+                except mysql.connector.Error as e:
+                    print(f"[memoria-calculo] meta memória para reconciliar id: {e}")
+                finally:
+                    try:
+                        if mcur is not None:
+                            mcur.close()
+                    except Exception:
+                        pass
+                    try:
+                        if mconn is not None:
+                            mconn.close()
+                    except Exception:
+                        pass
+
+        fields = _precainfosnew_columns(cur)
+        found = _find_precainfos_id_by_caso(
+            cur,
+            processo=proc,
+            incidente=inc,
+            requerente=nome,
+            fields=fields,
+        )
+        if found is None:
+            return (
+                None,
+                (
+                    f"Não existe registro com id {prec_id} em precainfosnew "
+                    "e não foi possível reconciliar por processo, incidente e nome."
+                ),
+            )
+        print(
+            f"[memoria-calculo] id_precainfosnew {prec_id} inexistente; "
+            f"reconciliado para {found} ({proc} / {inc} / {nome})"
+        )
+        return found, None
+    except mysql.connector.Error as e:
+        return None, f"Erro ao reconciliar cadastro: {e}"
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _persist_memoria_id_precainfosnew(memoria_id: int, new_prec_id: int) -> bool:
+    """Grava o id vivo em ``memoria_calculo`` (mantém bloqueio mensal coerente)."""
+    mcfg = _memoria_mysql_config()
+    if not mcfg:
+        return False
+    mconn = None
+    mcur = None
+    try:
+        mconn = mysql.connector.connect(
+            **mcfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        mcur = mconn.cursor()
+        mcur.execute(
+            """
+            UPDATE memoria_calculo
+            SET id_precainfosnew = %s,
+                atualizado_em = atualizado_em
+            WHERE id = %s
+              AND (id_precainfosnew IS NULL OR id_precainfosnew <> %s)
+            """,
+            (int(new_prec_id), int(memoria_id), int(new_prec_id)),
+        )
+        mconn.commit()
+        return mcur.rowcount > 0
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] persistir id_precainfosnew falhou: {e}")
+        return False
+    finally:
+        try:
+            if mcur is not None:
+                mcur.close()
+        except Exception:
+            pass
+        try:
+            if mconn is not None:
+                mconn.close()
+        except Exception:
+            pass
+
+
+def _reconcile_stale_precainfos_ids(results: list[dict]) -> list[dict]:
+    """Troca ids mortos pelo cadastro atual (processo+incidente+nome) e deduplica."""
+    if not results:
+        return results
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return results
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW TABLES LIKE 'precainfosnew'")
+        if not cur.fetchone():
+            return results
+        fields = _precainfosnew_columns(cur)
+        out: list[dict] = []
+        for row in results:
+            item = dict(row)
+            try:
+                pid = int(item["id_precainfosnew"]) if item.get("id_precainfosnew") is not None else None
+            except (TypeError, ValueError):
+                pid = None
+            if pid is not None and pid > 0 and not _precainfos_id_exists(cur, pid):
+                found = _find_precainfos_id_by_caso(
+                    cur,
+                    processo=str(item.get("numero_de_processo") or ""),
+                    incidente=str(item.get("numero_do_incidente") or ""),
+                    requerente=str(item.get("requerente") or ""),
+                    fields=fields,
+                )
+                if found is not None:
+                    print(
+                        f"[memoria-calculo] busca: id {pid} → {found} "
+                        f"({item.get('requerente')})"
+                    )
+                    item["id_precainfosnew"] = found
+                    item["id_precainfosnew_reconciliado"] = True
+                    item["id_precainfosnew_anterior"] = pid
+                    memoria_pk = item.get("id")
+                    try:
+                        memoria_pk_int = int(memoria_pk) if memoria_pk is not None else None
+                    except (TypeError, ValueError):
+                        memoria_pk_int = None
+                    if memoria_pk_int and memoria_pk_int > 0:
+                        if _persist_memoria_id_precainfosnew(memoria_pk_int, found):
+                            item["id_precainfosnew_persistido"] = True
+            out.append(item)
+
+        # Mesmo processo+incidente+nome pode aparecer duas vezes (id antigo e novo).
+        deduped: list[dict] = []
+        seen: dict[tuple[str, str, str], int] = {}
+        for item in out:
+            key = (
+                str(item.get("numero_de_processo") or "").strip(),
+                str(item.get("numero_do_incidente") or "").strip(),
+                _norm_credor_key(item.get("requerente")),
+            )
+            if not key[0] or not key[2]:
+                deduped.append(item)
+                continue
+            if key not in seen:
+                seen[key] = len(deduped)
+                deduped.append(item)
+                continue
+            prev = deduped[seen[key]]
+            # Preferir a linha cujo id já era o do cadastro vivo (sem reconciliação).
+            prev_recon = bool(prev.get("id_precainfosnew_reconciliado"))
+            cur_recon = bool(item.get("id_precainfosnew_reconciliado"))
+            if prev_recon and not cur_recon:
+                deduped[seen[key]] = item
+            elif prev_recon == cur_recon:
+                try:
+                    prev_id = int(prev.get("id") or 0)
+                    cur_id = int(item.get("id") or 0)
+                except (TypeError, ValueError):
+                    prev_id, cur_id = 0, 0
+                if cur_id > prev_id:
+                    deduped[seen[key]] = item
+        return deduped
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] reconcile precainfos ids: {e}")
+        return results
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
 def _append_missing_precainfos_creditors(
     results: list[dict],
     *,
@@ -523,6 +849,9 @@ def _append_missing_precainfos_creditors(
         )
         req_sql = f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"
         if incidente and f_inc:
+            inc_sql, inc_params = _sql_trim_in(
+                f"`{f_inc}`", incidente_match_variants(incidente)
+            )
             cur.execute(
                 f"""
                 SELECT id,
@@ -533,11 +862,11 @@ def _append_missing_precainfos_creditors(
                        {meses_sql}
                 FROM precainfosnew
                 WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                  AND {inc_sql}
                 ORDER BY id DESC
                 LIMIT 20
                 """,
-                (processo, incidente),
+                (processo, *inc_params),
             )
         else:
             inc_sel = (
@@ -727,13 +1056,8 @@ def _eda_mysql_config() -> dict | None:
 
 
 def _normalizar_blacklist_processo_incidente(processo: object, incidente: object) -> str:
-    proc = " ".join(str(processo or "").strip().upper().split())
-    if not proc or proc.lower() == "nan":
-        return ""
-    inc = " ".join(str(incidente or "").strip().upper().split())
-    if inc.lower() == "nan":
-        inc = ""
-    return f"{proc}|{inc}"
+    """``01`` / ``1`` / ``001`` colapsam para a mesma chave (via ``normalizar_incidente``)."""
+    return normalizar_processo_incidente_chave(processo, incidente)
 
 
 def _normalizar_blacklist_nome(nome: object) -> str:
@@ -802,6 +1126,13 @@ _PIPELINE_COLETA_STATUS_BLOQUEANTES: frozenset[str] = frozenset(
     }
 )
 
+# Aviso claro (não oculta valores): cadastro removido pelo limpador de blacklist.
+_PIPELINE_COLETA_STATUS_AVISO: frozenset[str] = frozenset(
+    {
+        "REMOVIDO_BLACKLIST",
+    }
+)
+
 
 def _normalizar_pipeline_coleta_status(value: object) -> str:
     return _normalizar_blacklist_status(value)
@@ -810,6 +1141,9 @@ def _normalizar_pipeline_coleta_status(value: object) -> str:
 def _pipeline_coleta_status_bloqueia(status: object) -> bool:
     normalized = _normalizar_pipeline_coleta_status(status)
     if not normalized:
+        return False
+    # Aviso (ex. REMOVIDO_BLACKLIST) não é bloqueio técnico.
+    if _pipeline_coleta_status_aviso(normalized):
         return False
     blocked = {
         _normalizar_pipeline_coleta_status(item)
@@ -826,6 +1160,26 @@ def _pipeline_coleta_status_bloqueia(status: object) -> bool:
     return False
 
 
+def _pipeline_coleta_status_aviso(status: object) -> bool:
+    """Status que devem gerar aviso claro sem ocultar os valores da memória."""
+    normalized = _normalizar_pipeline_coleta_status(status)
+    if not normalized:
+        return False
+    avisos = {
+        _normalizar_pipeline_coleta_status(item)
+        for item in _PIPELINE_COLETA_STATUS_AVISO
+    }
+    return normalized in avisos
+
+
+def _sql_trim_in(column_sql: str, values: list[str]) -> tuple[str, list[str]]:
+    """``TRIM(col) IN (...)`` com placeholders; lista vazia → predicado falso."""
+    if not values:
+        return "1=0", []
+    placeholders = ", ".join(["%s"] * len(values))
+    return f"TRIM(COALESCE({column_sql}, '')) IN ({placeholders})", list(values)
+
+
 def _lookup_controle_coleta_status(
     processo: str,
     incidente: str = "",
@@ -833,11 +1187,16 @@ def _lookup_controle_coleta_status(
     """
     Consulta ``controle_coleta_TJSP`` (flaskdb). Soft-fail: None se indisponível.
     Retorna ``{"status": str, "found": True}`` quando há linha com status.
+
+    Exige incidente informado. Sem incidente não adivinha entre linhas do
+    mesmo processo (evita bloquear um incidente apto por causa de outro).
     """
     proc = str(processo or "").strip()
     if not proc:
         return None
     inc = str(incidente or "").strip()
+    if not inc:
+        return None
     cfg = _flask_mysql_config()
     if not cfg:
         return None
@@ -882,32 +1241,21 @@ def _lookup_controle_coleta_status(
             "Incidente",
         )
         f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
-        if not f_proc or not f_status:
+        if not f_proc or not f_status or not f_inc:
             return None
 
-        if f_inc and inc:
-            cur.execute(
-                f"""
-                SELECT `{f_status}` AS status
-                FROM controle_coleta_TJSP
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
-                ORDER BY 1 DESC
-                LIMIT 1
-                """,
-                (proc, inc),
-            )
-        else:
-            cur.execute(
-                f"""
-                SELECT `{f_status}` AS status
-                FROM controle_coleta_TJSP
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                ORDER BY 1 DESC
-                LIMIT 1
-                """,
-                (proc,),
-            )
+        inc_sql, inc_params = _sql_trim_in(f"`{f_inc}`", incidente_match_variants(inc))
+        cur.execute(
+            f"""
+            SELECT `{f_status}` AS status
+            FROM controle_coleta_TJSP
+            WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+              AND {inc_sql}
+            ORDER BY `{f_status}` DESC
+            LIMIT 1
+            """,
+            (proc, *inc_params),
+        )
         row = cur.fetchone() or {}
         status = row.get("status")
         if status is None:
@@ -996,7 +1344,9 @@ def _apply_pipeline_coleta_blocks(results: list[dict]) -> list[dict]:
     """
     Check duplo: se o caso estiver com status bloqueante em controle_coleta_TJSP,
     oculta valores e marca ``pipeline_blocked`` (sem misturar com blacklist EDA).
+    ``REMOVIDO_BLACKLIST`` gera aviso claro sem ocultar valores.
     Soft-fail quando flaskdb indisponível.
+    Sem incidente na linha → não consulta (evita misturar incidentes).
     """
     if not results:
         return results
@@ -1008,20 +1358,28 @@ def _apply_pipeline_coleta_blocks(results: list[dict]) -> list[dict]:
             continue
         proc = str(row.get("numero_de_processo") or "").strip()
         inc = str(row.get("numero_do_incidente") or "").strip()
-        if not proc:
+        if not proc or not inc:
             out.append(row)
             continue
-        key = (proc, inc)
+        key = (proc, normalizar_incidente(inc) or inc)
         if key not in cache:
             cache[key] = _lookup_controle_coleta_status(proc, inc)
         ctl = cache[key]
-        if not ctl or not _pipeline_coleta_status_bloqueia(ctl.get("status")):
-            if ctl and ctl.get("status") is not None:
-                row = dict(row)
-                row["controle_coleta_status"] = ctl["status"]
+        if not ctl:
             out.append(row)
             continue
         status = str(ctl.get("status") or "").strip()
+        if _pipeline_coleta_status_aviso(status):
+            row = dict(row)
+            row["controle_coleta_status"] = status
+            row["removido_blacklist_aviso"] = True
+            out.append(row)
+            continue
+        if not _pipeline_coleta_status_bloqueia(status):
+            row = dict(row)
+            row["controle_coleta_status"] = status
+            out.append(row)
+            continue
         out.append(
             _pipeline_coleta_result_row(
                 status=status,
@@ -1458,10 +1816,17 @@ def _bloquear_calculo_mes_atual_enabled() -> bool:
     return raw not in ("0", "false", "off", "no", "nao", "não", "disabled")
 
 
-def _memoria_calculo_bloqueado_mes_atual(prec_id: int) -> tuple[bool, str | None]:
+def _memoria_calculo_bloqueado_mes_atual(
+    prec_id: int,
+    *,
+    processo: str = "",
+    incidente: str = "",
+    requerente: str = "",
+) -> tuple[bool, str | None]:
     """
     Bloqueio de segurança: se ``memoria_calculo`` já tiver sido atualizada no mês atual
-    para este ``id_precainfosnew``, evita rodar a automação novamente (cliques repetidos).
+    para este ``id_precainfosnew`` (ou o mesmo processo+incidente+nome), evita
+    rodar a automação novamente (cliques repetidos / id recriado).
 
     Returns
     -------
@@ -1483,12 +1848,45 @@ def _memoria_calculo_bloqueado_mes_atual(prec_id: int) -> tuple[bool, str | None
         ultima_f = _memoria_calculo_ultima_atualizacao_field(cur)
         if not ultima_f:
             return False, None
+
         cur.execute(
-            f"SELECT `{ultima_f}` AS ultima_atualizacao FROM memoria_calculo WHERE id_precainfosnew = %s LIMIT 1",
+            f"""
+            SELECT `{ultima_f}` AS ultima_atualizacao
+            FROM memoria_calculo
+            WHERE id_precainfosnew = %s
+            ORDER BY `{ultima_f}` DESC
+            LIMIT 1
+            """,
             (int(prec_id),),
         )
         row = cur.fetchone() or {}
         ultima = row.get("ultima_atualizacao")
+
+        # Id recriado: a linha antiga pode ainda ter o id morto — olhar chave natural.
+        if ultima is None:
+            proc = str(processo or "").strip()
+            nome = str(requerente or "").strip()
+            inc = str(incidente or "").strip()
+            if proc and nome:
+                variants = incidente_match_variants(inc) if inc else [""]
+                if not variants:
+                    variants = [""]
+                placeholders = ", ".join(["%s"] * len(variants))
+                cur.execute(
+                    f"""
+                    SELECT `{ultima_f}` AS ultima_atualizacao
+                    FROM memoria_calculo
+                    WHERE TRIM(COALESCE(numero_de_processo, '')) = %s
+                      AND TRIM(COALESCE(requerente, '')) = %s
+                      AND TRIM(COALESCE(numero_do_incidente, '')) IN ({placeholders})
+                    ORDER BY `{ultima_f}` DESC
+                    LIMIT 1
+                    """,
+                    (proc, nome, *variants),
+                )
+                row = cur.fetchone() or {}
+                ultima = row.get("ultima_atualizacao")
+
         if not ultima:
             return False, None
         # mysql-connector pode devolver datetime ou string
@@ -2310,7 +2708,8 @@ def api_memoria_buscar():
     Dois modos (exclusivos):
     - Nome: LIKE no requerente (mín. 2 caracteres; bind + escape de % e _).
     - Processo + incidente: igualdade em TRIM de numero_de_processo e
-      TRIM de numero_do_incidente (incidente vazio = sem incidente na BD).
+      TRIM de numero_do_incidente (incidente vazio = todos os incidentes
+      do processo; o bloqueio de pipeline só corre por linha/incidente).
     Não combinar parâmetros dos dois modos.
     """
     nome = (request.args.get("nome") or request.args.get("q") or "").strip()
@@ -2375,6 +2774,9 @@ def api_memoria_buscar():
         "query": {"processo": proc, "incidente": inc, "nome": nome},
         "motivo": override_reason,
     }
+    pesquisar_cumprimentos = str(
+        request.args.get("pesquisar_cumprimentos") or ""
+    ).strip().lower() in {"1", "true", "yes", "sim", "on"}
 
     if use_process:
         bl_row = _blacklist_processo_incidente_match(
@@ -2389,15 +2791,16 @@ def api_memoria_buscar():
                 processo=proc,
                 incidente=inc,
             )
-        # Check duplo: status bloqueante no controle_coleta_TJSP (pipeline TJSP).
-        ctl = _lookup_controle_coleta_status(proc, inc)
-        if ctl and _pipeline_coleta_status_bloqueia(ctl.get("status")):
-            return _pipeline_coleta_memoria_response(
-                modo="processo",
-                status=str(ctl.get("status") or "").strip(),
-                processo=proc,
-                incidente=inc or None,
-            )
+        # Check duplo: só com incidente informado (sem incidente → filtro por linha).
+        if inc:
+            ctl = _lookup_controle_coleta_status(proc, inc)
+            if ctl and _pipeline_coleta_status_bloqueia(ctl.get("status")):
+                return _pipeline_coleta_memoria_response(
+                    modo="processo",
+                    status=str(ctl.get("status") or "").strip(),
+                    processo=proc,
+                    incidente=inc or None,
+                )
     else:
         bl_row = _blacklist_nome_match(blacklist, nome=nome)
         if bl_row is not None and not allow_blacklist_override:
@@ -2422,13 +2825,37 @@ def api_memoria_buscar():
     def esc_like(s: str) -> str:
         return s.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
+    def _entregar(rows: list, source: str):
+        merged = _anexar_cumprimentos_se_pedido(
+            list(rows or []),
+            pedido=pesquisar_cumprimentos,
+            use_process=use_process,
+            nome=nome,
+            processo=proc,
+            incidente=inc,
+            blacklist=blacklist,
+            allow_blacklist_override=allow_blacklist_override,
+            audit_context=audit_context,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "modo": "processo" if use_process else "nome",
+                "source": source,
+                "results": merged,
+            }
+        )
+
     if use_process:
         if inc:
-            where_sql = """
+            inc_sql, inc_params = _sql_trim_in(
+                "numero_do_incidente", incidente_match_variants(inc)
+            )
+            where_sql = f"""
         TRIM(COALESCE(numero_de_processo, '')) = %s
-        AND TRIM(COALESCE(numero_do_incidente, '')) = %s
+        AND {inc_sql}
         """
-            params_exec: list = [proc, inc]
+            params_exec: list = [proc, *inc_params]
         else:
             where_sql = """
         TRIM(COALESCE(numero_de_processo, '')) = %s
@@ -2541,6 +2968,7 @@ def api_memoria_buscar():
             500,
         )
     if results:
+        results = _reconcile_stale_precainfos_ids(results)
         results = _apply_pipeline_coleta_blocks(results)
         _enrich_results_precainfos_numero_de_meses(results)
         if use_process:
@@ -2553,26 +2981,12 @@ def api_memoria_buscar():
                 audit_context=audit_context,
             )
             results = _apply_pipeline_coleta_blocks(results)
-        return jsonify(
-            {
-                "ok": True,
-                "modo": "processo" if use_process else "nome",
-                "source": "memoria_calculo",
-                "results": results,
-            }
-        )
+        return _entregar(results, "memoria_calculo")
 
     # Fallback: se não houver memória, procura no precainfosnew (flaskdb).
     fcfg = _flask_mysql_config()
     if not fcfg:
-        return jsonify(
-            {
-                "ok": True,
-                "modo": "processo" if use_process else "nome",
-                "source": "memoria_calculo",
-                "results": [],
-            }
-        )
+        return _entregar([], "memoria_calculo")
 
     try:
         conn2 = mysql.connector.connect(
@@ -2581,14 +2995,7 @@ def api_memoria_buscar():
         cur2 = conn2.cursor(dictionary=True)
         cur2.execute("SHOW TABLES LIKE 'precainfosnew'")
         if not cur2.fetchone():
-            return jsonify(
-                {
-                    "ok": True,
-                    "modo": "processo" if use_process else "nome",
-                    "source": "precainfosnew",
-                    "results": [],
-                }
-            )
+            return _entregar([], "precainfosnew")
 
         cur2.execute("SHOW COLUMNS FROM `precainfosnew`")
         raw_cols = cur2.fetchall() or []
@@ -2636,17 +3043,13 @@ def api_memoria_buscar():
             else "NULL AS precainfos_numero_de_meses"
         )
         if use_process and not f_proc:
-            return jsonify(
-                {
-                    "ok": True,
-                    "modo": "processo",
-                    "source": "precainfosnew",
-                    "results": [],
-                }
-            )
+            return _entregar([], "precainfosnew")
 
         if use_process:
             if inc and f_inc:
+                inc_sql, inc_params = _sql_trim_in(
+                    f"`{f_inc}`", incidente_match_variants(inc)
+                )
                 cur2.execute(
                     f"""
                     SELECT id,
@@ -2657,11 +3060,11 @@ def api_memoria_buscar():
                            {meses_sql}
                     FROM precainfosnew
                     WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                      AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                      AND {inc_sql}
                     ORDER BY id DESC
                     LIMIT 10
                     """,
-                    (proc, inc),
+                    (proc, *inc_params),
                 )
                 rows = cur2.fetchall() or []
             else:
@@ -2689,14 +3092,7 @@ def api_memoria_buscar():
             # Para pesquisa por nome, devolvemos resultados mas NÃO auto-rodamos cálculo
             # (pode haver muitos casos).
             if not f_req:
-                return jsonify(
-                    {
-                        "ok": True,
-                        "modo": "nome",
-                        "source": "precainfosnew",
-                        "results": [],
-                    }
-                )
+                return _entregar([], "precainfosnew")
             like_pat = f"%{esc_like(nome)}%"
             cur2.execute(
                 f"""
@@ -2808,24 +3204,10 @@ def api_memoria_buscar():
                 ).strip()
             out_rows.append(out_item)
         out_rows = _apply_pipeline_coleta_blocks(out_rows)
-        return jsonify(
-            {
-                "ok": True,
-                "modo": "processo" if use_process else "nome",
-                "source": "precainfosnew",
-                "results": out_rows,
-            }
-        )
+        return _entregar(out_rows, "precainfosnew")
     except mysql.connector.Error as e:
         print(f"[memoria-calculo] fallback precainfosnew falhou: {e}")
-        return jsonify(
-            {
-                "ok": True,
-                "modo": "processo" if use_process else "nome",
-                "source": "memoria_calculo",
-                "results": [],
-            }
-        )
+        return _entregar([], "memoria_calculo")
     finally:
         try:
             cur2.close()
@@ -2835,6 +3217,87 @@ def api_memoria_buscar():
             conn2.close()
         except Exception:
             pass
+
+
+def _anexar_cumprimentos_se_pedido(
+    results: list[dict],
+    *,
+    pedido: bool,
+    use_process: bool,
+    nome: str,
+    processo: str,
+    incidente: str,
+    blacklist: dict,
+    allow_blacklist_override: bool,
+    audit_context: dict,
+) -> list[dict]:
+    """Inclui coleta_cumprimento na listagem por nome ou processo com incidente amplo.
+
+    Só corre depois da blacklist e do controle_coleta da pesquisa, e só se o
+    checkbox Pedir Cumprimentos veio marcado. Incidente preenchido (exceto zero)
+    não consulta a tabela.
+    """
+    if not pedido:
+        return results
+    if use_process:
+        if not incidente_lista_ampla(incidente):
+            return results
+        consulta_nome = ""
+        consulta_proc = processo
+    else:
+        consulta_nome = nome
+        consulta_proc = ""
+    try:
+        encontrados = buscar_cumprimentos(nome=consulta_nome, processo=consulta_proc)
+    except Exception as e:
+        print(f"[memoria-calculo] coleta_cumprimento falhou: {e}")
+        return results
+    if not encontrados:
+        return results
+    liberados: list[dict] = []
+    for row in encontrados:
+        bl_row = None
+        for candidato in (
+            row.get("requerente"),
+            row.get("nome_complementar"),
+            row.get("requerente_coleta"),
+        ):
+            if not str(candidato or "").strip():
+                continue
+            bl_row = _blacklist_case_match(
+                blacklist,
+                processo=row.get("numero_de_processo"),
+                incidente=row.get("numero_do_incidente"),
+                requerente=candidato,
+            )
+            if bl_row is not None:
+                break
+        if bl_row is not None and not allow_blacklist_override:
+            liberados.append(
+                _blacklist_result_row(row, bl_row=bl_row, source="coleta_cumprimento")
+            )
+            continue
+        if bl_row is not None:
+            try:
+                _record_blacklist_override_audit(
+                    bl_row=bl_row,
+                    row=row,
+                    source="coleta_cumprimento",
+                    modo=str(audit_context.get("modo") or ""),
+                    query=dict(audit_context.get("query") or {}),
+                    motivo_confirmacao=str(audit_context.get("motivo") or ""),
+                )
+            except _BlacklistAuditError as e:
+                print(f"[memoria-calculo] auditoria blacklist cumprimento: {e}")
+                liberados.append(
+                    _blacklist_result_row(row, bl_row=bl_row, source="coleta_cumprimento")
+                )
+                continue
+            row = dict(row)
+            row["blacklist_override_audited"] = True
+        liberados.append(row)
+    liberados = _apply_pipeline_coleta_blocks(liberados)
+    return mesclar_sem_duplicar(results, liberados)
 
 
 def _calculo_atualizacao_api_base() -> str | None:
@@ -2951,19 +3414,15 @@ def _proxy_calculo_atualizacao_api_get(path: str) -> tuple[dict, int]:
     )
 
 
-def _run_calculo_via_fila_async_poll(
+def _enqueue_calculo_atualizacao(
     prec_id: int,
     *,
     feito_por: str,
-    timeout_sec: int,
     prioridade: bool = False,
     form_payload: dict | None = None,
     percentual_honorarios: float | None = None,
 ) -> tuple[dict, int]:
-    """
-    Enfileira na API (resposta rápida) e faz polling até o caso terminar.
-    Evita ``TimeoutError`` numa única ligação HTTP longa.
-    """
+    """Enfileira na API interna (``wait=False``) e devolve a aceitação imediata."""
     body: dict = {
         "id_precainfosnew": prec_id,
         "feito_por": feito_por,
@@ -2980,6 +3439,36 @@ def _run_calculo_via_fila_async_poll(
         "/atualizar",
         body=post_body,
         timeout=60,
+    )
+    if code not in (200, 202) or not accepted.get("accepted"):
+        return accepted, code if code >= 400 else 502
+    out = dict(accepted) if isinstance(accepted, dict) else {"ok": True}
+    out["accepted"] = True
+    out["id_precainfosnew"] = int(prec_id)
+    out["prioridade"] = bool(prioridade)
+    out.setdefault("ok", True)
+    return out, 202
+
+
+def _run_calculo_via_fila_async_poll(
+    prec_id: int,
+    *,
+    feito_por: str,
+    timeout_sec: int,
+    prioridade: bool = False,
+    form_payload: dict | None = None,
+    percentual_honorarios: float | None = None,
+) -> tuple[dict, int]:
+    """
+    Enfileira na API e faz polling no servidor até o caso terminar.
+    Preferir enfileirar + poll no browser (Atualizar Cálculo) para não prender workers.
+    """
+    accepted, code = _enqueue_calculo_atualizacao(
+        prec_id,
+        feito_por=feito_por,
+        prioridade=prioridade,
+        form_payload=form_payload,
+        percentual_honorarios=percentual_honorarios,
     )
     if code not in (200, 202) or not accepted.get("accepted"):
         return accepted, code if code >= 400 else 502
@@ -3066,7 +3555,25 @@ def api_memoria_atualizar_calculo():
             400,
         )
 
-    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    proc_meta = str(data.get("numero_de_processo") or data.get("processo") or "")
+    inc_meta = str(data.get("numero_do_incidente") or data.get("incidente") or "")
+    req_meta = str(data.get("requerente") or data.get("nome") or "")
+    live_id, resolve_err = _resolve_live_precainfos_id(
+        prec_id,
+        processo=proc_meta,
+        incidente=inc_meta,
+        requerente=req_meta,
+    )
+    if live_id is None:
+        return jsonify({"ok": False, "error": resolve_err or "Cadastro não encontrado."}), 400
+    prec_id = live_id
+
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(
+        prec_id,
+        processo=proc_meta,
+        incidente=inc_meta,
+        requerente=req_meta,
+    )
     if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
         blocked = False
     if blocked:
@@ -3122,16 +3629,29 @@ def api_memoria_atualizar_calculo():
             "yes",
             "on",
         }
-    out, code = _run_calculo_via_fila_async_poll(
+    # Enfileira e devolve já; o browser faz poll em /atualizar-calculo/status/<id>.
+    out, code = _enqueue_calculo_atualizacao(
         prec_id,
         feito_por=_memoria_feito_por_plataforma(),
-        timeout_sec=_calculo_atualizacao_api_timeout(),
         prioridade=prioridade,
         percentual_honorarios=honor_pct,
     )
     if isinstance(out, dict):
         out = dict(out)
         out["prioridade"] = bool(out.get("prioridade")) or bool(prioridade)
+        out["async"] = True
+    return jsonify(out), code
+
+
+@app.route("/api/memoria-calculo/atualizar-calculo/status/<int:prec_id>", methods=["GET"])
+def api_memoria_atualizar_calculo_status(prec_id: int):
+    """Estado do job na API interna (poll do browser após enfileirar)."""
+    if prec_id <= 0:
+        return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
+    out, code = _proxy_calculo_atualizacao_api_get(f"/status/{prec_id}")
+    if isinstance(out, dict) and "ok" not in out:
+        out = dict(out)
+        out["ok"] = code == 200
     return jsonify(out), code
 
 
@@ -3181,11 +3701,28 @@ def api_memoria_calculo_manual():
     automação. Se não existir, não cria linha nessa tabela: grava só em
     ``memoria_calculo`` e corre a planilha com os dados do formulário.
     """
-    payload, err = calculo_manual_normalize(request.get_json(silent=True) or {})
+    raw_manual = request.get_json(silent=True) or {}
+    origem_cumprimento = str(raw_manual.get("origem_dados") or "").strip() == "coleta_cumprimento"
+    if origem_cumprimento:
+        from zoneinfo import ZoneInfo
+
+        raw_manual = dict(raw_manual)
+        raw_manual["data_decisao"] = datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+    payload, err = calculo_manual_normalize(raw_manual)
     if err or payload is None:
         return jsonify({"ok": False, "error": err or "Formulário inválido."}), 400
 
-    upsert, err = calculo_manual_upsert(payload)
+    if origem_cumprimento:
+        upsert, err = {
+            "id": calculo_manual_synthetic_id(
+                payload["numero_de_processo"],
+                payload["numero_do_incidente"],
+                payload["requerente"],
+            ),
+            "action": "memoria_only",
+        }, None
+    else:
+        upsert, err = calculo_manual_upsert(payload)
     if err or not upsert:
         return jsonify({"ok": False, "error": err or "Falha ao gravar o cadastro."}), 400
 
@@ -3194,7 +3731,12 @@ def api_memoria_calculo_manual():
     form_payload = None
     feito = _memoria_feito_por_plataforma()
 
-    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(
+        prec_id,
+        processo=str(payload.get("numero_de_processo") or ""),
+        incidente=str(payload.get("numero_do_incidente") or ""),
+        requerente=str(payload.get("requerente") or ""),
+    )
     if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
         blocked = False
     if blocked:
@@ -3253,12 +3795,27 @@ def api_memoria_calculo_manual():
         )
 
     prioridade = bool(payload.get("prioridade"))
+    honor_pct = None
+    raw_honor = raw_manual.get("percentual_honorarios")
+    if raw_honor is None:
+        raw_honor = raw_manual.get("Percentual_Honorarios")
+    if raw_honor is not None and raw_honor != "":
+        try:
+            honor_pct = float(str(raw_honor).replace("%", "").replace(",", ".").strip())
+        except (TypeError, ValueError):
+            honor_pct = None
+        else:
+            if honor_pct < 0:
+                honor_pct = None
+            else:
+                honor_pct = round(min(honor_pct, 100.0), 2)
     out, code = _run_calculo_via_fila_async_poll(
         prec_id,
         feito_por=_memoria_feito_por_plataforma(),
         timeout_sec=_calculo_atualizacao_api_timeout(),
         prioridade=prioridade,
         form_payload=form_payload,
+        percentual_honorarios=honor_pct,
     )
     if isinstance(out, dict):
         out = dict(out)
@@ -3301,6 +3858,19 @@ def api_memoria_salvar_numero_meses():
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "id_precainfosnew inválido."}), 400
 
+    proc_meta = str(data.get("numero_de_processo") or data.get("processo") or "")
+    inc_meta = str(data.get("numero_do_incidente") or data.get("incidente") or "")
+    req_meta = str(data.get("requerente") or data.get("nome") or "")
+    live_id, resolve_err = _resolve_live_precainfos_id(
+        prec_id,
+        processo=proc_meta,
+        incidente=inc_meta,
+        requerente=req_meta,
+    )
+    if live_id is None:
+        return jsonify({"ok": False, "error": resolve_err or "Cadastro não encontrado."}), 400
+    prec_id = live_id
+
     raw_meses = data.get("numero_de_meses")
     if raw_meses is None or str(raw_meses).strip() == "":
         return (
@@ -3330,7 +3900,12 @@ def api_memoria_salvar_numero_meses():
         status = 409 if err_upd and "só pode ser alterado" in err_upd else 400
         return jsonify({"ok": False, "error": err_upd or "Falha ao gravar."}), status
 
-    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(prec_id)
+    blocked, ultima_iso = _memoria_calculo_bloqueado_mes_atual(
+        prec_id,
+        processo=proc_meta,
+        incidente=inc_meta,
+        requerente=req_meta,
+    )
     if blocked and _pode_ignorar_bloqueio_calculo_mes_atual():
         blocked = False
     if blocked:
@@ -3575,17 +4150,20 @@ def api_memoria_precainfos_detalhes():
             400
 
         if f_inc:
+            inc_sql, inc_params = _sql_trim_in(
+                f"`{f_inc}`", incidente_match_variants(inc)
+            )
             cur.execute(
                 f"""
                 SELECT *
                 FROM precainfosnew
                 WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                  AND {inc_sql}
                   AND TRIM(COALESCE(`{f_req}`, '')) = %s
                 ORDER BY id DESC
                 LIMIT 2
                 """,
-                (proc, inc, nome),
+                (proc, *inc_params, nome),
             )
         else:
             cur.execute(
@@ -4440,6 +5018,100 @@ def api_proposta_gerar_pdf():
             "Cache-Control": "no-store",
         },
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FINANCEIRO — custos gerais e por departamento
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/financeiro")
+def financeiro_page():
+    return render_template("financeiro.html")
+
+
+def _financeiro_entrada() -> tuple[dict, tuple[str, bytes] | None]:
+    if request.files or request.form:
+        data = request.form.to_dict(flat=True)
+    else:
+        raw = request.get_json(silent=True)
+        data = raw if isinstance(raw, dict) else {}
+    upload = request.files.get("pdf") if request.files else None
+    pdf = None
+    if upload and upload.filename:
+        content = upload.read()
+        if content:
+            pdf = (upload.filename, content)
+    return data, pdf
+
+
+@app.route("/api/financeiro/custos", methods=["GET"], endpoint="api_financeiro_custos_listar")
+def api_financeiro_custos_listar():
+    try:
+        mes_raw = (request.args.get("mes") or "").strip()
+        sit = (request.args.get("situacao") or "").strip().lower() or None
+        payload = financeiro_listar(
+            departamento=(request.args.get("departamento") or "").strip().lower(),
+            ano=int(request.args.get("ano") or "0"),
+            mes=int(mes_raw) if mes_raw else None,
+            situacao=sit,
+        )
+        return jsonify(payload)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        app.logger.exception("financeiro listar")
+        return jsonify({"ok": False, "error": "Não foi possível carregar os custos."}), 500
+
+
+@app.route("/api/financeiro/custos", methods=["POST"], endpoint="api_financeiro_custos_criar")
+def api_financeiro_custos_criar():
+    try:
+        u = current_user()
+        autor = str((u or {}).get("username") or "").strip()
+        data, pdf = _financeiro_entrada()
+        return jsonify(financeiro_criar(data, autor, pdf))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        app.logger.exception("financeiro criar")
+        return jsonify({"ok": False, "error": "Não foi possível salvar o custo."}), 500
+
+
+@app.route("/api/financeiro/custos/<int:custo_id>", methods=["PUT"], endpoint="api_financeiro_custos_atualizar")
+def api_financeiro_custos_atualizar(custo_id: int):
+    try:
+        data, pdf = _financeiro_entrada()
+        return jsonify(financeiro_atualizar(custo_id, data, pdf))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        app.logger.exception("financeiro atualizar")
+        return jsonify({"ok": False, "error": "Não foi possível salvar o custo."}), 500
+
+
+@app.route("/api/financeiro/custos/<int:custo_id>", methods=["DELETE"], endpoint="api_financeiro_custos_excluir")
+def api_financeiro_custos_excluir(custo_id: int):
+    try:
+        return jsonify(financeiro_desativar(custo_id))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        app.logger.exception("financeiro excluir")
+        return jsonify({"ok": False, "error": "Não foi possível excluir o custo."}), 500
+
+
+@app.route("/api/financeiro/custos/<int:custo_id>/pdf", endpoint="api_financeiro_custos_pdf")
+def api_financeiro_custos_pdf(custo_id: int):
+    try:
+        found = financeiro_caminho_pdf(custo_id)
+    except Exception:
+        app.logger.exception("financeiro pdf")
+        return jsonify({"ok": False, "error": "Não foi possível abrir o PDF."}), 500
+    if not found:
+        return jsonify({"ok": False, "error": "PDF não encontrado."}), 404
+    path, nome = found
+    return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=nome)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
