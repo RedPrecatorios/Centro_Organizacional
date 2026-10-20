@@ -1317,6 +1317,7 @@
       cursor: pointer;
     }
     .memoria-btn-mais-info:hover:not(:disabled){ background: var(--bg-chat); }
+    #memoria-btn-analise-processual[hidden]{ display: none !important; }
     .memoria-btn-mais-info:disabled{ opacity: 0.5; cursor: not-allowed; }
     .memoria-case-row--action{ border-top: 1px dashed var(--border); padding-top: 0.5rem; margin-top: 0.25rem; }
     .memoria-verificar-meses{
@@ -1972,6 +1973,14 @@
         btnAtualizarCalculo.title = 'Cumprimento sem data-base, entidade ou valores.';
         return;
       }
+      // Cumprimento completo: libera Atualizar (fluxo calculo-manual), mesmo sem id positivo.
+      if (cumprimentoCalculoPronto(row || currentRow)) {
+        btnAtualizarCalculo.disabled = false;
+        btnAtualizarCalculo.title = cumprimentoSemMeses(row || currentRow)
+          ? 'Meses em falta: o robô grava 1000 se ≤ R$ 200 mil; acima disso a UI pede correção.'
+          : 'Gera a memória a partir dos dados do cumprimento.';
+        return;
+      }
       if (idPrecainfosnewSelecionado != null && Number(idPrecainfosnewSelecionado) <= 0) {
         btnAtualizarCalculo.disabled = true;
         btnAtualizarCalculo.title = 'Caso só na memória de cálculo. Recalcule na aba Cálculo manual.';
@@ -2123,7 +2132,8 @@
       var viaCumprimento = casoViaCumprimento(currentRow);
       var procFromRow = temRegistoCarregado && currentRow && String(currentRow.numero_de_processo || '').trim();
       var procFromInput = getModo() === 'processo' && inputProc && String(inputProc.value || '').trim();
-      var show = !viaCumprimento && (procFromRow || procFromInput);
+      // Com cumprimento (checkbox ou linha da coleta): só Atualizar Cálculo.
+      var show = !viaCumprimento && !!(procFromRow || procFromInput);
       if (show) {
         btnAnaliseProcessual.removeAttribute('hidden');
       } else {
@@ -2131,8 +2141,12 @@
       }
       if (viaCumprimento) {
         btnAnaliseProcessual.disabled = true;
-        btnAnaliseProcessual.title = 'Com «Pesquisar Cumprimentos» ativo, use apenas Atualizar Cálculo.';
-      } else if (!analiseProcessualConfigured) {
+        btnAnaliseProcessual.setAttribute('aria-disabled', 'true');
+        btnAnaliseProcessual.title = 'Com «Pesquisar Cumprimentos» / cumprimento, use apenas Atualizar Cálculo.';
+        return;
+      }
+      btnAnaliseProcessual.removeAttribute('aria-disabled');
+      if (!analiseProcessualConfigured) {
         btnAnaliseProcessual.disabled = true;
         btnAnaliseProcessual.title = 'REFACTOR_TJSP não configurado no servidor';
       } else if (bloquearBotoesCasoAusente && !podeAnaliseProcessualMesmoInapto()) {
@@ -3501,6 +3515,7 @@
     if (chkPesquisarCumprimentos) {
       chkPesquisarCumprimentos.addEventListener('change', function () {
         syncAnaliseProcessualButton();
+        syncAtualizarCalculoButtonState(currentRow);
       });
     }
     if (analiseClose) analiseClose.addEventListener('click', hideAnaliseModal);

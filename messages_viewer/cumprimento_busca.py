@@ -240,22 +240,43 @@ def linha_cumprimento(row: dict) -> dict[str, Any] | None:
     }
 
 
+def _chaves_linha(row: dict) -> list[tuple[str, str]]:
+    proc = row.get("numero_de_processo")
+    return [
+        _chave(nome, proc)
+        for nome in (
+            row.get("requerente"),
+            row.get("nome_complementar"),
+            row.get("requerente_coleta"),
+        )
+        if _clean(nome) and _clean(proc)
+    ]
+
+
 def mesclar_sem_duplicar(existentes: list[dict], novos: list[dict]) -> list[dict]:
-    """Não repete cumprimento já listado pelo mesmo nome e o mesmo processo."""
+    """Não repete o mesmo nome+processo.
+
+    Se a coleta e a memória/cadastro coincidem, **prefere ``coleta_cumprimento``**
+    (senão o id negativo da memória desativa «Atualizar Cálculo» e sobra «Análise»).
+    """
     known: set[tuple[str, str]] = set()
     known_ids: set[int] = set()
-    for row in existentes:
-        proc = row.get("numero_de_processo")
-        for nome in (row.get("requerente"), row.get("nome_complementar")):
-            if _clean(nome) and _clean(proc):
-                known.add(_chave(nome, proc))
+    out: list[dict] = []
+
+    def _registrar(row: dict) -> None:
+        for chave in _chaves_linha(row):
+            known.add(chave)
         coleta_id = row.get("id_coleta_cumprimento")
         try:
             if coleta_id is not None:
                 known_ids.add(int(coleta_id))
         except (TypeError, ValueError):
             pass
-    out = list(existentes)
+
+    for row in existentes:
+        out.append(row)
+        _registrar(row)
+
     for row in novos:
         coleta_id = row.get("id_coleta_cumprimento")
         try:
@@ -264,20 +285,24 @@ def mesclar_sem_duplicar(existentes: list[dict], novos: list[dict]) -> list[dict
             coleta_int = None
         if coleta_int is not None and coleta_int in known_ids:
             continue
-        chaves = [
-            _chave(nome, row.get("numero_de_processo"))
-            for nome in (
-                row.get("requerente"),
-                row.get("nome_complementar"),
-                row.get("requerente_coleta"),
-            )
-            if _clean(nome)
-        ]
-        if chaves and all(chave in known for chave in chaves):
+        chaves = _chaves_linha(row)
+        match_idx: int | None = None
+        if chaves:
+            for i, old in enumerate(out):
+                old_chaves = _chaves_linha(old)
+                if old_chaves and any(c in old_chaves for c in chaves):
+                    match_idx = i
+                    break
+        if match_idx is not None:
+            old = out[match_idx]
+            if (
+                row.get("source") == "coleta_cumprimento"
+                and old.get("source") != "coleta_cumprimento"
+            ):
+                out[match_idx] = row
+                _registrar(row)
             continue
-        if coleta_int is not None:
-            known_ids.add(coleta_int)
-        known.update(chaves)
+        _registrar(row)
         out.append(row)
     return out
 

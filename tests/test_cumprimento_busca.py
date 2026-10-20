@@ -178,12 +178,13 @@ def test_data_so_mes_ano_usa_ultimo_dia():
     assert abril["form"]["data_base"] == "2011-04-30"
 
 
-def test_mescla_nao_repete_mesmo_nome_e_processo():
+def test_mescla_prefere_coleta_sobre_memoria():
     existente = [
         {
             "requerente": "Maria Cristina",
             "numero_de_processo": "0000878-86.2025.8.26.0053",
             "source": "memoria_calculo",
+            "id_precainfosnew": -123,
         }
     ]
     novo = linha_cumprimento(
@@ -192,6 +193,10 @@ def test_mescla_nao_repete_mesmo_nome_e_processo():
             "nome": "Maria Cristina",
             "cpf": "923.558.468-04",
             "numero_do_cumprimento": "0000878-86.2025.8.26.0053",
+            "entidade_devedora": "SPPREV",
+            "principal_liquido": "10,00",
+            "juros": "1,00",
+            "data_base": "01/08/2023",
         }
     )
     outro = linha_cumprimento(
@@ -204,4 +209,6 @@ def test_mescla_nao_repete_mesmo_nome_e_processo():
     )
     merged = mesclar_sem_duplicar(existente, [novo, outro])
     assert len(merged) == 2
+    assert merged[0]["source"] == "coleta_cumprimento"
+    assert merged[0]["requerente"] == "Maria Cristina"
     assert merged[1]["requerente"] == "Outra Pessoa"
