@@ -224,8 +224,16 @@ def _parse_int(raw: Any) -> int | None:
         return None
 
 
-def normalize_form(data: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """Valida o JSON do formulário. Devolve (payload, erro)."""
+def normalize_form(
+    data: dict[str, Any],
+    *,
+    meses_opcional: bool = False,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Valida o JSON do formulário. Devolve (payload, erro).
+
+    Com ``meses_opcional=True`` (cumprimento), meses em branco viram 0 e o robô
+    aplica 1000 se o total ≤ R$ 200 mil; acima disso a memória fica «Verificar Meses».
+    """
     if not isinstance(data, dict):
         return None, "JSON inválido."
     out: dict[str, Any] = {}
@@ -247,7 +255,11 @@ def normalize_form(data: dict[str, Any]) -> tuple[dict[str, Any] | None, str | N
     out["inst_prev"] = out["descontos"]
     for k in _DESCONTO_RUBRICAS:
         out[k] = Decimal("0")
-    meses = _parse_int(data.get("numero_de_meses"))
+    raw_meses = data.get("numero_de_meses")
+    if meses_opcional and (raw_meses is None or str(raw_meses).strip() == ""):
+        meses = 0
+    else:
+        meses = _parse_int(raw_meses)
     out["numero_de_meses"] = meses
     out["prioridade"] = _parse_bool_flag(data.get("prioridade"))
 
@@ -274,10 +286,10 @@ def normalize_form(data: dict[str, Any]) -> tuple[dict[str, Any] | None, str | N
     if out["numero_de_meses"] is None:
         return None, "Número de meses inválido."
     entidade = out["entidade_devedora"].upper()
-    if out["numero_de_meses"] < 1 and "INSS" not in entidade:
-        return None, "Número de meses deve ser pelo menos 1 (exceto entidade INSS)."
     if out["numero_de_meses"] < 0:
         return None, "Número de meses não pode ser negativo."
+    if out["numero_de_meses"] < 1 and not meses_opcional and "INSS" not in entidade:
+        return None, "Número de meses deve ser pelo menos 1 (exceto entidade INSS)."
     if not re.search(r"\d", out["numero_de_processo"]):
         return None, "Nº do processo inválido."
     return out, None

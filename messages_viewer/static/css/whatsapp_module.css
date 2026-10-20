@@ -1130,7 +1130,8 @@ body.platform-body #app-toast {
 }
 .memoria-btn-atualizar-calculo,
 .memoria-btn-analise-processual,
-.memoria-btn-salvar-meses {
+.memoria-btn-salvar-meses,
+.memoria-btn-baixar-planilha {
   height: 40px;
   padding: 0 16px;
   font-size: 13px;
@@ -1139,6 +1140,23 @@ body.platform-body #app-toast {
   border-radius: var(--r);
   cursor: pointer;
   white-space: nowrap;
+}
+.memoria-btn-baixar-planilha {
+  color: #0f766e;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+}
+.memoria-btn-baixar-planilha:hover:not(:disabled) {
+  background: #f0fdfa;
+  border-color: #0f766e;
+}
+.memoria-btn-baixar-planilha:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.25);
+}
+.memoria-btn-baixar-planilha:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .memoria-btn-atualizar-calculo {
   color: #fff;

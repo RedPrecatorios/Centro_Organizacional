@@ -156,6 +156,11 @@ from messages_viewer.calculo_manual import (
     upsert_memoria_from_form as calculo_manual_upsert_memoria,
     upsert_precainfos_from_form as calculo_manual_upsert,
 )
+from messages_viewer.memoria_drive_planilha import (
+    download_planilha_bytes as memoria_drive_download_bytes,
+    find_planilha as memoria_drive_find_planilha,
+    is_configured as memoria_drive_planilha_configured,
+)
 from messages_viewer.cumprimento_busca import (
     buscar_cumprimentos,
     incidente_lista_ampla,
@@ -1971,6 +1976,7 @@ def memoria_calculo():
         bloquear_calculo_mes_atual=_bloquear_calculo_mes_atual_enabled(),
         pode_forcar_atualizar_calculo=pode_forcar_atualizar_calculo,
         analise_processual_configured=_refactor_analise_processual_configured(),
+        planilha_drive_configured=memoria_drive_planilha_configured(),
     )
 
 
@@ -3231,17 +3237,15 @@ def _anexar_cumprimentos_se_pedido(
     allow_blacklist_override: bool,
     audit_context: dict,
 ) -> list[dict]:
-    """Inclui coleta_cumprimento na listagem por nome ou processo com incidente amplo.
+    """Inclui coleta_cumprimento na listagem quando o checkbox está marcado.
 
-    Só corre depois da blacklist e do controle_coleta da pesquisa, e só se o
-    checkbox Pedir Cumprimentos veio marcado. Incidente preenchido (exceto zero)
-    não consulta a tabela.
+    A coleta não tem incidente: o filtro de incidente da pesquisa vale só para
+    memória/precainfos. Com o pedido ativo, a coleta é consultada mesmo se o
+    campo incidente estiver preenchido (antes isso silenciava o resultado).
     """
     if not pedido:
         return results
     if use_process:
-        if not incidente_lista_ampla(incidente):
-            return results
         consulta_nome = ""
         consulta_proc = processo
     else:
@@ -3655,6 +3659,130 @@ def api_memoria_atualizar_calculo_status(prec_id: int):
     return jsonify(out), code
 
 
+@app.route("/api/memoria-calculo/planilha-drive", methods=["GET"], endpoint="api_memoria_planilha_drive")
+def api_memoria_planilha_drive():
+    """Localiza a planilha do caso na pasta PLANS do Google Drive (metadados)."""
+    if not memoria_drive_planilha_configured():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Download do Drive não configurado. "
+                        "Defina MEMORIA_DRIVE_FOLDER_ID e MEMORIA_DRIVE_TOKEN_PATH no .env."
+                    ),
+                }
+            ),
+            503,
+        )
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    req = (request.args.get("requerente") or request.args.get("nome") or "").strip()
+    if not proc:
+        return jsonify({"ok": False, "error": "Indique o nº do processo."}), 400
+    try:
+        found = memoria_drive_find_planilha(
+            processo=proc, incidente=inc, requerente=req
+        )
+    except Exception as e:
+        print(f"[memoria-calculo] planilha-drive find: {e}")
+        return jsonify({"ok": False, "error": f"Falha ao consultar o Drive: {e}"}), 502
+    if not found:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": (
+                        "Nenhuma planilha encontrada no Drive para este processo "
+                        "(últimos 90 dias)."
+                    ),
+                }
+            ),
+            404,
+        )
+    return jsonify({"ok": True, "file": found})
+
+
+@app.route(
+    "/api/memoria-calculo/planilha-drive/download",
+    methods=["GET"],
+    endpoint="api_memoria_planilha_drive_download",
+)
+def api_memoria_planilha_drive_download():
+    """Descarrega a planilha do Drive (binary attachment)."""
+    if not memoria_drive_planilha_configured():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Download do Drive não configurado.",
+                }
+            ),
+            503,
+        )
+    file_id = (request.args.get("file_id") or request.args.get("id") or "").strip()
+    proc = (request.args.get("numero_de_processo") or request.args.get("processo") or "").strip()
+    inc = (request.args.get("numero_do_incidente") or request.args.get("incidente") or "").strip()
+    req = (request.args.get("requerente") or request.args.get("nome") or "").strip()
+    try:
+        if not file_id:
+            if not proc:
+                return jsonify({"ok": False, "error": "Indique file_id ou o nº do processo."}), 400
+            found = memoria_drive_find_planilha(
+                processo=proc, incidente=inc, requerente=req
+            )
+            if not found:
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "Nenhuma planilha encontrada no Drive para este processo.",
+                        }
+                    ),
+                    404,
+                )
+            file_id = str(found["id"])
+        content, filename = memoria_drive_download_bytes(file_id)
+    except Exception as e:
+        print(f"[memoria-calculo] planilha-drive download: {e}")
+        return jsonify({"ok": False, "error": f"Falha ao descarregar do Drive: {e}"}), 502
+    from io import BytesIO
+    from urllib.parse import quote
+
+    raw_name = str(filename or "planilha.xlsx").strip() or "planilha.xlsx"
+    # Extensão coerente com o conteúdo (OOXML começa com PK).
+    lower = raw_name.lower()
+    if not (lower.endswith(".xlsx") or lower.endswith(".xlsm") or lower.endswith(".xls")):
+        raw_name = f"{raw_name}.xlsx"
+        lower = raw_name.lower()
+    if lower.endswith(".xlsm"):
+        mime = "application/vnd.ms-excel.sheet.macroEnabled.12"
+    elif lower.endswith(".xls"):
+        mime = "application/vnd.ms-excel"
+    else:
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    # ASCII fallback + RFC 5987 (acentos/espaços no nome).
+    ascii_name = re.sub(r"[^\w.\-]+", "_", raw_name, flags=re.ASCII).strip("._") or "planilha.xlsx"
+    if not ascii_name.lower().endswith((".xlsx", ".xlsm", ".xls")):
+        ascii_name = f"{ascii_name}.xlsx"
+    utf8_name = quote(raw_name)
+    buf = BytesIO(content)
+    buf.seek(0)
+    resp = send_file(
+        buf,
+        mimetype=mime,
+        as_attachment=True,
+        download_name=ascii_name,
+        max_age=0,
+    )
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/memoria-calculo/calculo-manual/caso")
 def api_memoria_calculo_manual_caso():
     """Carrega os campos do formulário manual a partir de precainfosnew."""
@@ -3708,7 +3836,10 @@ def api_memoria_calculo_manual():
 
         raw_manual = dict(raw_manual)
         raw_manual["data_decisao"] = datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
-    payload, err = calculo_manual_normalize(raw_manual)
+    # Cumprimento: meses podem faltar (robô → 1000 se ≤200 mil; senão «Verificar Meses»).
+    payload, err = calculo_manual_normalize(
+        raw_manual, meses_opcional=origem_cumprimento
+    )
     if err or payload is None:
         return jsonify({"ok": False, "error": err or "Formulário inválido."}), 400
 

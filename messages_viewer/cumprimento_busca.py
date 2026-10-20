@@ -139,7 +139,11 @@ def _money_br(value: object) -> str:
 
 
 def formulario_completo(form: dict) -> bool:
-    """True quando a linha tem o que a planilha exige para atualizar o cálculo."""
+    """True quando a linha tem o que a planilha exige para atualizar o cálculo.
+
+    Meses podem faltar: se o total for ≤ R$ 200 mil o robô grava 1000;
+    se for maior, a memória fica com «Verificar Meses» para correção na UI.
+    """
     if not _clean(form.get("requerente")):
         return False
     entidade = _clean(form.get("entidade_devedora"))
@@ -151,14 +155,14 @@ def formulario_completo(form: dict) -> bool:
         return False
     if not form.get("principal_liquido") or not form.get("juros_moratorio"):
         return False
-    try:
-        meses = int(str(form.get("numero_de_meses") or "").strip())
-    except (TypeError, ValueError):
-        return False
-    if meses < 0:
-        return False
-    if meses < 1 and "INSS" not in entidade.upper():
-        return False
+    raw_meses = str(form.get("numero_de_meses") or "").strip()
+    if raw_meses:
+        try:
+            meses = int(raw_meses)
+        except (TypeError, ValueError):
+            return False
+        if meses < 0:
+            return False
     return True
 
 

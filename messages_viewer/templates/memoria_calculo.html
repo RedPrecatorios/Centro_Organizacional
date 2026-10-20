@@ -163,6 +163,9 @@
                 {% if user_can('salvar_numero_meses') %}
                 <button type="button" class="memoria-btn-salvar-meses" id="memoria-btn-salvar-meses" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env"{% endif %}>Salvar meses</button>
                 {% endif %}
+                {% if user_can('baixar_planilha_drive') %}
+                <button type="button" class="memoria-btn-baixar-planilha" id="memoria-btn-baixar-planilha" disabled {% if not planilha_drive_configured %}title="Drive não configurado (MEMORIA_DRIVE_*)"{% else %}title="Pesquise e selecione um caso para baixar a planilha do Drive"{% endif %}>Baixar planilha</button>
+                {% endif %}
                 <button type="button" class="memoria-btn-atualizar-calculo" id="memoria-btn-atualizar-calculo" {% if not calculo_atualizacao_configured %}disabled title="Defina CALCULO_ATUALIZACAO_API_URL no .env (ex.: http://127.0.0.1:5099) e o serviço interno"{% endif %}>Atualizar Cálculo</button>
               </div>
               <p id="honor-pct-hint" class="memoria-toolbar-hint">Honorários atualizam a tabela na hora. <strong>Atualizar Cálculo</strong> grava o percentual e o recálculo na planilha.</p>
@@ -694,6 +697,8 @@
     data-pode-forcar-atualizar-calculo='{{ pode_forcar_atualizar_calculo | tojson }}'
     data-flask-mysql-configured='{{ flask_mysql_configured | tojson }}'
     data-calculo-manual-permitted='{{ user_can("calculo_manual") | tojson }}'
+    data-planilha-drive-configured='{{ planilha_drive_configured | tojson }}'
+    data-baixar-planilha-drive-permitted='{{ user_can("baixar_planilha_drive") | tojson }}'
     hidden
   ></div>
 
@@ -1487,6 +1492,8 @@
     var cfgEl = document.getElementById('memoria-runtime-config');
     var memoriaConfigured = cfgEl ? JSON.parse(cfgEl.dataset.memoriaMysqlConfigured || 'false') : false;
     var calculoAtualizacaoConfigured = cfgEl ? JSON.parse(cfgEl.dataset.calculoAtualizacaoConfigured || 'false') : false;
+    var planilhaDriveConfigured = cfgEl ? JSON.parse(cfgEl.dataset.planilhaDriveConfigured || 'false') : false;
+    var baixarPlanilhaDrivePermitted = cfgEl ? JSON.parse(cfgEl.dataset.baixarPlanilhaDrivePermitted || 'false') : false;
     var analiseProcessualConfigured = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualConfigured || 'false') : false;
     var analiseProcessualPermitted = cfgEl ? JSON.parse(cfgEl.dataset.analiseProcessualPermitted || 'false') : false;
     var isPlataformaAdmin = cfgEl ? JSON.parse(cfgEl.dataset.isPlataformaAdmin || 'false') : false;
@@ -1538,6 +1545,7 @@
     var precainfosClose = document.getElementById('memoria-precainfos-close');
     var precainfosX = document.getElementById('memoria-precainfos-x');
     var btnAtualizarCalculo = document.getElementById('memoria-btn-atualizar-calculo');
+    var btnBaixarPlanilha = document.getElementById('memoria-btn-baixar-planilha');
     var btnAnaliseProcessual = document.getElementById('memoria-btn-analise-processual');
     var btnSalvarMeses = document.getElementById('memoria-btn-salvar-meses');
     var inputNumeroMeses = document.getElementById('memoria-numero-meses');
@@ -1704,6 +1712,15 @@
       return !!isPlataformaAdmin;
     }
 
+    function pesquisarCumprimentosAtivo() {
+      var chk = document.getElementById('memoria-pesquisar-cumprimentos');
+      return !!(chk && chk.checked);
+    }
+
+    function casoViaCumprimento(row) {
+      return pesquisarCumprimentosAtivo() || !!(row && row.source === 'coleta_cumprimento');
+    }
+
     function isPipelineColetaBlocked(row) {
       if (!row) return false;
       if (row.pipeline_blocked) return true;
@@ -1717,7 +1734,12 @@
       var meses = String(mesesRaw).trim().toLowerCase();
       if (meses === alvo) return true;
       var mesesNum = parseInt(meses, 10);
-      return !isNaN(mesesNum) && mesesNum <= 9;
+      if (!isNaN(mesesNum) && mesesNum <= 9) return true;
+      // Cumprimento sem meses e valor estimado > 200 mil: pedir correção na UI.
+      if (cumprimentoSemMeses(row) && cumprimentoValorEstimado(row) > LIMITE_ISENCAO_IR_MESES) {
+        return true;
+      }
+      return false;
     }
 
     function syncVerificarMesesAlert(row) {
@@ -1906,9 +1928,32 @@
       btnSalvarMeses.title = 'Grava o número de meses no cadastro e executa Atualizar Cálculo.';
     }
 
+    function syncBaixarPlanilhaButtonState(row) {
+      if (!btnBaixarPlanilha) return;
+      if (!baixarPlanilhaDrivePermitted) {
+        btnBaixarPlanilha.disabled = true;
+        return;
+      }
+      if (!planilhaDriveConfigured) {
+        btnBaixarPlanilha.disabled = true;
+        btnBaixarPlanilha.title = 'Drive não configurado (MEMORIA_DRIVE_*).';
+        return;
+      }
+      var r = row || currentRow;
+      var proc = r && String(r.numero_de_processo || '').trim();
+      if (!proc) {
+        btnBaixarPlanilha.disabled = true;
+        btnBaixarPlanilha.title = 'Pesquise e selecione um caso para baixar a planilha do Drive.';
+        return;
+      }
+      btnBaixarPlanilha.disabled = false;
+      btnBaixarPlanilha.title = 'Descarregar a planilha .xlsx deste caso no Google Drive.';
+    }
+
     function syncAtualizarCalculoButtonState(row) {
       syncMaisInfoButton();
       syncSalvarMesesButtonState(row);
+      syncBaixarPlanilhaButtonState(row);
       if (!btnAtualizarCalculo) return;
       // respeita bloqueio por config da API (server-side já desabilita via template)
       if (!calculoAtualizacaoConfigured) return;
@@ -1924,7 +1969,7 @@
       }
       if ((row || currentRow) && (row || currentRow).source === 'coleta_cumprimento' && !cumprimentoCalculoPronto(row || currentRow)) {
         btnAtualizarCalculo.disabled = true;
-        btnAtualizarCalculo.title = 'Cumprimento sem data-base, entidade, valores ou meses completos.';
+        btnAtualizarCalculo.title = 'Cumprimento sem data-base, entidade ou valores.';
         return;
       }
       if (idPrecainfosnewSelecionado != null && Number(idPrecainfosnewSelecionado) <= 0) {
@@ -1967,6 +2012,29 @@
 
     function cumprimentoCalculoPronto(row) {
       return !!(row && row.source === 'coleta_cumprimento' && row.calculo_completo && row.form);
+    }
+
+    var LIMITE_ISENCAO_IR_MESES = 200000;
+
+    function parseMoneyBrLoose(s) {
+      var t = String(s || '').replace(/R\$\s?/gi, '').trim();
+      if (!t) return 0;
+      if (t.indexOf(',') >= 0) {
+        t = t.replace(/\./g, '').replace(',', '.');
+      }
+      var n = parseFloat(t);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function cumprimentoSemMeses(row) {
+      if (!row || row.source !== 'coleta_cumprimento' || !row.form) return false;
+      var m = parseInt(String(row.form.numero_de_meses || '').trim(), 10);
+      return isNaN(m) || m < 1;
+    }
+
+    function cumprimentoValorEstimado(row) {
+      if (!row || !row.form) return 0;
+      return parseMoneyBrLoose(row.form.principal_liquido) + parseMoneyBrLoose(row.form.juros_moratorio);
     }
 
     function dataDecisaoCumprimentoIso() {
@@ -2052,15 +2120,19 @@
 
     function syncAnaliseProcessualButton() {
       if (!btnAnaliseProcessual || !analiseProcessualPermitted) return;
+      var viaCumprimento = casoViaCumprimento(currentRow);
       var procFromRow = temRegistoCarregado && currentRow && String(currentRow.numero_de_processo || '').trim();
       var procFromInput = getModo() === 'processo' && inputProc && String(inputProc.value || '').trim();
-      var show = procFromRow || procFromInput;
+      var show = !viaCumprimento && (procFromRow || procFromInput);
       if (show) {
         btnAnaliseProcessual.removeAttribute('hidden');
       } else {
         btnAnaliseProcessual.setAttribute('hidden', '');
       }
-      if (!analiseProcessualConfigured) {
+      if (viaCumprimento) {
+        btnAnaliseProcessual.disabled = true;
+        btnAnaliseProcessual.title = 'Com «Pesquisar Cumprimentos» ativo, use apenas Atualizar Cálculo.';
+      } else if (!analiseProcessualConfigured) {
         btnAnaliseProcessual.disabled = true;
         btnAnaliseProcessual.title = 'REFACTOR_TJSP não configurado no servidor';
       } else if (bloquearBotoesCasoAusente && !podeAnaliseProcessualMesmoInapto()) {
@@ -2069,9 +2141,6 @@
       } else if (isCasoSemSaldo(currentRow) && !podeAnaliseProcessualMesmoInapto()) {
         btnAnaliseProcessual.disabled = true;
         btnAnaliseProcessual.title = 'Caso inapto (Sem Saldo).';
-      } else if (currentRow && currentRow.source === 'coleta_cumprimento') {
-        btnAnaliseProcessual.disabled = true;
-        btnAnaliseProcessual.title = 'Cumprimento. Análise processual não se aplica a este caso.';
       } else {
         btnAnaliseProcessual.disabled = !show;
         if (!show) {
@@ -2277,7 +2346,13 @@
       escolherList.innerHTML = '';
       if (r.source === 'coleta_cumprimento') {
         if (cumprimentoCalculoPronto(r)) {
-          setMsg('Cumprimento com dados completos. Clique em “Atualizar Cálculo” para gerar a memória.', false);
+          if (cumprimentoSemMeses(r) && cumprimentoValorEstimado(r) > LIMITE_ISENCAO_IR_MESES) {
+            setMsg('Cumprimento pronto (sem meses). Valor acima de R$ 200 mil: após o cálculo será pedida a correção de meses. Clique em “Atualizar Cálculo”.', false);
+          } else if (cumprimentoSemMeses(r)) {
+            setMsg('Cumprimento pronto (sem meses). Até R$ 200 mil o robô grava 1000 meses. Clique em “Atualizar Cálculo”.', false);
+          } else {
+            setMsg('Cumprimento com dados completos. Clique em “Atualizar Cálculo” para gerar a memória.', false);
+          }
         } else {
           setMsg('Cumprimento localizado. Faltam dados para atualizar daqui. Na aba Cálculo manual os valores disponíveis já vêm preenchidos.', false);
         }
@@ -2415,6 +2490,7 @@
                         setMsg('Não localizado na memória/cadastro. Status no controle de coleta: ' + ctlStatus, false);
                         if (
                           !skipAutoAnalise &&
+                          !pesquisarCumprimentosAtivo() &&
                           analiseProcessualPermitted &&
                           analiseProcessualConfigured &&
                           shouldAutoAnaliseControle(ctlStatus) &&
@@ -3012,6 +3088,98 @@
       });
     }
 
+    if (btnBaixarPlanilha) {
+      btnBaixarPlanilha.addEventListener('click', function () {
+        if (!baixarPlanilhaDrivePermitted) {
+          setMsg('Sem permissão para baixar planilha do Drive.', true);
+          return;
+        }
+        if (!planilhaDriveConfigured) {
+          setMsg('Download do Drive não configurado no servidor.', true);
+          return;
+        }
+        var r = currentRow;
+        var proc = r && String(r.numero_de_processo || '').trim();
+        if (!proc) {
+          setMsg('Pesquise e selecione um caso antes de baixar a planilha.', true);
+          return;
+        }
+        var inc = r && r.numero_do_incidente != null ? String(r.numero_do_incidente).trim() : '';
+        var req = r && r.requerente ? String(r.requerente).trim() : '';
+        var u = new URLSearchParams();
+        u.set('numero_de_processo', proc);
+        if (inc) u.set('numero_do_incidente', inc);
+        if (req) u.set('requerente', req);
+        btnBaixarPlanilha.disabled = true;
+        var prevTitle = btnBaixarPlanilha.title;
+        btnBaixarPlanilha.title = 'A localizar planilha no Drive…';
+        setMsg('A localizar a planilha no Drive…', false);
+        fetch('/api/memoria-calculo/planilha-drive?' + u.toString(), {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' }
+        })
+          .then(function (res) {
+            return res.json().then(function (d) { return { ok: res.ok, status: res.status, d: d }; });
+          })
+          .then(function (o) {
+            if (!o.ok || !o.d || !o.d.ok || !o.d.file || !o.d.file.id) {
+              setMsg((o.d && o.d.error) ? o.d.error : 'Planilha não encontrada no Drive.', true);
+              return;
+            }
+            var fileName = (o.d.file.name && String(o.d.file.name).trim()) || 'planilha.xlsx';
+            setMsg(
+              'Planilha encontrada' +
+                (o.d.file.name ? (': ' + o.d.file.name) : '') +
+                (o.d.file.date ? (' (' + o.d.file.date + ')') : '') +
+                '. A descarregar…',
+              false
+            );
+            var dl = new URLSearchParams();
+            dl.set('file_id', String(o.d.file.id));
+            return fetch('/api/memoria-calculo/planilha-drive/download?' + dl.toString(), {
+              credentials: 'same-origin'
+            }).then(function (res) {
+              if (!res.ok) {
+                return res.json().then(function (d) {
+                  throw new Error((d && d.error) ? d.error : ('HTTP ' + res.status));
+                }).catch(function (err) {
+                  if (err && err.message && err.message.indexOf('HTTP') < 0) throw err;
+                  throw new Error('Falha no download (HTTP ' + res.status + ').');
+                });
+              }
+              var cd = res.headers.get('Content-Disposition') || '';
+              var m = /filename\*=UTF-8''([^;]+)|filename=\"([^\"]+)\"|filename=([^;]+)/i.exec(cd);
+              if (m) {
+                try {
+                  fileName = decodeURIComponent((m[1] || m[2] || m[3] || fileName).trim());
+                } catch (_) {}
+              }
+              return res.blob().then(function (blob) {
+                var type = blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                var typed = blob.type ? blob : new Blob([blob], { type: type });
+                var url = URL.createObjectURL(typed);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(function () { try { URL.revokeObjectURL(url); } catch (_) {} }, 2000);
+                setMsg('Download iniciado: ' + fileName, false);
+              });
+            });
+          })
+          .catch(function (err) {
+            setMsg((err && err.message) ? err.message : 'Falha de rede ao consultar o Drive.', true);
+          })
+          .finally(function () {
+            syncBaixarPlanilhaButtonState(currentRow);
+            if (btnBaixarPlanilha && prevTitle) btnBaixarPlanilha.title = prevTitle;
+          });
+      });
+    }
+
     if (btnAtualizarCalculo) {
       btnAtualizarCalculo.addEventListener('click', function () {
         if (!memoriaConfigured) {
@@ -3240,6 +3408,10 @@
         setMsg('Sem permissão para análise processual. Peça a um administrador (Utilizadores).', true);
         return;
       }
+      if (casoViaCumprimento(currentRow)) {
+        setMsg('Com «Pesquisar Cumprimentos» ativo, use apenas Atualizar Cálculo.', true);
+        return;
+      }
       if (analiseEmCurso() && !opts.force) {
         setMsg('Análise processual já em execução. Aguarde a conclusão.', false);
         return;
@@ -3324,6 +3496,12 @@
 
     if (btnAnaliseProcessual) {
       btnAnaliseProcessual.addEventListener('click', function () { startAnaliseProcessual(); });
+    }
+    var chkPesquisarCumprimentos = document.getElementById('memoria-pesquisar-cumprimentos');
+    if (chkPesquisarCumprimentos) {
+      chkPesquisarCumprimentos.addEventListener('change', function () {
+        syncAnaliseProcessualButton();
+      });
     }
     if (analiseClose) analiseClose.addEventListener('click', hideAnaliseModal);
     if (analiseX) analiseX.addEventListener('click', hideAnaliseModal);

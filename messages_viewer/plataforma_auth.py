@@ -119,6 +119,11 @@ FEATURE_PERMISSIONS: tuple[tuple[str, str, str], ...] = (
         "Cálculo manual (formulário)",
         "Aba na Memória de cálculo: pesquisa o caso, altera datas/valores/meses e dispara a automação",
     ),
+    (
+        "baixar_planilha_drive",
+        "Baixar planilha do Drive",
+        "Botão na Memória de cálculo para descarregar a planilha .xlsx diretamente do Google Drive",
+    ),
 )
 
 # Painéis do menu + funcionalidades extra (checkboxes em Utilizadores).
@@ -813,6 +818,8 @@ def _endpoint_to_tab() -> str | None:
         "api_memoria_analise_processual_status": "analise_processual",
         "api_memoria_precainfos_detalhes": "memoria_calculo",
         "api_memoria_controle_coleta_status": "memoria_calculo",
+        "api_memoria_planilha_drive": "baixar_planilha_drive",
+        "api_memoria_planilha_drive_download": "baixar_planilha_drive",
         "campanha_page": "campanha",
         "api_campanha_dominios": "campanha",
         "api_campanha_dominios_add": "campanha",

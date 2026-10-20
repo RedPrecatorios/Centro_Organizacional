@@ -106,6 +106,26 @@ def test_linha_completa_libera_atualizacao():
     assert item["form"]["data_decisao"] == ""
 
 
+def test_linha_sem_meses_ainda_libera_atualizacao():
+    """Meses em falta não bloqueiam: robô (≤200 mil→1000) ou UI «Verificar Meses»."""
+    item = linha_cumprimento(
+        {
+            "id": 9,
+            "nome": "MARIA",
+            "cpf": "1",
+            "numero_do_cumprimento": "0001-00.2020.8.26.0053",
+            "entidade_devedora": "SPPREV",
+            "principal_liquido": "10.000,00",
+            "juros": "1.000,00",
+            "meses": None,
+            "data_base": "01/08/2023",
+        }
+    )
+    assert item is not None
+    assert item["form"]["numero_de_meses"] == ""
+    assert item["calculo_completo"] is True
+
+
 def test_transito_nao_vira_data_decisao():
     base = {
         "id": 8,
