@@ -15,6 +15,7 @@ class SearchKind(str, Enum):
     NOME = "nome"
     CPF = "cpf"
     PROCESSO = "processo"
+    CREDOR = "credor"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class SearchQuery:
     label: str
     url: str
     filter_nome: str | None = None
+    filter_incidente: str | None = None
+    filter_cpf: str | None = None
 
     @property
     def slug(self) -> str:
@@ -33,10 +36,14 @@ class SearchQuery:
             raw = normalize_cpf(raw)
         elif self.kind == SearchKind.PROCESSO:
             base = normalize_processo(self.value)
+            if self.filter_incidente:
+                base = f"{base}_{self.filter_incidente}"
             if self.filter_nome:
                 raw = f"{base}_{normalize_party_name(self.filter_nome)}"
             else:
                 raw = base
+        elif self.kind == SearchKind.CREDOR:
+            raw = f"{normalize_cpf(self.value)}_{normalize_party_name(self.filter_nome or self.label)}"
         else:
             raw = normalize_party_name(raw)
         slug = re.sub(r"[^\w.\-]+", "_", raw, flags=re.UNICODE).strip("._")
@@ -172,55 +179,62 @@ def build_numproc_search_url(numero: str, *, cd_foro: int = -1) -> str:
     )
 
 
+def normalize_incidente(incidente: str) -> str:
+    raw = str(incidente or "").strip()
+    if not raw:
+        raise ValueError("Incidente vazio.")
+    digits = re.sub(r"\D+", "", raw)
+    if digits:
+        return str(int(digits))
+    return raw
+
+
 def build_search_query(
     *,
     nome: str | None = None,
     cpf: str | None = None,
     processo: str | None = None,
+    incidente: str | None = None,
 ) -> SearchQuery:
     """
     Build SearchQuery from:
-      - nome sozinho (NMPARTE)
-      - cpf sozinho (DOCPARTE)
-      - processo + nome (NUMPROC; nome = filtro na capa dos incidentes)
+      - nome + cpf (busca DOCPARTE; nome filtra capa)
+      - processo + incidente + (nome ou cpf)
     """
     n = normalize_party_name(nome) if nome and str(nome).strip() else ""
     c_raw = str(cpf).strip() if cpf and str(cpf).strip() else ""
     p_raw = str(processo).strip() if processo and str(processo).strip() else ""
-
-    if c_raw:
-        if n or p_raw:
-            raise ValueError("CPF deve ser informado sozinho (sem nome nem processo).")
-        digits = normalize_cpf(c_raw)
-        return SearchQuery(
-            kind=SearchKind.CPF,
-            value=digits,
-            label=digits,
-            url=build_docparte_search_url(digits),
-        )
+    i_raw = str(incidente).strip() if incidente and str(incidente).strip() else ""
 
     if p_raw:
-        if not n:
+        if not i_raw:
+            raise ValueError("Ao pesquisar por processo, informe também o incidente.")
+        if not n and not c_raw:
             raise ValueError(
-                "Ao pesquisar por processo, informe também o nome (Monday) "
-                "para filtrar os incidentes na capa."
+                "Ao pesquisar por processo e incidente, informe nome ou CPF do credor."
             )
         cnj = normalize_processo(p_raw)
+        inc = normalize_incidente(i_raw)
+        digits = normalize_cpf(c_raw) if c_raw else None
+        label_who = n or (digits or "")
         return SearchQuery(
             kind=SearchKind.PROCESSO,
             value=cnj,
-            label=f"{cnj} · {n}",
+            label=f"{cnj}/{inc} · {label_who}".strip(" ·"),
             url=build_numproc_search_url(cnj),
+            filter_nome=n or None,
+            filter_incidente=inc,
+            filter_cpf=digits,
+        )
+
+    if n and c_raw:
+        digits = normalize_cpf(c_raw)
+        return SearchQuery(
+            kind=SearchKind.CREDOR,
+            value=digits,
+            label=f"{n} · {digits}",
+            url=build_docparte_search_url(digits),
             filter_nome=n,
         )
 
-    if not n:
-        raise ValueError(
-            "Informe nome, CPF, ou processo + nome (filtro de incidente na capa)."
-        )
-    return SearchQuery(
-        kind=SearchKind.NOME,
-        value=n,
-        label=n,
-        url=build_nmparte_search_url(n),
-    )
+    raise ValueError("Informe nome e CPF, ou processo + incidente + nome ou CPF.")

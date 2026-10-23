@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -83,12 +85,15 @@ def scrape_precatorios(
     search_kind: str | None = None,
     search_label: str | None = None,
     filter_nome: str | None = None,
+    filter_incidente: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> ScrapeResult:
     """Collect Precatório / incidente records from e-SAJ (no REFACTOR).
 
     When ``filter_nome`` is set (busca por processo + nome Monday), opens **all**
     incidente capas and keeps every match — no autos download; name is on the capa.
     Multiple hits with the same name are all returned.
+    When ``filter_incidente`` is set, only that incidente is kept.
     """
     settings.ensure_dirs()
     url = search_url or settings.esaj_search_url
@@ -96,13 +101,27 @@ def scrape_precatorios(
     records: list[PrecatorioRecord] = []
     links_count = 0
     nome_filtro = " ".join(str(filter_nome or "").split()).strip() or None
+    incidente_filtro = str(filter_incidente or "").strip() or None
+    if incidente_filtro:
+        try:
+            incidente_filtro = str(int(re.sub(r"\D+", "", incidente_filtro) or incidente_filtro))
+        except (TypeError, ValueError):
+            pass
     filter_by_capa = bool(nome_filtro)
+    open_all_incidentes = filter_by_capa or bool(incidente_filtro)
+
+    def _progress(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
+    _progress("Consultando o e-SAJ")
 
     logger.info(
-        "=== TJSP Scrape START === kind=%s label=%s filter_nome=%s url=%s",
+        "=== TJSP Scrape START === kind=%s label=%s filter_nome=%s filter_incidente=%s url=%s",
         search_kind,
         search_label,
         nome_filtro,
+        incidente_filtro,
         url,
     )
 
@@ -118,8 +137,9 @@ def scrape_precatorios(
 
         from tjsp_pipeline.scraper.search import PrecatorioLink, PROCESSO_CODIGO_PATTERN
 
-        if filter_by_capa:
-            # Todos os incidentes (não só Precatório) — validação pelo nome na capa.
+        if open_all_incidentes:
+            # Todos os incidentes (não só Precatório) — validação pelo nome na capa
+            # e/ou filtro de um incidente específico.
             all_links = parse_all_incidente_links_from_html(search_html)
             if not all_links and "show.do" in current_url:
                 m = PROCESSO_CODIGO_PATTERN.search(current_url)
@@ -197,7 +217,7 @@ def scrape_precatorios(
         if not all_links and not records:
             msg = (
                 "Nenhum incidente encontrado na página de busca"
-                if filter_by_capa
+                if open_all_incidentes
                 else "Nenhum link de Precatório encontrado na página de busca"
             )
             errors.append(msg)
@@ -214,6 +234,9 @@ def scrape_precatorios(
             if link.processo_codigo in visited:
                 continue
             visited.add(link.processo_codigo)
+            _progress(
+                f"Abrindo incidente {len(visited)} de {len(all_links)} no e-SAJ"
+            )
             try:
                 # Página já carregada (redirect NUMPROC) — reutilizar HTML
                 if (
@@ -259,6 +282,7 @@ def scrape_precatorios(
                         url=link.url,
                         processo_codigo=link.processo_codigo,
                         label=link.label,
+                        require_precatorio_title=not open_all_incidentes,
                     )
 
                 if record:
@@ -278,6 +302,29 @@ def scrape_precatorios(
                 f"(verificados {len(visited)} incidente(s))"
             )
 
+    if incidente_filtro:
+        before = len(records)
+        kept = []
+        for rec in records:
+            raw = str(getattr(rec, "numero_do_incidente", "") or "").strip()
+            try:
+                norm = str(int(re.sub(r"\D+", "", raw) or raw))
+            except (TypeError, ValueError):
+                norm = raw
+            if norm == incidente_filtro or raw == incidente_filtro:
+                kept.append(rec)
+        records = kept
+        logger.info(
+            "Filtered to incidente=%s → %s of %s record(s)",
+            incidente_filtro,
+            len(records),
+            before,
+        )
+        if before and not records:
+            errors.append(
+                f"Nenhum incidente «{incidente_filtro}» encontrado após a busca."
+            )
+
     if limit is not None and limit > 0:
         records = records[:limit]
         logger.info("Limiting to %s record(s) for processing", len(records))
@@ -290,6 +337,7 @@ def scrape_precatorios(
                 "search_kind": search_kind,
                 "search_label": search_label,
                 "filter_nome": nome_filtro,
+                "filter_incidente": incidente_filtro,
                 "output_dir": str(settings.final_output_dir),
                 "links_found": links_count,
                 "records": [asdict(r) for r in records],
@@ -325,6 +373,8 @@ def enrich_records(
     scrape_snapshot_path: str | None = None,
     search_kind: str | None = None,
     search_label: str | None = None,
+    on_log_line: Callable[[str], None] | None = None,
+    on_tick: Callable[[], None] | None = None,
 ) -> PipelineResult:
     """Run REFACTOR + publish artifacts for the given records only."""
     settings.ensure_dirs()
@@ -375,7 +425,13 @@ def enrich_records(
     write_processos_txt(records, txt_path)
 
     mode = (refactor_mode or settings.refactor_mode or "preenchimento").strip().lower()
-    proc = run_refactor(settings, txt_name, mode=mode)
+    proc = run_refactor(
+        settings,
+        txt_name,
+        mode=mode,
+        on_log_line=on_log_line,
+        on_tick=on_tick,
+    )
     refactor_exit = proc.returncode
     stdout_all = proc.stdout or ""
     stderr_all = proc.stderr or ""
@@ -398,7 +454,13 @@ def enrich_records(
             "(likely already in precainfosnew) — retrying with --reprocessamento",
             len(records),
         )
-        proc2 = run_refactor(settings, txt_name, mode="reprocessamento")
+        proc2 = run_refactor(
+            settings,
+            txt_name,
+            mode="reprocessamento",
+            on_log_line=on_log_line,
+            on_tick=on_tick,
+        )
         refactor_exit = proc2.returncode
         stdout_all = (stdout_all + "\n" + (proc2.stdout or "")).strip()
         stderr_all = (stderr_all + "\n" + (proc2.stderr or "")).strip()

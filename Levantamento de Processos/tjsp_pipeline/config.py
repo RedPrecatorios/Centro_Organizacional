@@ -8,6 +8,22 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+_VALID_CALCULO_API_IDS = {1, 2}
+
+
+def parse_refactor_calculo_api(raw: str | None, *, default: int = 2) -> int:
+    """REFACTOR_CALCULO_API: 1 ou 2. Inválido/vazio → default (2)."""
+    text = str(raw or "").strip()
+    if not text:
+        return default
+    try:
+        value = int(text)
+    except ValueError:
+        return default
+    if value not in _VALID_CALCULO_API_IDS:
+        return default
+    return value
+
 
 @dataclass(frozen=True)
 class ProxyConfig:
@@ -51,6 +67,7 @@ class Settings:
     calculo_api_url: str
     calculo_api_token: str
     use_calculo_api: str
+    refactor_calculo_api_id: int
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Settings:
@@ -133,6 +150,9 @@ class Settings:
             calculo_api_url=os.getenv("CALCULO_API_URL", "").strip(),
             calculo_api_token=os.getenv("CALCULO_API_TOKEN", "").strip(),
             use_calculo_api=os.getenv("USE_CALCULO_API", "").strip(),
+            refactor_calculo_api_id=parse_refactor_calculo_api(
+                os.getenv("REFACTOR_CALCULO_API")
+            ),
         )
 
     @property
@@ -181,6 +201,7 @@ class Settings:
             calculo_api_url=self.calculo_api_url,
             calculo_api_token=self.calculo_api_token,
             use_calculo_api=use_calculo,
+            refactor_calculo_api_id=self.refactor_calculo_api_id,
         )
 
     def ensure_dirs(self) -> None:

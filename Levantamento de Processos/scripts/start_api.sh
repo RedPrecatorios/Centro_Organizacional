@@ -11,10 +11,21 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ -f "$ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT/.env"
-  set +a
+  # KEY=VALUE only — never `source` (SQL/unquoted values would execute as commands).
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line// }" || "$line" == \#* ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "$val" == \"*\" ]]; then
+      val="${val:1:${#val}-2}"
+    elif [[ "$val" == \'*\' ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    export "$key=$val"
+  done < "$ROOT/.env"
 fi
 
 export DISPLAY="${DISPLAY:-:99}"

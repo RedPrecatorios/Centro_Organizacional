@@ -70,6 +70,7 @@ class TjspApiClient:
         nome: str | None = None,
         cpf: str | None = None,
         processo: str | None = None,
+        incidente: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, str] = {}
         if nome and str(nome).strip():
@@ -78,18 +79,15 @@ class TjspApiClient:
             body["cpf"] = str(cpf).strip()
         if processo and str(processo).strip():
             body["processo"] = str(processo).strip()
-        if "cpf" in body:
-            if len(body) != 1:
-                raise ValueError("CPF deve ser informado sozinho.")
-        elif "processo" in body:
-            if "nome" not in body:
-                raise ValueError(
-                    "Ao pesquisar por processo, informe também --nome (filtro na capa)."
-                )
-            if len(body) != 2:
-                raise ValueError("Use processo + nome (sem CPF).")
-        elif "nome" not in body or len(body) != 1:
-            raise ValueError("Informe --nome, --cpf, ou --processo + --nome.")
+        if incidente and str(incidente).strip():
+            body["incidente"] = str(incidente).strip()
+        if "processo" in body:
+            if "incidente" not in body:
+                raise ValueError("Ao pesquisar por processo, informe também o incidente.")
+            if "nome" not in body and "cpf" not in body:
+                raise ValueError("Ao pesquisar por processo e incidente, informe nome ou CPF.")
+        elif "nome" not in body or "cpf" not in body:
+            raise ValueError("Informe nome e CPF, ou processo + incidente + nome ou CPF.")
         response = requests.post(
             f"{self.base_url}/api/v1/searches",
             headers=self._headers(),

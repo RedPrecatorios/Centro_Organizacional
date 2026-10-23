@@ -29,6 +29,10 @@ NUMERO_INCIDENTE_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 CNJ_PATTERN = re.compile(r"\b(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})\b")
+_RPV_PATTERN = re.compile(
+    r"requisi[cç][aã]o\s+de\s+pequeno\s+valor|\bRPV\b",
+    re.IGNORECASE,
+)
 _DISALLOWED_NAME_CHARS = re.compile(r"[^A-Z0-9\s]")
 
 
@@ -41,6 +45,7 @@ class PrecatorioRecord:
     label: str
     processo_principal: str | None = None
     partes_capa: tuple[str, ...] = ()
+    classe: str | None = None
 
     @property
     def txt_line(self) -> str:
@@ -58,6 +63,17 @@ def _text_before_br(element: Tag) -> str | None:
             parts.append(str(child))
     text = "".join(parts).strip()
     return text or None
+
+
+def is_rpv_text(*parts: object) -> bool:
+    blob = " ".join(str(p or "") for p in parts)
+    return bool(_RPV_PATTERN.search(blob))
+
+
+def record_is_rpv(record: PrecatorioRecord | None) -> bool:
+    if record is None:
+        return False
+    return is_rpv_text(record.classe, record.label)
 
 
 def extract_partes_capa(page_html: str) -> list[str]:
@@ -191,6 +207,10 @@ def extract_from_show_html(
 
     partes = extract_partes_capa(page_html)
 
+    unj = soup.select_one("span.unj-larger, span.unj-larger-1, a.unj-larger-1")
+    unj_text = unj.get_text(" ", strip=True) if unj else ""
+    classe = "RPV" if is_rpv_text(unj_text, label) else (unj_text or label or None)
+
     record = PrecatorioRecord(
         numero_de_processo=numero_processo.strip(),
         numero_do_incidente=str(int(numero_incidente.strip())),
@@ -199,6 +219,7 @@ def extract_from_show_html(
         label=label,
         processo_principal=processo_principal,
         partes_capa=tuple(partes),
+        classe=classe,
     )
     logger.info(
         "Extracted incidente | %s | codigo=%s | partes=%s",

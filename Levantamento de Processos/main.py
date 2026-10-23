@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Número CNJ do processo (repetível)",
     )
     parser.add_argument(
+        "--incidente",
+        default=None,
+        help="Número do incidente (obrigatório com --processo)",
+    )
+    parser.add_argument(
         "--search-url",
         help="URL de busca e-SAJ crua (sobrescreve critérios; 1 única query)",
     )
@@ -113,12 +118,27 @@ def collect_queries(args: argparse.Namespace) -> list[SearchQuery]:
     if args.nome:
         nomes.insert(0, args.nome)
 
-    for nome in nomes:
-        queries.append(build_search_query(nome=nome))
-    for cpf in args.cpfs or []:
-        queries.append(build_search_query(cpf=cpf))
-    for processo in args.processos or []:
-        queries.append(build_search_query(processo=processo))
+    cpfs = list(args.cpfs or [])
+    processos = list(args.processos or [])
+    incidente = (args.incidente or "").strip() or None
+    if processos:
+        who_nome = nomes[0] if nomes else None
+        who_cpf = cpfs[0] if cpfs else None
+        for processo in processos:
+            queries.append(
+                build_search_query(
+                    nome=who_nome,
+                    cpf=who_cpf,
+                    processo=processo,
+                    incidente=incidente,
+                )
+            )
+        return queries
+    if nomes and cpfs:
+        for nome in nomes:
+            queries.append(build_search_query(nome=nome, cpf=cpfs[0]))
+        return queries
+    raise ValueError("Informe nome e CPF, ou processo + incidente + nome ou CPF.")
 
     return queries
 

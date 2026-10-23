@@ -51,7 +51,7 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     (
         "levantamento_processual",
         "Levantamento Processual",
-        "Pesquisa por nome, CPF ou processo e listagem de aptos/inaptos (API TJSP)",
+        "Busca TJSP, pré-checagem Monday e inclusão de incidentes (aptos selecionados ou cumprimento)",
     ),
     (
         "autos_export",
@@ -86,6 +86,11 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
         "blacklist",
         "Blacklist",
         "Ver CPF, nome, telefone, e-mail e processo+incidente bloqueados",
+    ),
+    (
+        "totp_2fa",
+        "2FA",
+        "Códigos TOTP: visualizar, copiar e cadastrar novas chaves",
     ),
     ("eda", "EDA Diário", "Processamento e relatórios EDA (/eda/)"),
 )
@@ -599,6 +604,9 @@ def permission_ids_from_form(form, prefix: str) -> list[str]:
     return chosen
 
 
+_UNIFIED_LEVANTAMENTO_TABS = frozenset({"levantamento_processual", "solicitacao_inclusao"})
+
+
 def user_can_tab(tab: str) -> bool:
     u = current_user()
     if not u:
@@ -610,6 +618,10 @@ def user_can_tab(tab: str) -> bool:
     if not hasattr(g, "_plataforma_tabs"):
         g._plataforma_tabs = get_user_tabs(int(u["id"]))
     return tab in g._plataforma_tabs
+
+
+def user_can_unified_levantamento() -> bool:
+    return user_can_tab("levantamento_processual") or user_can_tab("solicitacao_inclusao")
 
 
 def _first_accessible_url_for_user(u: dict) -> str | None:
@@ -629,7 +641,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("pre_analise_processual", "pre_analise_processual_page"),
         ("levantamento_processual", "levantamento_processual_page"),
         ("autos_export", "autos_export_page"),
-        ("solicitacao_inclusao", "solicitacao_inclusao_page"),
+        ("solicitacao_inclusao", "levantamento_processual_page"),
         ("tabela_juros", "tabela_juros_page"),
         ("proposta", "proposta_page"),
         ("atualizacao_imposto", "atualizacao_imposto_page"),
@@ -638,6 +650,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
         ("blacklist", "blacklist_page"),
+        ("totp_2fa", "totp_2fa_page"),
         ("outro_modulo", "embedded.index"),
     ]
     for tab, endpoint in order:
@@ -664,12 +677,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "admin"
     if path.startswith("/pre-analise-processual"):
         return "pre_analise_processual"
-    if path.startswith("/levantamento-processual"):
+    if path.startswith("/levantamento-processual") or path.startswith("/solicitacao-inclusao"):
         return "levantamento_processual"
-    if path.startswith("/autos-esaj"):
-        return "autos_export"
-    if path.startswith("/solicitacao-inclusao"):
-        return "solicitacao_inclusao"
     if path.startswith("/tabela-juros"):
         return "tabela_juros"
     if path.startswith("/proposta"):
@@ -688,6 +697,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "localize"
     if path.startswith("/blacklist") or path.startswith("/api/blacklist"):
         return "blacklist"
+    if path.startswith("/2fa") or path.startswith("/api/totp"):
+        return "totp_2fa"
     if path.startswith("/eda"):
         return "eda"
     if path.startswith("/auth"):
@@ -709,6 +720,8 @@ def _safe_post_login_url(nxt: str) -> str:
             return nxt
         alt = _first_accessible_url_for_user(u)
         return alt or nxt
+    if need in _UNIFIED_LEVANTAMENTO_TABS and user_can_unified_levantamento():
+        return nxt
     if need is not None and user_can_tab(need):
         return nxt
     if need is not None and not user_can_tab(need):
@@ -768,6 +781,9 @@ def _endpoint_to_tab() -> str | None:
         "api_levantamento_health": "levantamento_processual",
         "api_levantamento_iniciar": "levantamento_processual",
         "api_levantamento_status": "levantamento_processual",
+        "api_levantamento_jobs": "levantamento_processual",
+        "api_levantamento_precheck_monday": "levantamento_processual",
+        "api_levantamento_incluir": "levantamento_processual",
         "autos_export_page": "autos_export",
         "api_autos_export_list": "autos_export",
         "api_autos_export_start": "autos_export",
@@ -775,16 +791,17 @@ def _endpoint_to_tab() -> str | None:
         "api_autos_export_delete": "autos_export",
         "api_autos_export_zip": "autos_export",
         "api_autos_export_file": "autos_export",
-        "solicitacao_inclusao_page": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_listar": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_criar": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_detalhe": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_arquivar": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_desarquivar": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_limpar_fila": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_autos": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_autos_texto": "solicitacao_inclusao",
-        "api_solicitacao_inclusao_auto_indice": "solicitacao_inclusao",
+        "solicitacao_inclusao_page": "levantamento_processual",
+        "api_solicitacao_inclusao_listar": "levantamento_processual",
+        "api_solicitacao_inclusao_criar": "levantamento_processual",
+        "api_solicitacao_inclusao_solicitantes": "levantamento_processual",
+        "api_solicitacao_inclusao_detalhe": "levantamento_processual",
+        "api_solicitacao_inclusao_arquivar": "levantamento_processual",
+        "api_solicitacao_inclusao_desarquivar": "levantamento_processual",
+        "api_solicitacao_inclusao_limpar_fila": "levantamento_processual",
+        "api_solicitacao_inclusao_autos": "levantamento_processual",
+        "api_solicitacao_inclusao_autos_texto": "levantamento_processual",
+        "api_solicitacao_inclusao_auto_indice": "levantamento_processual",
         "tabela_juros_page": "tabela_juros",
         "api_tabela_juros_calcular": "tabela_juros",
         "proposta_page": "proposta",
@@ -804,6 +821,10 @@ def _endpoint_to_tab() -> str | None:
         "api_financeiro_custos_pdf": "financeiro",
         "embedded.index": "outro_modulo",
         "get_summary": "index",
+        "totp_2fa_page": "totp_2fa",
+        "api_totp_codes": "totp_2fa",
+        "api_totp_accounts_create": "totp_2fa",
+        "api_totp_accounts_delete": "totp_2fa",
         "get_instances": "conversas",
         "get_conversations": "conversas",
         "get_messages": "conversas",
@@ -965,6 +986,8 @@ def plataforma_before_request() -> Any | None:
         return None
 
     if u.get("role") == "admin":
+        return None
+    if needs in _UNIFIED_LEVANTAMENTO_TABS and user_can_unified_levantamento():
         return None
     if not user_can_tab(needs):
         if needs == "auditoria_syscall" and user_can_tab("campanha"):
@@ -1295,6 +1318,7 @@ def inject_plataforma_template_globals():
     return {
         "plataforma_user": u,
         "user_can": user_can_tab,
+        "user_can_unified_levantamento": user_can_unified_levantamento,
         "is_plataforma_admin": bool(u and u.get("role") == "admin"),
         "can_manage_blacklist": user_can_manage_blacklist(u),
         "can_view_blacklist": "ver" in bl_caps,

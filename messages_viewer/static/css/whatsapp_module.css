@@ -883,6 +883,214 @@ body.platform-body #app-toast {
   padding: 8px 0 20px;
 }
 
+.dash-digits {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: pointer;
+}
+.dash-digit {
+  width: 28px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text);
+  background: var(--bg, #f4f6f8);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  line-height: 1;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.dash-digits-remaining {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 2.2em;
+  text-align: right;
+}
+.dash-digits-remaining.is-low {
+  color: #b45309;
+}
+
+.totp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 920px;
+}
+.totp-banner {
+  padding: 12px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--muted);
+}
+.totp-banner-error {
+  border-color: #fecaca;
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.totp-add-card,
+.totp-list-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 18px 18px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.totp-add-hint {
+  margin: -4px 0 14px 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.totp-add-hint code {
+  font-size: 12px;
+}
+.totp-add-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+.totp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.totp-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.totp-field-wide {
+  grid-column: 1 / -1;
+}
+.totp-textarea {
+  min-height: 64px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+.totp-add-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+.totp-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.totp-list-head .dash-section-title {
+  margin: 0;
+}
+.totp-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.totp-empty {
+  font-size: 14px;
+  color: var(--muted);
+  padding: 8px 0 4px;
+}
+.totp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.totp-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg, #f8fafc);
+}
+.totp-card-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+.totp-card-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.totp-card-code {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.totp-code-plain {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+  padding: 4px 2px;
+}
+.totp-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.totp-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.totp-btn:hover {
+  background: #fff;
+}
+.totp-btn-del {
+  color: var(--danger, #b91c1c);
+  border-color: #fecaca;
+}
+.totp-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+@media (max-width: 760px) {
+  .totp-add-form {
+    grid-template-columns: 1fr;
+  }
+  .totp-card {
+    grid-template-columns: 1fr;
+  }
+  .totp-card-actions {
+    flex-direction: row;
+  }
+}
+
 .dash-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

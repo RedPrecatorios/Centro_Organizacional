@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 # Token fixo so para este arquivo de teste.
 TEST_TOKEN = "test-token-dashboard-backend-ci"
+VALID_SEARCH = {"nome": "Fulano de Tal", "cpf": "12345678901"}
 
 
 @pytest.fixture()
@@ -46,14 +47,14 @@ def test_health_is_public(client: TestClient):
 
 
 def test_search_rejects_missing_token(client: TestClient):
-    response = client.post("/api/v1/searches", json={"nome": "Fulano de Tal"})
+    response = client.post("/api/v1/searches", json=VALID_SEARCH)
     assert response.status_code == 401
 
 
 def test_search_rejects_wrong_token(client: TestClient):
     response = client.post(
         "/api/v1/searches",
-        json={"nome": "Fulano de Tal"},
+        json=VALID_SEARCH,
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert response.status_code == 401
@@ -62,7 +63,7 @@ def test_search_rejects_wrong_token(client: TestClient):
 def test_search_accepts_x_api_key(client: TestClient):
     response = client.post(
         "/api/v1/searches",
-        json={"nome": "Fulano de Tal"},
+        json=VALID_SEARCH,
         headers={"X-API-Key": TEST_TOKEN},
     )
     assert response.status_code == 202, response.text
@@ -85,7 +86,7 @@ def test_api_key_env_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     with TestClient(app) as test_client:
         response = test_client.post(
             "/api/v1/searches",
-            json={"nome": "Fulano de Tal"},
+            json=VALID_SEARCH,
             headers={"Authorization": f"Bearer {TEST_TOKEN}"},
         )
         assert response.status_code == 202, response.text
@@ -110,7 +111,7 @@ def test_ip_allowlist_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     with TestClient(app) as test_client:
         blocked = test_client.post(
             "/api/v1/searches",
-            json={"nome": "Fulano de Tal"},
+            json=VALID_SEARCH,
             headers={
                 "Authorization": f"Bearer {TEST_TOKEN}",
                 "X-Forwarded-For": "198.51.100.1",
@@ -120,7 +121,7 @@ def test_ip_allowlist_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
         allowed = test_client.post(
             "/api/v1/searches",
-            json={"nome": "Fulano de Tal"},
+            json=VALID_SEARCH,
             headers={
                 "Authorization": f"Bearer {TEST_TOKEN}",
                 "X-Forwarded-For": "203.0.113.99",
@@ -134,7 +135,7 @@ def test_search_send_and_receive_with_token(client: TestClient):
 
     created = client.post(
         "/api/v1/searches",
-        json={"nome": "Heloisa Maria Fernandes Queiroz"},
+        json={"nome": "Heloisa Maria Fernandes Queiroz", "cpf": "12345678901"},
         headers=headers,
     )
     assert created.status_code == 202, created.text
@@ -233,7 +234,7 @@ def test_cloud_client_send_receive(client: TestClient, monkeypatch: pytest.Monke
     health = api.health()
     assert health["status"] == "ok"
 
-    created = api.create_search(nome="Nadir Costa de Oliveira")
+    created = api.create_search(nome="Nadir Costa de Oliveira", cpf="12345678901")
     assert created["status"] == "queued"
     job_id = created["job_id"]
 
@@ -259,4 +260,4 @@ def test_cloud_client_send_receive(client: TestClient, monkeypatch: pytest.Monke
     # Token errado
     bad = cloud_client.TjspApiClient("http://test", "token-errado")
     with pytest.raises(PermissionError):
-        bad.create_search(nome="Alguem")
+        bad.create_search(nome="Alguem", cpf="12345678901")

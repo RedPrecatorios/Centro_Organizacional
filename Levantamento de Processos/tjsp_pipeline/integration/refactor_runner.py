@@ -8,8 +8,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 
 from tjsp_pipeline.config import Settings
 from tjsp_pipeline.scraper.show_page import PrecatorioRecord
@@ -28,6 +30,18 @@ _FORCE_SYNC_KEYS = frozenset(
         "USE_GEMINI_API",
     }
 )
+# Dual-cloud pairs live in the REFACTOR .env; Levantamento must not rewrite them.
+_PROTECTED_REFACTOR_ENV_PREFIXES = (
+    "CALCULO_API_1_",
+    "CALCULO_API_2_",
+    "USE_CALCULO_API_1",
+    "USE_CALCULO_API_2",
+)
+
+
+def _is_protected_refactor_env_key(key: str) -> bool:
+    name = str(key or "").strip()
+    return any(name.startswith(prefix) for prefix in _PROTECTED_REFACTOR_ENV_PREFIXES)
 
 
 def ensure_refactor_env(settings: Settings) -> Path:
@@ -78,6 +92,8 @@ def ensure_refactor_env(settings: Settings) -> Path:
 
     changed = False
     for key, value in required.items():
+        if _is_protected_refactor_env_key(key):
+            continue
         missing_or_blank = key not in existing or not str(existing.get(key, "")).strip()
         force = key in _FORCE_SYNC_KEYS and str(value).strip() != ""
         # Always push ENABLE_PERSISTENCE / USE_CALCULO_API even when "false".
@@ -106,11 +122,54 @@ def write_processos_txt(
     return target_path
 
 
+def build_refactor_command(
+    settings: Settings,
+    txt_filename: str,
+    *,
+    python_bin: str,
+    mode: str | None = None,
+) -> list[str]:
+    resolved_mode = (mode or settings.refactor_mode).strip().lower()
+    cmd = [python_bin, str(settings.refactor_path / "main.py")]
+    if resolved_mode == "reprocessamento":
+        cmd.append("--reprocessamento")
+    else:
+        cmd.append("--preenchimento")
+    if settings.refactor_test_mode:
+        cmd.append("--test")
+    cmd.extend(["--txt", txt_filename])
+    api_id = int(getattr(settings, "refactor_calculo_api_id", 2) or 2)
+    if api_id not in {1, 2}:
+        api_id = 2
+    cmd.extend(["--api-calculo", str(api_id)])
+    return cmd
+
+
+class _FileTail:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._pos = path.stat().st_size if path.is_file() else 0
+
+    def read_new(self) -> list[str]:
+        if not self.path.is_file():
+            return []
+        try:
+            with self.path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(self._pos)
+                data = handle.read()
+                self._pos = handle.tell()
+        except OSError:
+            return []
+        return data.splitlines() if data else []
+
+
 def run_refactor(
     settings: Settings,
     txt_filename: str,
     *,
     mode: str | None = None,
+    on_log_line: Callable[[str], None] | None = None,
+    on_tick: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     ensure_refactor_env(settings)
     main_py = settings.refactor_path / "main.py"
@@ -130,18 +189,16 @@ def run_refactor(
             python_bin = str(candidate)
             break
 
-    resolved_mode = (mode or settings.refactor_mode).strip().lower()
-    cmd = [python_bin, str(main_py)]
-    if resolved_mode == "reprocessamento":
-        cmd.append("--reprocessamento")
-    else:
-        cmd.append("--preenchimento")
-    if settings.refactor_test_mode:
-        cmd.append("--test")
-    cmd.extend(["--txt", txt_filename])
+    cmd = build_refactor_command(
+        settings,
+        txt_filename,
+        python_bin=python_bin,
+        mode=mode,
+    )
 
     logger.info("Running REFACTOR: %s", " ".join(cmd))
     env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
     # Pool de IPs fixos (RequestsClient round-robin). Não injeta mais o gateway rotativo.
     from tjsp_pipeline.proxy_pool import resolve_proxies_list_path
 
@@ -155,15 +212,71 @@ def run_refactor(
     env.pop("HTTP_PROXY", None)
     env.pop("HTTPS_PROXY", None)
     env.pop("HTTP_PROXY_URL", None)
-    return subprocess.run(
+
+    def _emit(line: str) -> None:
+        if not on_log_line or not line:
+            return
+        try:
+            on_log_line(line.rstrip("\n"))
+        except Exception:
+            logger.exception("REFACTOR on_log_line failed")
+
+    def _tick() -> None:
+        if not on_tick:
+            return
+        try:
+            on_tick()
+        except Exception:
+            logger.exception("REFACTOR on_tick failed")
+
+    tail = _FileTail(settings.refactor_path / "logs" / "app.log")
+    chunks: list[str] = []
+    deadline = time.monotonic() + 3600
+    proc = subprocess.Popen(
         cmd,
         cwd=str(settings.refactor_path),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=3600,
-        check=False,
+        bufsize=1,
         env=env,
     )
+    try:
+        while True:
+            if time.monotonic() > deadline:
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+                raise subprocess.TimeoutExpired(cmd, 3600, output="".join(chunks))
+            line = ""
+            if proc.stdout is not None:
+                line = proc.stdout.readline()
+            ended = proc.poll() is not None
+            if line:
+                chunks.append(line)
+                _emit(line)
+            for extra in tail.read_new():
+                _emit(extra)
+            _tick()
+            if ended and not line:
+                for extra in tail.read_new():
+                    _emit(extra)
+                _tick()
+                break
+            if not line:
+                time.sleep(0.25)
+    except Exception:
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                pass
+        raise
+    stdout_all = "".join(chunks)
+    return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout_all, "")
 
 
 # Back-compat alias

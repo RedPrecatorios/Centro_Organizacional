@@ -47,8 +47,8 @@
       PRÉ Análise Processual{% if page_in_maintenance('pre_analise_processual') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
-    {% if user_can('levantamento_processual') %}
-    <a class="dash-nav-item{% if request.endpoint == 'levantamento_processual_page' %} active{% endif %}{% if page_in_maintenance('levantamento_processual') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('levantamento_processual_page') }}">
+    {% if user_can('levantamento_processual') or user_can('solicitacao_inclusao') %}
+    <a class="dash-nav-item{% if request.endpoint in ('levantamento_processual_page', 'solicitacao_inclusao_page') %} active{% endif %}{% if page_in_maintenance('levantamento_processual') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('levantamento_processual_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 11h6M11 8v6"/></svg>
       </span>
@@ -61,14 +61,6 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </span>
       Autos e-SAJ{% if page_in_maintenance('autos_export') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
-    </a>
-    {% endif %}
-    {% if user_can('solicitacao_inclusao') %}
-    <a class="dash-nav-item{% if request.endpoint == 'solicitacao_inclusao_page' %} active{% endif %}{% if page_in_maintenance('solicitacao_inclusao') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('solicitacao_inclusao_page') }}">
-      <span class="dash-nav-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-      </span>
-      Solicitação de Inclusão{% if page_in_maintenance('solicitacao_inclusao') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
     {% if user_can('tabela_juros') %}
@@ -125,6 +117,14 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       </span>
       Localize{% if page_in_maintenance('localize') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
+    {% if user_can('totp_2fa') %}
+    <a class="dash-nav-item{% if request.endpoint == 'totp_2fa_page' %} active{% endif %}{% if page_in_maintenance('totp_2fa') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('totp_2fa_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+      </span>
+      2FA{% if page_in_maintenance('totp_2fa') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
     {% if user_can('auditoria_syscall') or user_can('campanha') %}

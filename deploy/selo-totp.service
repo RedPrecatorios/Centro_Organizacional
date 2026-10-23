@@ -1,0 +1,19 @@
+[Unit]
+Description=Selo TOTP headless (geração de códigos 2FA)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/mnt/volume_nyc1_1778499775066/automacao-de-acesso
+EnvironmentFile=-/etc/selo-totp.env
+ExecStart=/mnt/volume_nyc1_1778499775066/Centro_Organizacional/.venv/bin/python service.py
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -29,7 +29,13 @@ from urllib.parse import quote
 import requests
 
 from messages_viewer.plataforma_auth import solicitante_from_user
-from messages_viewer.plataforma_auth_store import auth_connection, auth_cursor
+from messages_viewer.plataforma_auth_store import (
+    auth_connection,
+    auth_cursor,
+    platform_meta_get,
+)
+
+_SI_LIST_CUTOFF_KEY = "si_lista_corte_iso"
 
 _OPEN_STATUSES = frozenset(
     {
@@ -814,8 +820,13 @@ def _copy_casos_counts(item: dict[str, Any]) -> None:
     ):
         if item.get(key) is None and det.get(key) is not None:
             item[key] = det[key]
-    if not isinstance(item.get("casos"), list) and isinstance(det.get("casos"), list):
-        item["casos"] = det["casos"]
+    for key in ("casos", "desfechos"):
+        current = item.get(key)
+        nested = det.get(key)
+        if isinstance(nested, list) and nested and not (
+            isinstance(current, list) and current
+        ):
+            item[key] = nested
 
 
 def _item_is_cumprimento(item: dict[str, Any]) -> bool:
@@ -1612,6 +1623,37 @@ def _remote_list_solicitantes(q: str = "") -> tuple[dict[str, Any], int]:
                 "total": max(0, total),
             }
         )
+    cutoff = list_cutoff_dt()
+    if cutoff is not None:
+        hidden = _archived_ids()
+        kept: list[dict[str, Any]] = []
+        for row in items:
+            email = str(row.get("email_solicitante") or "").strip().lower()
+            listed, code = _remote_list(
+                {
+                    "limit": 200,
+                    "offset": 0,
+                    "email_solicitante": email,
+                    "updated_since": cutoff.isoformat(),
+                },
+                email_solicitante=email,
+            )
+            if code >= 400 or not listed.get("ok"):
+                continue
+            n = sum(
+                1
+                for it in (listed.get("items") or [])
+                if isinstance(it, dict)
+                and _item_id(it)
+                and _item_id(it) not in hidden
+                and _item_after_cutoff(it, cutoff)
+            )
+            if n <= 0:
+                continue
+            row = dict(row)
+            row["total"] = n
+            kept.append(row)
+        items = kept
     items.sort(
         key=lambda row: (
             str(row.get("nome_solicitante") or "").casefold(),
@@ -1806,6 +1848,32 @@ def _item_updated_at(obj: dict[str, Any]) -> datetime | None:
     return None
 
 
+def _item_created_at(obj: dict[str, Any]) -> datetime | None:
+    det = obj.get("detalhe") if isinstance(obj.get("detalhe"), dict) else {}
+    for key in ("created_at", "criado_em", "createdAt"):
+        dt = _parse_item_dt(obj.get(key))
+        if dt:
+            return dt
+        dt = _parse_item_dt(det.get(key))
+        if dt:
+            return dt
+    return _item_updated_at(obj)
+
+
+def list_cutoff_dt() -> datetime | None:
+    raw = (platform_meta_get(_SI_LIST_CUTOFF_KEY) or "").strip()
+    return _parse_item_dt(raw)
+
+
+def _item_after_cutoff(obj: dict[str, Any], cutoff: datetime | None) -> bool:
+    if cutoff is None:
+        return True
+    dt = _item_created_at(obj)
+    if dt is None:
+        return False
+    return dt >= cutoff
+
+
 def _updated_within_hours(obj: dict[str, Any], hours: int) -> bool:
     dt = _item_updated_at(obj)
     if not dt:
@@ -1953,7 +2021,12 @@ def _duplicate_open_blocked(match: dict[str, Any]) -> tuple[dict[str, Any], int]
     )
 
 
-def criar(data: dict[str, Any], user: dict | None) -> tuple[dict[str, Any], int]:
+def criar(
+    data: dict[str, Any],
+    user: dict | None,
+    *,
+    skip_cooldown: bool = False,
+) -> tuple[dict[str, Any], int]:
     if not is_configured():
         return _not_configured()
     body, err = build_create_payload(data if isinstance(data, dict) else {}, user)
@@ -1969,9 +2042,12 @@ def criar(data: dict[str, Any], user: dict | None) -> tuple[dict[str, Any], int]
         match = _find_open_duplicate(body, email)
         if match:
             return _duplicate_open_blocked(match)
-    wait = _claim_create_slot(email)
-    if wait:
-        return _cooldown_blocked(wait)
+    claimed = False
+    if not skip_cooldown:
+        wait = _claim_create_slot(email)
+        if wait:
+            return _cooldown_blocked(wait)
+        claimed = True
     success = False
     try:
         try:
@@ -2002,7 +2078,8 @@ def criar(data: dict[str, Any], user: dict | None) -> tuple[dict[str, Any], int]
         success = True
         return out, int(response.status_code or 202)
     finally:
-        _finish_create_slot(email, success=success)
+        if claimed:
+            _finish_create_slot(email, success=success)
 
 
 def _listar_arquivados(
@@ -2057,6 +2134,9 @@ def _listar_arquivados(
         _annotate_tipo(item)
         items.append(item)
     remember_statuses(items)
+    cutoff = list_cutoff_dt()
+    if cutoff is not None:
+        items = [it for it in items if _item_after_cutoff(it, cutoff)]
     items = _filter_by_tipo(items, tipo)
     total = len(items)
     page = items[offset : offset + limit]
@@ -2138,10 +2218,14 @@ def listar(
         return remote, code
 
     hidden = _archived_ids()
+    cutoff = list_cutoff_dt()
     visible = [
         it
         for it in (remote.get("items") or [])
-        if isinstance(it, dict) and _item_id(it) and _item_id(it) not in hidden
+        if isinstance(it, dict)
+        and _item_id(it)
+        and _item_id(it) not in hidden
+        and _item_after_cutoff(it, cutoff)
     ]
     for it in visible:
         it["arquivado"] = False

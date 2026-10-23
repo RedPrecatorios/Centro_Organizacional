@@ -1584,6 +1584,7 @@
     var blacklistValidation = document.getElementById('memoria-blacklist-validation');
     var blacklistCounter = document.getElementById('memoria-blacklist-counter');
     var blacklistPendingRow = null;
+    var blacklistSearchAlvo = 'caso';
     var analisePollTimer = null;
     var analiseActiveJobId = null;
     var analisePollMisses = 0;
@@ -1719,7 +1720,10 @@
     }
 
     function casoViaCumprimento(row) {
-      return pesquisarCumprimentosAtivo() || !!(row && row.source === 'coleta_cumprimento');
+      if (!row) return false;
+      if (row.source === 'coleta_cumprimento' || row.memoria_cumprimento) return true;
+      if (row.id_coleta_cumprimento != null && String(row.id_coleta_cumprimento).trim() !== '') return true;
+      return String(row.feito_por || '').trim().toUpperCase() === 'CMP_CALC';
     }
 
     function isPipelineColetaBlocked(row) {
@@ -1983,7 +1987,14 @@
       }
       if (idPrecainfosnewSelecionado != null && Number(idPrecainfosnewSelecionado) <= 0) {
         btnAtualizarCalculo.disabled = true;
-        btnAtualizarCalculo.title = 'Caso só na memória de cálculo. Recalcule na aba Cálculo manual.';
+        btnAtualizarCalculo.title = (row || currentRow) && (row || currentRow).memoria_cumprimento
+          ? 'Cálculo do cumprimento já está na memória.'
+          : 'Caso só na memória de cálculo. Recalcule na aba Cálculo manual.';
+        return;
+      }
+      if ((row || currentRow) && (row || currentRow).memoria_cumprimento && idPrecainfosnewSelecionado == null) {
+        btnAtualizarCalculo.disabled = true;
+        btnAtualizarCalculo.title = 'Cálculo do cumprimento já está na memória.';
         return;
       }
       if (!bloquearCalculoMesAtual || podeForcarAtualizarCalculo) {
@@ -2132,7 +2143,7 @@
       var viaCumprimento = casoViaCumprimento(currentRow);
       var procFromRow = temRegistoCarregado && currentRow && String(currentRow.numero_de_processo || '').trim();
       var procFromInput = getModo() === 'processo' && inputProc && String(inputProc.value || '').trim();
-      // Com cumprimento (checkbox ou linha da coleta): só Atualizar Cálculo.
+      // Linha de cumprimento não usa análise processual. A caixa sozinha não esconde o botão.
       var show = !viaCumprimento && !!(procFromRow || procFromInput);
       if (show) {
         btnAnaliseProcessual.removeAttribute('hidden');
@@ -2213,7 +2224,7 @@
       syncRemovidoBlacklistAlert(r);
     }
 
-    function showInaptoSemSaldoModal(row) {
+    function showInaptoSemSaldoModal(row, opts) {
       var req = row && row.requerente ? String(row.requerente) : '—';
       var proc = row && row.numero_de_processo ? String(row.numero_de_processo) : '—';
       var inc = row && row.numero_do_incidente != null && row.numero_do_incidente !== ''
@@ -2251,13 +2262,18 @@
             ? 'Atualizar Cálculo está desativado. Análise Processual continua disponível para admin.'
             : 'Os botões Atualizar Cálculo e Análise Processual estão desativados.');
       }
+      if (opts && opts.manual) {
+        txt += '\n\nNo Cálculo manual o formulário não será preenchido.';
+      }
       showModal(txt, false);
       if (modalAutoHideT) { clearTimeout(modalAutoHideT); modalAutoHideT = null; }
-      if (isPipeline) {
-        setMsg('Coleta bloqueada (' + pipelineStatus + '). Cálculo não exibido.', false);
-      } else {
-        setMsg(isBlacklist ? 'Caso inapto por blacklist. Cálculo não exibido.' : 'Caso inapto (Sem Saldo). Valores da memória não carregados.', false);
-      }
+      var avisoCurto = isPipeline
+        ? ('Coleta bloqueada (' + pipelineStatus + '). Cálculo não exibido.')
+        : (isBlacklist
+          ? 'Caso inapto por blacklist. Cálculo não exibido.'
+          : 'Caso inapto (Sem Saldo). Valores da memória não carregados.');
+      if (opts && opts.manual) setManualSearchMsg(avisoCurto, true);
+      else setMsg(avisoCurto, false);
     }
 
     function updateBlacklistAuthorizationState() {
@@ -2277,8 +2293,9 @@
       blacklistPendingRow = null;
     }
 
-    function requestBlacklistOverride(row) {
+    function requestBlacklistOverride(row, alvo) {
       if (!blacklistModal) return false;
+      blacklistSearchAlvo = alvo === 'manual' ? 'manual' : 'caso';
       blacklistPendingRow = row;
       if (blacklistMotivo) blacklistMotivo.textContent = row && row.blacklist_motivo ? String(row.blacklist_motivo) : 'Blacklist';
       if (blacklistReq) blacklistReq.textContent = row && row.requerente ? String(row.requerente) : '—';
@@ -2372,6 +2389,8 @@
         }
       } else if (r.source === 'precainfosnew') {
         setMsg('Caso encontrado no cadastro. Clique em “Atualizar Cálculo” para gerar a memória.', false);
+      } else if (r.memoria_cumprimento) {
+        setMsg('Memória do cumprimento carregada.', false);
       } else {
         setMsg('Memória carregada', false);
       }
@@ -3033,7 +3052,15 @@
           if (blacklistJustificativa) blacklistJustificativa.focus();
           return;
         }
+        var alvo = blacklistSearchAlvo;
         hideBlacklistModal();
+        if (alvo === 'manual') {
+          doManualSearch({
+            blacklistOverride: true,
+            blacklistReason: motivo
+          });
+          return;
+        }
         doSearch({
           skipAutoAnalise: true,
           blacklistOverride: true,
@@ -3044,7 +3071,12 @@
     if (blacklistCancel) {
       blacklistCancel.addEventListener('click', function () {
         var blockedRow = blacklistPendingRow;
+        var alvo = blacklistSearchAlvo;
         hideBlacklistModal();
+        if (alvo === 'manual') {
+          if (blockedRow) showInaptoSemSaldoModal(blockedRow, { manual: true });
+          return;
+        }
         if (blockedRow) applyInaptoRow(blockedRow, false);
       });
     }
@@ -3126,68 +3158,58 @@
         if (req) u.set('requerente', req);
         btnBaixarPlanilha.disabled = true;
         var prevTitle = btnBaixarPlanilha.title;
-        btnBaixarPlanilha.title = 'A localizar planilha no Drive…';
-        setMsg('A localizar a planilha no Drive…', false);
-        fetch('/api/memoria-calculo/planilha-drive?' + u.toString(), {
+        btnBaixarPlanilha.title = 'A localizar e descarregar…';
+        setMsg('A localizar e descarregar a planilha no Drive…', false);
+        // Um único pedido: o backend localiza e devolve o ficheiro (evita 2 round-trips lentos).
+        var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var tmr = ctl ? window.setTimeout(function () { try { ctl.abort(); } catch (_) {} }, 45000) : null;
+        fetch('/api/memoria-calculo/planilha-drive/download?' + u.toString(), {
           credentials: 'same-origin',
-          headers: { Accept: 'application/json' }
+          signal: ctl ? ctl.signal : undefined
         })
           .then(function (res) {
-            return res.json().then(function (d) { return { ok: res.ok, status: res.status, d: d }; });
-          })
-          .then(function (o) {
-            if (!o.ok || !o.d || !o.d.ok || !o.d.file || !o.d.file.id) {
-              setMsg((o.d && o.d.error) ? o.d.error : 'Planilha não encontrada no Drive.', true);
-              return;
-            }
-            var fileName = (o.d.file.name && String(o.d.file.name).trim()) || 'planilha.xlsx';
-            setMsg(
-              'Planilha encontrada' +
-                (o.d.file.name ? (': ' + o.d.file.name) : '') +
-                (o.d.file.date ? (' (' + o.d.file.date + ')') : '') +
-                '. A descarregar…',
-              false
-            );
-            var dl = new URLSearchParams();
-            dl.set('file_id', String(o.d.file.id));
-            return fetch('/api/memoria-calculo/planilha-drive/download?' + dl.toString(), {
-              credentials: 'same-origin'
-            }).then(function (res) {
-              if (!res.ok) {
-                return res.json().then(function (d) {
-                  throw new Error((d && d.error) ? d.error : ('HTTP ' + res.status));
-                }).catch(function (err) {
-                  if (err && err.message && err.message.indexOf('HTTP') < 0) throw err;
-                  throw new Error('Falha no download (HTTP ' + res.status + ').');
-                });
-              }
-              var cd = res.headers.get('Content-Disposition') || '';
-              var m = /filename\*=UTF-8''([^;]+)|filename=\"([^\"]+)\"|filename=([^;]+)/i.exec(cd);
-              if (m) {
-                try {
-                  fileName = decodeURIComponent((m[1] || m[2] || m[3] || fileName).trim());
-                } catch (_) {}
-              }
-              return res.blob().then(function (blob) {
-                var type = blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-                var typed = blob.type ? blob : new Blob([blob], { type: type });
-                var url = URL.createObjectURL(typed);
-                var a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                a.rel = 'noopener';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                setTimeout(function () { try { URL.revokeObjectURL(url); } catch (_) {} }, 2000);
-                setMsg('Download iniciado: ' + fileName, false);
+            if (!res.ok) {
+              return res.json().then(function (d) {
+                throw new Error((d && d.error) ? d.error : ('HTTP ' + res.status));
+              }).catch(function (err) {
+                if (err && err.message && err.message.indexOf('HTTP') < 0 && String(err.message).indexOf('JSON') < 0) throw err;
+                if (err && err.message && err.message.indexOf('Falha') >= 0) throw err;
+                if (err && err.message && !/Unexpected|JSON|HTTP/.test(err.message)) throw err;
+                throw new Error((err && err.message && err.message.indexOf('HTTP') >= 0) ? err.message : ('Falha no download (HTTP ' + res.status + ').'));
               });
+            }
+            var fileName = 'planilha.xlsx';
+            var cd = res.headers.get('Content-Disposition') || '';
+            var m = /filename\*=UTF-8''([^;]+)|filename=\"([^\"]+)\"|filename=([^;]+)/i.exec(cd);
+            if (m) {
+              try {
+                fileName = decodeURIComponent((m[1] || m[2] || m[3] || fileName).trim());
+              } catch (_) {}
+            }
+            return res.blob().then(function (blob) {
+              var type = blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+              var typed = blob.type ? blob : new Blob([blob], { type: type });
+              var url = URL.createObjectURL(typed);
+              var a = document.createElement('a');
+              a.href = url;
+              a.download = fileName;
+              a.rel = 'noopener';
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              setTimeout(function () { try { URL.revokeObjectURL(url); } catch (_) {} }, 2000);
+              setMsg('Download iniciado: ' + fileName, false);
             });
           })
           .catch(function (err) {
+            if (err && err.name === 'AbortError') {
+              setMsg('A consulta ao Drive demorou demais. Tente de novo em instantes.', true);
+              return;
+            }
             setMsg((err && err.message) ? err.message : 'Falha de rede ao consultar o Drive.', true);
           })
           .finally(function () {
+            if (tmr) window.clearTimeout(tmr);
             syncBaixarPlanilhaButtonState(currentRow);
             if (btnBaixarPlanilha && prevTitle) btnBaixarPlanilha.title = prevTitle;
           });
@@ -3423,7 +3445,7 @@
         return;
       }
       if (casoViaCumprimento(currentRow)) {
-        setMsg('Com «Pesquisar Cumprimentos» ativo, use apenas Atualizar Cálculo.', true);
+        setMsg('Caso de cumprimento não usa análise processual.', true);
         return;
       }
       if (analiseEmCurso() && !opts.force) {
@@ -3806,9 +3828,40 @@
 
     function manualRowId(row) {
       if (!row) return null;
-      var raw = row.id_precainfosnew != null ? row.id_precainfosnew : row.id;
+      var raw = row.id_precainfosnew;
+      if (raw == null || raw === '') return null;
       var n = parseInt(raw, 10);
       return isNaN(n) ? null : n;
+    }
+
+    function preencherManualPelaMemoria(row, msg) {
+      openManualFormNovo({
+        requerente: row && row.requerente || '',
+        numero_de_processo: row && row.numero_de_processo || '',
+        numero_do_incidente: row && row.numero_do_incidente || ''
+      });
+      if (manualForm && row) {
+        if (row.principal_bruto != null && manualForm.elements.principal_liquido) {
+          manualForm.elements.principal_liquido.value = String(row.principal_bruto);
+        }
+        if (row.juros != null && manualForm.elements.juros_moratorio) {
+          manualForm.elements.juros_moratorio.value = String(row.juros);
+        }
+        if (row.desc_saude_prev != null && manualForm.elements.descontos) {
+          manualForm.elements.descontos.value = String(row.desc_saude_prev);
+        }
+        if (row.numero_de_meses != null && manualForm.elements.numero_de_meses) {
+          manualForm.elements.numero_de_meses.value = String(row.numero_de_meses);
+        }
+      }
+      if (row && (row.requerente || row.numero_de_processo)) {
+        setManualLoadedBanner(
+          'Memória: ' + (row.requerente || '—') +
+          ' · Processo ' + (row.numero_de_processo || '—') +
+          ' · Incidente ' + (row.numero_do_incidente || '—')
+        );
+      }
+      setManualSearchMsg(msg, false);
     }
 
     function loadManualCumprimento(row) {
@@ -3841,38 +3894,15 @@
     }
 
     function loadManualCasoFromRow(row) {
-      if (row && row.source === 'coleta_cumprimento') {
+      if (row && (row.source === 'coleta_cumprimento' || (row.memoria_cumprimento && row.form))) {
         loadManualCumprimento(row);
         return;
       }
       var pid = manualRowId(row);
-      if (pid == null) {
-        setManualSearchMsg('Este resultado não tem cadastro associado; não é possível preencher o formulário.', true);
-        return;
-      }
-      if (pid <= 0) {
-        openManualFormNovo({
-          requerente: row.requerente || '',
-          numero_de_processo: row.numero_de_processo || '',
-          numero_do_incidente: row.numero_do_incidente || ''
-        });
-        if (manualForm) {
-          if (row.principal_bruto != null && manualForm.elements.principal_liquido) {
-            manualForm.elements.principal_liquido.value = String(row.principal_bruto);
-          }
-          if (row.juros != null && manualForm.elements.juros_moratorio) {
-            manualForm.elements.juros_moratorio.value = String(row.juros);
-          }
-          if (row.desc_saude_prev != null && manualForm.elements.descontos) {
-            manualForm.elements.descontos.value = String(row.desc_saude_prev);
-          }
-          if (row.numero_de_meses != null && manualForm.elements.numero_de_meses) {
-            manualForm.elements.numero_de_meses.value = String(row.numero_de_meses);
-          }
-        }
-        setManualSearchMsg(
-          'Caso só na memória de cálculo (sem cadastro). Ajuste os campos e envie para recalcular.',
-          false
+      if (pid == null || pid <= 0) {
+        preencherManualPelaMemoria(
+          row,
+          'Caso só na memória de cálculo (sem cadastro). Ajuste os campos e envie para recalcular.'
         );
         return;
       }
@@ -3886,8 +3916,10 @@
         .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
         .then(function (o) {
           if (!o.ok || !o.d || !o.d.ok || !o.d.form) {
-            setManualSearchMsg((o.d && o.d.error) ? o.d.error : 'Não foi possível carregar o cadastro.', true);
-            resetManualForm();
+            preencherManualPelaMemoria(
+              row,
+              'O cadastro deste id não existe mais. O formulário foi preenchido com a memória de cálculo. Confira e envie.'
+            );
             return;
           }
           fillManualForm(o.d.form);
@@ -3901,6 +3933,21 @@
         .catch(function () {
           setManualSearchMsg('Falha de rede ao carregar o cadastro.', true);
         });
+    }
+
+    function casoManualBloqueado(row) {
+      if (!row) return false;
+      if (row.source === 'blacklist' || row.source === 'controle_coleta') return true;
+      if (isPipelineColetaBlocked(row) || isCasoSemSaldo(row)) return true;
+      return false;
+    }
+
+    function aplicarBloqueioNoManual(row) {
+      resetManualForm();
+      if (row && row.source === 'blacklist' && row.blacklist_can_override) {
+        if (requestBlacklistOverride(row, 'manual')) return;
+      }
+      showInaptoSemSaldoModal(row, { manual: true });
     }
 
     function renderManualEscolher(results, porNome) {
@@ -3927,14 +3974,42 @@
         n2.textContent = rotuloCasoLista(row);
         b.appendChild(n1);
         b.appendChild(n2);
-        b.addEventListener('click', function () { loadManualCasoFromRow(results[i]); });
+        if (row && row.source === 'blacklist') {
+          var tagBl = document.createElement('span');
+          tagBl.className = 'memoria-escolher-tag';
+          tagBl.textContent = row.blacklist_motivo
+            ? (' · Blacklist: ' + String(row.blacklist_motivo))
+            : ' · Blacklist (inapto)';
+          b.appendChild(tagBl);
+        } else if (isPipelineColetaBlocked(row)) {
+          var tagPipe = document.createElement('span');
+          tagPipe.className = 'memoria-escolher-tag';
+          tagPipe.textContent = ' · Coleta bloqueada: ' + String(
+            row.pipeline_status || row.controle_coleta_status || 'controle_coleta'
+          );
+          b.appendChild(tagPipe);
+        } else if (isCasoSemSaldo(row)) {
+          var tagInap = document.createElement('span');
+          tagInap.className = 'memoria-escolher-tag';
+          tagInap.textContent = ' · Inapto (Sem Saldo)';
+          b.appendChild(tagInap);
+        }
+        b.addEventListener('click', function () {
+          var escolhido = results[i];
+          if (casoManualBloqueado(escolhido)) {
+            aplicarBloqueioNoManual(escolhido);
+            return;
+          }
+          loadManualCasoFromRow(escolhido);
+        });
         li.appendChild(b);
         list.appendChild(li);
       });
       escolher.removeAttribute('hidden');
     }
 
-    function doManualSearch() {
+    function doManualSearch(opts) {
+      opts = opts || {};
       if (!memoriaConfigured) return;
       var btnN = document.getElementById('memoria-manual-btn-buscar');
       var btnP = document.getElementById('memoria-manual-btn-buscar-proc');
@@ -3970,6 +4045,10 @@
       }
       var chkCumpManual = document.getElementById('memoria-manual-pesquisar-cumprimentos');
       if (chkCumpManual && chkCumpManual.checked) u.set('pesquisar_cumprimentos', '1');
+      if (opts.blacklistOverride) {
+        u.set('blacklist_override', '1');
+        u.set('blacklist_override_reason', String(opts.blacklistReason || '').trim());
+      }
       setManualSearchMsg('A pesquisar…', false);
       if (escolher) {
         escolher.setAttribute('hidden', '');
@@ -3990,13 +4069,22 @@
             return;
           }
           var results = o.d.results || [];
+          if (results.length === 1 && casoManualBloqueado(results[0])) {
+            aplicarBloqueioNoManual(results[0]);
+            return;
+          }
           var usable = results.filter(function (r) {
-            return (r && r.source === 'coleta_cumprimento' && r.form) || manualRowId(r) != null;
+            if (casoManualBloqueado(r)) return false;
+            if (r.source === 'coleta_cumprimento' && r.form) return true;
+            if (r.memoria_cumprimento) return true;
+            if (manualRowId(r) != null) return true;
+            return !!(String(r.requerente || '').trim() || String(r.numero_de_processo || '').trim());
           });
-            if (!usable.length) {
+          if (!usable.length) {
             if (results.length) {
               resetManualForm();
-              setManualSearchMsg('Caso localizado, mas sem cadastro associado (inapto/blacklist). Não é possível preencher o formulário.', true);
+              setManualSearchMsg(results.length + ' casos encontrados. Escolha abaixo.', false);
+              renderManualEscolher(results, porNome);
               return;
             }
             var prefill = {};
@@ -4013,13 +4101,13 @@
             );
             return;
           }
-          if (usable.length === 1) {
-            loadManualCasoFromRow(usable[0]);
+          if (results.length > 1) {
+            resetManualForm();
+            setManualSearchMsg(results.length + ' casos encontrados. Escolha abaixo.', false);
+            renderManualEscolher(results, porNome);
             return;
           }
-          resetManualForm();
-          setManualSearchMsg(usable.length + ' casos encontrados. Escolha abaixo.', false);
-          renderManualEscolher(usable, porNome);
+          loadManualCasoFromRow(usable[0]);
         })
         .catch(function (e) {
           if (e && (e.name === 'AbortError' || String(e).indexOf('AbortError') >= 0)) {

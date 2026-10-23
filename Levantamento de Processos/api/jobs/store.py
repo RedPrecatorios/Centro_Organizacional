@@ -26,6 +26,8 @@ class JobRecord:
     search_kind: str
     query_value: str
     filter_nome: str | None
+    filter_incidente: str | None
+    filter_cpf: str | None
     progress: str | None
     result_json: dict[str, Any]
     error: str | None
@@ -81,6 +83,14 @@ class JobStore:
                     conn.execute(
                         "ALTER TABLE search_jobs ADD COLUMN filter_nome TEXT"
                     )
+                if "filter_incidente" not in cols:
+                    conn.execute(
+                        "ALTER TABLE search_jobs ADD COLUMN filter_incidente TEXT"
+                    )
+                if "filter_cpf" not in cols:
+                    conn.execute(
+                        "ALTER TABLE search_jobs ADD COLUMN filter_cpf TEXT"
+                    )
                 conn.commit()
 
     def create(
@@ -90,12 +100,16 @@ class JobStore:
         search_kind: str = "nome",
         query_value: str = "",
         filter_nome: str | None = None,
+        filter_incidente: str | None = None,
+        filter_cpf: str | None = None,
     ) -> JobRecord:
         job_id = uuid.uuid4().hex
         now = _utc_now()
         kind = (search_kind or "nome").strip().lower() or "nome"
         value = (query_value or label or "").strip()
         filtro = (filter_nome or "").strip() or None
+        filtro_inc = (filter_incidente or "").strip() or None
+        filtro_cpf = (filter_cpf or "").strip() or None
         record = JobRecord(
             job_id=job_id,
             status="queued",
@@ -103,6 +117,8 @@ class JobStore:
             search_kind=kind,
             query_value=value,
             filter_nome=filtro,
+            filter_incidente=filtro_inc,
+            filter_cpf=filtro_cpf,
             progress="queued",
             result_json={},
             error=None,
@@ -115,8 +131,9 @@ class JobStore:
                     """
                     INSERT INTO search_jobs
                     (job_id, status, nome, search_kind, query_value, filter_nome,
-                     progress, result_json, error, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     filter_incidente, filter_cpf, progress, result_json, error,
+                     created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.job_id,
@@ -125,6 +142,8 @@ class JobStore:
                         record.search_kind,
                         record.query_value,
                         record.filter_nome,
+                        record.filter_incidente,
+                        record.filter_cpf,
                         record.progress,
                         "{}",
                         None,
@@ -134,6 +153,20 @@ class JobStore:
                 )
                 conn.commit()
         return record
+
+    def list_recent(self, *, limit: int = 50) -> list[JobRecord]:
+        cap = max(1, min(int(limit or 50), 200))
+        with self._lock:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM search_jobs
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (cap,),
+                ).fetchall()
+        return [self._row_to_record(row) for row in rows]
 
     def get(self, job_id: str) -> JobRecord | None:
         with self._lock:
@@ -167,7 +200,7 @@ class JobStore:
                     SET status = 'running', progress = ?, updated_at = ?
                     WHERE job_id = ? AND status = 'queued'
                     """,
-                    ("running", now, row["job_id"]),
+                    ("Em Processamento", now, row["job_id"]),
                 )
                 conn.commit()
                 updated = conn.execute(
@@ -219,6 +252,8 @@ class JobStore:
         kind = row["search_kind"] if "search_kind" in keys else "nome"
         qv = row["query_value"] if "query_value" in keys else row["nome"]
         filtro = row["filter_nome"] if "filter_nome" in keys else None
+        filtro_inc = row["filter_incidente"] if "filter_incidente" in keys else None
+        filtro_cpf = row["filter_cpf"] if "filter_cpf" in keys else None
         return JobRecord(
             job_id=row["job_id"],
             status=row["status"],
@@ -226,6 +261,8 @@ class JobStore:
             search_kind=(kind or "nome"),
             query_value=(qv or row["nome"] or ""),
             filter_nome=(str(filtro).strip() if filtro else None),
+            filter_incidente=(str(filtro_inc).strip() if filtro_inc else None),
+            filter_cpf=(str(filtro_cpf).strip() if filtro_cpf else None),
             progress=row["progress"],
             result_json=payload if isinstance(payload, dict) else {},
             error=row["error"],

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2FA — {{ app_title|e }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/whatsapp_module.css') }}" />
+</head>
+<body class="dashboard-body">
+  {% include 'partials/sidebar_navegacao.html' %}
+
+  <div class="dash-main">
+    <header class="dash-top">
+      <div>
+        <h1 class="dash-h1">Autenticação 2FA</h1>
+        <p class="dash-sub">Códigos TOTP gerados localmente — atualizam a cada poucos segundos</p>
+      </div>
+      <button type="button" class="refresh-btn" id="totp-refresh" title="Atualizar códigos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+          <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+        </svg>
+        Atualizar
+      </button>
+    </header>
+
+    <div id="totp-toast" class="app-toast-dash"></div>
+
+    <main class="dash-content totp-page">
+      <div id="totp-banner" class="totp-banner dash-hidden" role="status"></div>
+
+      <section class="totp-add-card" aria-labelledby="totp-add-title">
+        <h2 class="dash-section-title" id="totp-add-title">Inserir novo código</h2>
+        <p class="totp-add-hint">Cole a chave secreta (Base32) ou o link <code>otpauth://</code>. Nome e emissor são opcionais se vierem no link.</p>
+        <form id="totp-add-form" class="totp-add-form" autocomplete="off">
+          <div class="totp-field totp-field-wide">
+            <label for="totp-secret">Chave ou otpauth://</label>
+            <textarea id="totp-secret" class="auth-input totp-textarea" rows="2" required placeholder="JBSWY3DPEHPK3PXP ou otpauth://totp/..."></textarea>
+          </div>
+          <div class="totp-field">
+            <label for="totp-name">Nome</label>
+            <input type="text" id="totp-name" class="auth-input" maxlength="80" placeholder="Ex.: Conta principal" />
+          </div>
+          <div class="totp-field">
+            <label for="totp-issuer">Emissor</label>
+            <input type="text" id="totp-issuer" class="auth-input" maxlength="80" placeholder="Ex.: TJSP / Google" />
+          </div>
+          <div class="totp-add-actions">
+            <button type="submit" class="refresh-btn totp-submit" id="totp-add-btn">Adicionar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="totp-list-wrap" aria-labelledby="totp-list-title">
+        <div class="totp-list-head">
+          <h2 class="dash-section-title" id="totp-list-title">Códigos ativos</h2>
+          <span class="totp-count" id="totp-count">—</span>
+        </div>
+        <div id="totp-empty" class="totp-empty dash-hidden">Nenhuma conta no cofre. Adicione uma chave acima.</div>
+        <div id="totp-list" class="totp-list" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+  (function () {
+    const listEl = document.getElementById('totp-list');
+    const emptyEl = document.getElementById('totp-empty');
+    const countEl = document.getElementById('totp-count');
+    const banner = document.getElementById('totp-banner');
+    const toast = document.getElementById('totp-toast');
+    const form = document.getElementById('totp-add-form');
+    const btnRefresh = document.getElementById('totp-refresh');
+    const btnAdd = document.getElementById('totp-add-btn');
+
+    let accounts = [];
+    let toastT = null;
+
+    function esc(s) {
+      return (s == null ? '' : String(s))
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function showToast(msg, isError) {
+      toast.textContent = msg;
+      toast.classList.toggle('toast-error', !!isError);
+      toast.classList.add('show');
+      clearTimeout(toastT);
+      toastT = setTimeout(function () {
+        toast.classList.remove('show', 'toast-error');
+      }, isError ? 4200 : 2200);
+    }
+
+    function setBanner(msg, isError) {
+      if (!msg) {
+        banner.classList.add('dash-hidden');
+        banner.textContent = '';
+        return;
+      }
+      banner.textContent = msg;
+      banner.classList.toggle('totp-banner-error', !!isError);
+      banner.classList.remove('dash-hidden');
+    }
+
+    function digitHtml(code, digits) {
+      var n = Math.max(6, Math.min(8, Number(digits) || 6));
+      var raw = String(code || '').replace(/\D/g, '').slice(0, n);
+      var html = '';
+      for (var i = 0; i < n; i++) {
+        html += '<span class="dash-digit">' + (raw[i] != null ? esc(raw[i]) : '—') + '</span>';
+      }
+      return html;
+    }
+
+    function codeOf(a) {
+      return String((a && a.code) || '').replace(/\D/g, '');
+    }
+
+    function copyText(text) {
+      var value = String(text || '');
+      if (!value) return Promise.reject(new Error('Código vazio'));
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(value);
+      }
+      return new Promise(function (resolve, reject) {
+        var ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, value.length);
+        var ok = false;
+        try {
+          ok = document.execCommand('copy');
+        } catch (e) {
+          ok = false;
+        }
+        document.body.removeChild(ta);
+        if (ok) resolve();
+        else reject(new Error('Cópia bloqueada pelo navegador'));
+      });
+    }
+
+    function render() {
+      countEl.textContent = accounts.length + (accounts.length === 1 ? ' conta' : ' contas');
+      if (!accounts.length) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('dash-hidden');
+        return;
+      }
+      emptyEl.classList.add('dash-hidden');
+      listEl.innerHTML = accounts.map(function (a) {
+        var rem = a.remaining != null ? Number(a.remaining) : null;
+        var remCls = rem != null && rem <= 5 ? ' is-low' : '';
+        var remTxt = rem != null ? rem + 's' : '—';
+        var title = [a.issuer, a.name].filter(Boolean).join(' · ') || 'Conta';
+        var period = a.period != null ? a.period + 's' : '—';
+        var code = codeOf(a);
+        return (
+          '<article class="totp-card" data-id="' + esc(a.id) + '">' +
+            '<div class="totp-card-meta">' +
+              '<p class="totp-card-title">' + esc(title) + '</p>' +
+              '<p class="totp-card-sub">Período ' + esc(period) + ' · ' + esc(a.digits || 6) + ' dígitos</p>' +
+            '</div>' +
+            '<div class="totp-card-code" data-copy-id="' + esc(a.id) + '" title="Clique para copiar">' +
+              '<div class="dash-digits" aria-label="Código ' + esc(code) + '">' + digitHtml(code, a.digits) + '</div>' +
+              '<span class="totp-code-plain" data-code-plain>' + esc(code || '—') + '</span>' +
+              '<span class="dash-digits-remaining' + remCls + '" data-remaining>' + esc(remTxt) + '</span>' +
+            '</div>' +
+            '<div class="totp-card-actions">' +
+              '<button type="button" class="totp-btn totp-btn-copy" data-copy-id="' + esc(a.id) + '">Copiar</button>' +
+              '<button type="button" class="totp-btn totp-btn-del" data-del="' + esc(a.id) + '">Remover</button>' +
+            '</div>' +
+          '</article>'
+        );
+      }).join('');
+    }
+
+    function tickLocal() {
+      accounts.forEach(function (a) {
+        if (a.remaining == null) return;
+        var n = Number(a.remaining);
+        if (n > 0) a.remaining = n - 1;
+        var card = listEl.querySelector('.totp-card[data-id="' + a.id + '"]');
+        if (!card) return;
+        var remEl = card.querySelector('[data-remaining]');
+        if (!remEl) return;
+        var rem = a.remaining != null ? Number(a.remaining) : null;
+        remEl.textContent = rem != null ? rem + 's' : '—';
+        remEl.classList.toggle('is-low', rem != null && rem <= 5);
+      });
+    }
+
+    async function load(quiet) {
+      btnRefresh.disabled = true;
+      btnRefresh.classList.add('spinning');
+      try {
+        var res = await fetch('/api/totp/codes', { credentials: 'same-origin' });
+        var data = await res.json();
+        if (!data || !data.ok) {
+          accounts = [];
+          render();
+          setBanner((data && data.error) || 'Não foi possível carregar os códigos.', true);
+          if (!quiet) showToast('Falha ao carregar 2FA.', true);
+          return;
+        }
+        setBanner('');
+        var next = Array.isArray(data.accounts) ? data.accounts : [];
+        var prevKey = accounts.map(function (a) { return a.id + ':' + codeOf(a); }).join('|');
+        var nextKey = next.map(function (a) { return a.id + ':' + String(a.code || '').replace(/\D/g, ''); }).join('|');
+        accounts = next;
+        if (prevKey !== nextKey || !listEl.children.length) {
+          render();
+        } else {
+          // Só atualiza temporizador/códigos em cards já montados (não derruba seleção).
+          accounts.forEach(function (a) {
+            var card = listEl.querySelector('.totp-card[data-id="' + a.id + '"]');
+            if (!card) return;
+            var plain = card.querySelector('[data-code-plain]');
+            var digitsWrap = card.querySelector('.dash-digits');
+            var remEl = card.querySelector('[data-remaining]');
+            var code = codeOf(a);
+            if (plain) plain.textContent = code || '—';
+            if (digitsWrap) digitsWrap.innerHTML = digitHtml(code, a.digits);
+            if (remEl) {
+              var rem = a.remaining != null ? Number(a.remaining) : null;
+              remEl.textContent = rem != null ? rem + 's' : '—';
+              remEl.classList.toggle('is-low', rem != null && rem <= 5);
+            }
+          });
+          countEl.textContent = accounts.length + (accounts.length === 1 ? ' conta' : ' contas');
+        }
+        if (!quiet) showToast('Códigos atualizados.');
+      } catch (e) {
+        accounts = [];
+        render();
+        setBanner(e.message || 'Erro de rede.', true);
+      } finally {
+        btnRefresh.disabled = false;
+        btnRefresh.classList.remove('spinning');
+      }
+    }
+
+    form.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var secret = document.getElementById('totp-secret').value.trim();
+      var name = document.getElementById('totp-name').value.trim();
+      var issuer = document.getElementById('totp-issuer').value.trim();
+      if (!secret) {
+        showToast('Informe a chave ou o link otpauth://.', true);
+        return;
+      }
+      btnAdd.disabled = true;
+      try {
+        var res = await fetch('/api/totp/accounts', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: secret, name: name, issuer: issuer })
+        });
+        var data = await res.json();
+        if (!data || !data.ok) {
+          showToast((data && data.error) || 'Não foi possível adicionar.', true);
+          return;
+        }
+        form.reset();
+        showToast('Conta adicionada.');
+        await load(true);
+      } catch (e) {
+        showToast(e.message || 'Erro ao adicionar.', true);
+      } finally {
+        btnAdd.disabled = false;
+      }
+    });
+
+    async function copyAccountId(accountId) {
+      var acc = accounts.find(function (a) { return a.id === accountId; });
+      var code = codeOf(acc);
+      if (!code) {
+        showToast('Código indisponível.', true);
+        return;
+      }
+      try {
+        await copyText(code);
+        showToast('Código ' + code + ' copiado.');
+      } catch (e) {
+        showToast('Não foi possível copiar. Selecione o número e use Ctrl+C.', true);
+      }
+    }
+
+    listEl.addEventListener('click', async function (ev) {
+      var t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      var delBtn = t.closest('[data-del]');
+      if (delBtn) {
+        var id = delBtn.getAttribute('data-del') || '';
+        if (!id || !confirm('Remover esta conta 2FA do cofre?')) return;
+        delBtn.disabled = true;
+        try {
+          var res = await fetch('/api/totp/accounts/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            credentials: 'same-origin'
+          });
+          var data = await res.json();
+          if (!data || !data.ok) {
+            showToast((data && data.error) || 'Falha ao remover.', true);
+            return;
+          }
+          showToast('Conta removida.');
+          await load(true);
+        } catch (e) {
+          showToast(e.message || 'Erro ao remover.', true);
+        } finally {
+          delBtn.disabled = false;
+        }
+        return;
+      }
+      var copyEl = t.closest('[data-copy-id]');
+      if (copyEl) {
+        await copyAccountId(copyEl.getAttribute('data-copy-id') || '');
+      }
+    });
+
+    btnRefresh.addEventListener('click', function () { load(false); });
+    load(true);
+    setInterval(function () { load(true); }, 5000);
+    setInterval(tickLocal, 1000);
+  })();
+  </script>
+</body>
+</html>

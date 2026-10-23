@@ -62,15 +62,21 @@ class SearchJobWorker:
                 job.nome,
             )
 
-            def on_progress(msg: str, _job_id: str = job.job_id) -> None:
-                self.store.update(_job_id, progress=msg)
+            def on_progress(msg: str, snapshot=None, _job_id: str = job.job_id) -> None:
+                kwargs: dict = {"progress": msg}
+                if isinstance(snapshot, dict):
+                    kwargs["result_json"] = snapshot
+                self.store.update(_job_id, **kwargs)
 
             try:
                 result = run_search_job(
                     self.settings,
+                    nome=job.nome,
                     search_kind=job.search_kind,
                     query_value=job.query_value or job.nome,
                     filter_nome=job.filter_nome,
+                    filter_incidente=job.filter_incidente,
+                    cpf=job.filter_cpf,
                     on_progress=on_progress,
                 )
                 self.store.update(

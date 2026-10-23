@@ -109,7 +109,15 @@ def _map_http_error(response: requests.Response) -> tuple[dict[str, Any], int]:
         if isinstance(d, str) and d.strip():
             msg = d.strip()
         elif isinstance(d, list) and d:
-            msg = str(d[0])
+            first = d[0]
+            if isinstance(first, dict):
+                msg = str(first.get("msg") or first.get("message") or first).strip()
+            else:
+                msg = str(first).strip()
+            if msg.lower().startswith("value error, "):
+                msg = msg[13:].strip()
+                if msg:
+                    msg = msg[0].upper() + msg[1:]
     return (
         {
             "ok": False,
@@ -136,37 +144,42 @@ def _normalize_payload_body(
     nome: str | None = None,
     cpf: str | None = None,
     processo: str | None = None,
+    incidente: str | None = None,
 ) -> tuple[dict[str, str] | None, str | None]:
     """Devolve body JSON da API ou (None, mensagem de erro)."""
     n = (nome or "").strip()
     c = re.sub(r"\D+", "", (cpf or "").strip())
     p = (processo or "").strip()
-
-    if c:
-        if n or p:
-            return None, "CPF deve ser informado sozinho (sem nome nem processo)."
-        if len(c) != 11:
-            return None, "CPF deve ter 11 dígitos."
-        return {"cpf": c}, None
+    i = (incidente or "").strip()
 
     if p:
-        if not n:
-            return (
-                None,
-                "Ao pesquisar por processo, informe também o nome (Monday) "
-                "para filtrar os incidentes na capa.",
-            )
-        if len(n) < 3:
+        if not i:
+            return None, "Ao pesquisar por processo, informe também o incidente."
+        if not n and not c:
+            return None, "Ao pesquisar por processo e incidente, informe nome ou CPF."
+        if n and len(n) < 3:
             return None, "Informe um nome com pelo menos 3 caracteres."
+        if c and len(c) != 11:
+            return None, "CPF deve ter 11 dígitos."
         if len(p) < 8:
             return None, "Informe um número de processo válido."
-        return {"processo": p, "nome": n}, None
+        body: dict[str, str] = {"processo": p, "incidente": i}
+        if n:
+            body["nome"] = n
+        if c:
+            body["cpf"] = c
+        return body, None
 
-    if not n:
-        return None, "Informe nome, CPF, ou processo + nome."
-    if len(n) < 3:
-        return None, "Informe um nome com pelo menos 3 caracteres."
-    return {"nome": n}, None
+    if i and not p:
+        return None, "Incidente exige também o número do processo."
+    if n and c:
+        if len(n) < 3:
+            return None, "Informe um nome com pelo menos 3 caracteres."
+        if len(c) != 11:
+            return None, "CPF deve ter 11 dígitos."
+        return {"nome": n, "cpf": c}, None
+
+    return None, "Informe nome e CPF, ou processo + incidente + nome ou CPF."
 
 
 def extract_processos_aptos(payload: dict[str, Any] | None) -> list[Any]:
@@ -235,12 +248,14 @@ def _enrich(payload: dict[str, Any]) -> dict[str, Any]:
     out["ok"] = True
     status = str(out.get("status") or "").strip().lower()
     out["terminal"] = status in _TERMINAL
-    if status == "done":
-        out["processos_aptos"] = extract_processos_aptos(out)
-        out["processos_inaptos"] = extract_processos_inaptos(out)
-    else:
-        out.setdefault("processos_aptos", [])
-        out.setdefault("processos_inaptos", [])
+    out["processos_aptos"] = extract_processos_aptos(out)
+    out["processos_inaptos"] = extract_processos_inaptos(out)
+    if not str(out.get("error") or "").strip():
+        errors = out.get("errors")
+        if isinstance(errors, list):
+            first = next((e for e in errors if str(e or "").strip()), None)
+            if first is not None:
+                out["error"] = str(first).strip()
     return out
 
 
@@ -282,10 +297,13 @@ def create_search(
     *,
     cpf: str | None = None,
     processo: str | None = None,
+    incidente: str | None = None,
 ) -> tuple[dict[str, Any], int]:
     if not is_configured():
         return _not_configured()
-    body, err = _normalize_payload_body(nome=nome, cpf=cpf, processo=processo)
+    body, err = _normalize_payload_body(
+        nome=nome, cpf=cpf, processo=processo, incidente=incidente
+    )
     if err or not body:
         return {"ok": False, "error": err or "Pedido inválido."}, 400
     try:
@@ -307,6 +325,39 @@ def create_search(
     if not isinstance(payload, dict):
         return {"ok": False, "error": "Resposta inválida da API ao criar busca."}, 502
     return _enrich(payload), 200
+
+
+def list_searches(*, limit: int = 50) -> tuple[dict[str, Any], int]:
+    if not is_configured():
+        return _not_configured()
+    try:
+        cap = max(1, min(int(limit or 50), 200))
+    except (TypeError, ValueError):
+        cap = 50
+    try:
+        response = requests.get(
+            f"{api_base()}/api/v1/searches",
+            headers=_headers(),
+            params={"limit": cap},
+            timeout=_timeout(),
+            verify=_verify_ssl(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _request_error(exc)
+    if response.status_code >= 400:
+        return _map_http_error(response)
+    try:
+        body = response.json()
+    except Exception:
+        return {"ok": False, "error": "Resposta inválida da API ao listar buscas."}, 502
+    items = body if isinstance(body, list) else (body.get("items") if isinstance(body, dict) else None)
+    if not isinstance(items, list):
+        return {"ok": False, "error": "Resposta inválida da API ao listar buscas."}, 502
+    out = []
+    for item in items:
+        if isinstance(item, dict):
+            out.append(_enrich(item))
+    return {"ok": True, "items": out, "total": len(out)}, 200
 
 
 def get_search(job_id: str) -> tuple[dict[str, Any], int]:

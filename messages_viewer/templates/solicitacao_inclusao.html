@@ -2722,23 +2722,27 @@
     return (r && r.detalhe && typeof r.detalhe === 'object' && !Array.isArray(r.detalhe)) ? r.detalhe : {};
   }
 
+  function firstNonEmptyList() {
+    for (var i = 0; i < arguments.length; i++) {
+      var v = arguments[i];
+      if (Array.isArray(v) && v.length) return v;
+    }
+    return null;
+  }
+
   function collectCasos(r) {
     r = r || {};
     var det = detalheBlock(r);
-    var list = null;
-    if (Array.isArray(det.casos)) list = det.casos;
-    else if (Array.isArray(r.casos)) list = r.casos;
-    else if (Array.isArray(det.desfechos)) list = det.desfechos;
-    else if (Array.isArray(r.desfechos)) list = r.desfechos;
-    else if (r.resultado_monday && Array.isArray(r.resultado_monday.desfechos)) {
-      list = r.resultado_monday.desfechos;
-    }
+    var rm = (r.resultado_monday && typeof r.resultado_monday === 'object') ? r.resultado_monday : {};
+    var list = firstNonEmptyList(
+      det.desfechos, r.desfechos, rm.desfechos,
+      det.casos, r.casos, det.processos, r.processos
+    );
     if (!list) {
       var parsed = parseJsonMaybe(r.mensagem) || parseJsonMaybe(r.detalhe) || parseJsonMaybe(r.motivo);
-      if (Array.isArray(parsed)) list = parsed;
-      else if (parsed && Array.isArray(parsed.casos)) list = parsed.casos;
-      else if (parsed && Array.isArray(parsed.desfechos)) list = parsed.desfechos;
-      else list = [];
+      if (Array.isArray(parsed) && parsed.length) list = parsed;
+      else if (parsed) list = firstNonEmptyList(parsed.desfechos, parsed.casos);
+      if (!list) list = [];
     }
     return list.filter(function (d) { return d && typeof d === 'object'; });
   }
@@ -2785,6 +2789,7 @@
     return casos.some(function (d) {
       return textosSemelhantes(s, d.motivo) ||
         textosSemelhantes(s, d.mensagem) ||
+        textosSemelhantes(s, d.mensagem_usuario) ||
         textosSemelhantes(s, [d.status, statusLabel(d.status), atribuidoDe(d), d.motivo].join(' '));
     });
   }
@@ -2868,8 +2873,19 @@
     return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  function pedidoUsuarioDe(d) {
+    var t = String((d && d.mensagem_usuario) || '').trim();
+    if (!t || t === '-') return '';
+    return t;
+  }
+
   function cleanMotivo(d, procLabel) {
-    var raw = String(d.motivo || d.mensagem || d.detalhe || '').trim();
+    if (pedidoUsuarioDe(d)) return '';
+    var raw = String(d.motivo || d.mensagem || '').trim();
+    if (raw === '-') raw = '';
+    if (/assumiu\s+\d+\s+item|proposta enviada\s*=|já em tratamento na monday/i.test(raw)) {
+      raw = '';
+    }
     if (!raw) return '';
     if (raw.charAt(0) === '{' || raw.charAt(0) === '[') return '';
     [procLabel, d.processo, String(d.processo || '') + '/' + String(d.incidente || '')].forEach(function (pre) {
@@ -2877,8 +2893,8 @@
       if (!pre) return;
       raw = raw.replace(new RegExp('^' + escapeRe(pre) + '\\s*:\\s*', 'i'), '');
     });
-    raw = raw.replace(/\s*\(item_id=\d+\)/gi, '');
-    raw = raw.replace(/^\s*Elemento\s+\S+\s+criado;?\s*/i, '');
+    raw = raw.replace(/\s*\(\s*item[\s_\-]*id\s*=\s*\d+\s*\)/gi, '');
+    raw = raw.replace(/^\s*Elemento\s+\S+\s+criado(?:\s+no\s+[A-Za-zÀ-ú]+)?;?\s*/i, '');
     return limparMensagemApi(raw.replace(/^;\s*/, '').trim());
   }
 
@@ -2938,6 +2954,7 @@
       var st = inapto ? (d.status || 'INAPTO') : d.status;
       var who = inapto ? '' : atribuidoDe(d);
       var mondayId = inapto ? '' : mondayIdDe(d, desfechoMap);
+      var pedido = inapto ? '' : pedidoUsuarioDe(d);
       var motivo = cleanMotivo(d, proc);
       if (inapto && !motivo) {
         var rawMotivo = String(d.motivo || '').trim();
@@ -2957,6 +2974,9 @@
         } else if (/não vinculado|nao vinculado|sem comprador|não é label/i.test(motivo) || statusKey(st) === 'SEM_COMPRADOR') {
           html += '<dt>Atribuído</dt><dd>Não vinculado</dd>';
         }
+      }
+      if (pedido) {
+        html += '<dt>Confirmação</dt><dd>' + esc(limparMensagemApi(pedido)) + '</dd>';
       }
       if (motivo && (inapto || (motivo !== proc && motivo !== statusLabel(st)))) {
         html += '<dt>Motivo</dt><dd class="' + (inapto ? 'si-case-motivo' : '') + '">' + esc(motivo) + '</dd>';

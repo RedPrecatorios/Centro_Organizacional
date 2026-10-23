@@ -178,13 +178,16 @@ def test_data_so_mes_ano_usa_ultimo_dia():
     assert abril["form"]["data_base"] == "2011-04-30"
 
 
-def test_mescla_prefere_coleta_sobre_memoria():
+def test_mescla_preserva_valores_da_memoria_e_anexa_coleta():
     existente = [
         {
             "requerente": "Maria Cristina",
             "numero_de_processo": "0000878-86.2025.8.26.0053",
             "source": "memoria_calculo",
-            "id_precainfosnew": -123,
+            "id_precainfosnew": None,
+            "id_coleta_cumprimento": 9,
+            "total_liquido": 11973.91,
+            "feito_por": "CMP_CALC",
         }
     ]
     novo = linha_cumprimento(
@@ -209,6 +212,11 @@ def test_mescla_prefere_coleta_sobre_memoria():
     )
     merged = mesclar_sem_duplicar(existente, [novo, outro])
     assert len(merged) == 2
-    assert merged[0]["source"] == "coleta_cumprimento"
-    assert merged[0]["requerente"] == "Maria Cristina"
+    assert merged[0]["source"] == "memoria_calculo"
+    assert merged[0]["total_liquido"] == 11973.91
+    assert merged[0]["memoria_cumprimento"] is True
+    assert merged[0]["form"]["entidade_devedora"] == "SPPREV"
+    assert merged[0]["form"]["principal_liquido"] == "10,00"
+    assert merged[1]["source"] == "coleta_cumprimento"
     assert merged[1]["requerente"] == "Outra Pessoa"
+    assert merged[1]["total_liquido"] == 0

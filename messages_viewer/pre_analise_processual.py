@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from http.client import RemoteDisconnected
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -142,6 +142,32 @@ def pre_analise_api_token() -> str | None:
 
 def is_configured() -> bool:
     return bool(pre_analise_api_base() and pre_analise_api_token())
+
+
+def cloud_processar_url() -> str | None:
+    """URL da 2ª API na mesma cloud (porta 8010): POST /v1/processar."""
+    explicit = (os.getenv("CLOUD_PROCESSAR_URL") or "").strip()
+    if explicit:
+        return explicit
+    base = pre_analise_api_base()
+    if not base:
+        return None
+    # Mesmo host de PRE_ANALISE_API_URL, porta 8010.
+    parsed = urlparse(base)
+    host = parsed.hostname
+    if not host:
+        return None
+    netloc = f"{host}:8010"
+    return urlunparse((parsed.scheme or "http", netloc, "/v1/processar", "", "", ""))
+
+
+def cloud_api_key() -> str | None:
+    key = (os.getenv("CLOUD_API_KEY") or "").strip()
+    return key or None
+
+
+def is_cloud_processar_configured() -> bool:
+    return bool(cloud_processar_url() and cloud_api_key())
 
 
 def api_health() -> tuple[dict, int]:
@@ -288,6 +314,87 @@ def proxy_pre_analise_api_request(
     if code in (200, 201, 202, 400, 403, 404, 409, 422, 500):
         return out, code
     return out, 502
+
+
+def disparar_cloud_processar(
+    *,
+    processo: str,
+    requerente: str,
+    incidente: str | None,
+) -> tuple[dict[str, Any], int]:
+    """
+    Segunda requisição (mesma cloud, porta 8010):
+    POST /v1/processar  Authorization: Bearer CLOUD_API_KEY
+    """
+    url = cloud_processar_url()
+    token = cloud_api_key()
+    if not url or not token:
+        return (
+            {
+                "ok": False,
+                "error": (
+                    "API cloud /v1/processar não configurada. "
+                    "Defina CLOUD_API_KEY (e opcionalmente CLOUD_PROCESSAR_URL) no .env."
+                ),
+            },
+            503,
+        )
+
+    payload = {
+        "processo": processo,
+        "requerente": requerente,
+        "incidente": incidente if incidente else None,
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {token}",
+    }
+    req = Request(url, data=body, method="POST", headers=headers)
+    # /v1/processar é síncrono e costuma levar ~60–90s; não usar o timeout curto da pré-análise.
+    try:
+        req_timeout = int((os.getenv("CLOUD_PROCESSAR_TIMEOUT") or "120").strip())
+    except ValueError:
+        req_timeout = 120
+    req_timeout = max(30, min(req_timeout, 300))
+    try:
+        with urlopen(req, timeout=req_timeout) as resp:
+            raw = resp.read()
+            code = resp.getcode()
+    except HTTPError as e:
+        raw = e.read()
+        code = e.code
+    except (URLError, RemoteDisconnected, ConnectionResetError, TimeoutError, socket.timeout, OSError) as e:
+        return _api_connection_error(url, e)
+    try:
+        out = json.loads(raw.decode("utf-8")) if raw else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        text = ""
+        try:
+            text = raw.decode("utf-8", errors="replace")[:300]
+        except Exception:
+            text = ""
+        return (
+            {
+                "ok": False,
+                "error": "Resposta inválida da API cloud /v1/processar (JSON esperado).",
+                "raw": text or None,
+            },
+            502,
+        )
+    if not isinstance(out, dict):
+        out = {"ok": code in (200, 201, 202), "data": out}
+    if code in (200, 201, 202):
+        out.setdefault("ok", True)
+        return out, code
+    err = (
+        out.get("mensagem")
+        or out.get("detail")
+        or out.get("error")
+        or f"API cloud /v1/processar retornou HTTP {code}."
+    )
+    return {"ok": False, "error": str(err), "api": out}, code if code >= 400 else 502
 
 
 def _status_is_terminal(status: str | None) -> bool:
@@ -889,6 +996,26 @@ def iniciar_caso(
         body=body,
     )
 
+    # 2ª requisição: mesma cloud, porta 8010 — independente do sucesso da 1ª
+    # no sentido de sempre disparar após validação; se a 1ª falhar, ainda assim
+    # tentamos a 2ª (e vice-versa o resultado da 1ª continua a mandar no ok).
+    cloud_out, cloud_code = disparar_cloud_processar(
+        processo=processo,
+        requerente=nome,
+        incidente=incidente or None,
+    )
+    cloud_ok = cloud_code in (200, 201, 202) and bool(cloud_out.get("ok", True))
+    cloud_aviso = None
+    if not cloud_ok:
+        cloud_aviso = (
+            "Pré-análise cloud :8010 (/v1/processar): "
+            + str(
+                cloud_out.get("error")
+                or cloud_out.get("mensagem")
+                or f"HTTP {cloud_code}"
+            )
+        )
+
     if api_code not in (200, 201, 202):
         err = (
             api_out.get("mensagem")
@@ -896,12 +1023,27 @@ def iniciar_caso(
             or api_out.get("error")
             or "Não foi possível iniciar a pré-análise."
         )
-        return {"ok": False, "error": str(err), "api": api_out}, api_code if api_code >= 400 else 502
+        resp_err: dict[str, Any] = {
+            "ok": False,
+            "error": str(err),
+            "api": api_out,
+            "cloud_processar": cloud_out,
+            "cloud_processar_ok": cloud_ok,
+        }
+        if cloud_aviso:
+            resp_err["aviso"] = cloud_aviso
+        return resp_err, api_code if api_code >= 400 else 502
 
     caso_id = str(api_out.get("caso_id") or "").strip()
     if not caso_id:
         return (
-            {"ok": False, "error": "API não retornou caso_id.", "api": api_out},
+            {
+                "ok": False,
+                "error": "API não retornou caso_id.",
+                "api": api_out,
+                "cloud_processar": cloud_out,
+                "cloud_processar_ok": cloud_ok,
+            },
             502,
         )
 
@@ -941,11 +1083,14 @@ def iniciar_caso(
         "id_externo": id_externo,
         "status": status,
         "mensagem": mensagem,
+        "cloud_processar_ok": cloud_ok,
+        "cloud_processar": cloud_out,
     }
     if api_out.get("reutilizado") or api_out.get("ja_existia"):
         out["reutilizado"] = True
-    if aviso_lookup:
-        out["aviso"] = aviso_lookup
+    avisos = [a for a in (aviso_lookup, cloud_aviso) if a]
+    if avisos:
+        out["aviso"] = " ".join(avisos)
     return out, 200
 
 

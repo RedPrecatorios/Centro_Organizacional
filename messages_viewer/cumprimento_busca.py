@@ -253,37 +253,87 @@ def _chaves_linha(row: dict) -> list[tuple[str, str]]:
     ]
 
 
-def mesclar_sem_duplicar(existentes: list[dict], novos: list[dict]) -> list[dict]:
-    """Não repete o mesmo nome+processo.
+def eh_memoria_de_cumprimento(row: dict) -> bool:
+    """Memória gravada pelo cumprimento, sem incidente nem id de precatório.
 
-    Se a coleta e a memória/cadastro coincidem, **prefere ``coleta_cumprimento``**
-    (senão o id negativo da memória desativa «Atualizar Cálculo» e sobra «Análise»).
+    A chave estável é ``id_coleta_cumprimento``. Linhas antigas do mesmo robô
+    ficam só com ``feito_por = CMP_CALC``.
+    """
+    coleta = row.get("id_coleta_cumprimento")
+    if coleta not in (None, "", 0):
+        return True
+    return str(row.get("feito_por") or "").strip().upper() == "CMP_CALC"
+
+
+def combinar_memoria_com_coleta(memoria: dict, coleta: dict) -> dict:
+    """Mantém o líquido já gravado e anexa o formulário da coleta."""
+    merged = dict(memoria)
+    for key in (
+        "form",
+        "calculo_completo",
+        "cpf",
+        "nome_complementar",
+        "requerente_coleta",
+    ):
+        valor = coleta.get(key)
+        if valor not in (None, "", {}):
+            merged[key] = valor
+    if not merged.get("id_coleta_cumprimento") and coleta.get("id_coleta_cumprimento") not in (
+        None,
+        "",
+    ):
+        merged["id_coleta_cumprimento"] = coleta.get("id_coleta_cumprimento")
+    merged["memoria_cumprimento"] = True
+    if not merged.get("source"):
+        merged["source"] = "memoria_calculo"
+    return merged
+
+
+def mesclar_sem_duplicar(existentes: list[dict], novos: list[dict]) -> list[dict]:
+    """Não repete o mesmo nome+processo nem o mesmo id da coleta.
+
+    Se a memória do cumprimento e a coleta coincidem, ficam os valores da
+    memória. A coleta com zero só entra quando ainda não há memória.
     """
     known: set[tuple[str, str]] = set()
     known_ids: set[int] = set()
     out: list[dict] = []
 
+    def _coleta_int(row: dict) -> int | None:
+        coleta_id = row.get("id_coleta_cumprimento")
+        try:
+            if coleta_id is None or coleta_id == "":
+                return None
+            return int(coleta_id)
+        except (TypeError, ValueError):
+            return None
+
     def _registrar(row: dict) -> None:
         for chave in _chaves_linha(row):
             known.add(chave)
-        coleta_id = row.get("id_coleta_cumprimento")
-        try:
-            if coleta_id is not None:
-                known_ids.add(int(coleta_id))
-        except (TypeError, ValueError):
-            pass
+        coleta_int = _coleta_int(row)
+        if coleta_int is not None:
+            known_ids.add(coleta_int)
+
+    def _juntar_na_memoria(idx: int, coleta: dict) -> None:
+        atual = out[idx]
+        if atual.get("source") == "coleta_cumprimento":
+            return
+        out[idx] = combinar_memoria_com_coleta(atual, coleta)
+        _registrar(out[idx])
 
     for row in existentes:
         out.append(row)
         _registrar(row)
 
     for row in novos:
-        coleta_id = row.get("id_coleta_cumprimento")
-        try:
-            coleta_int = int(coleta_id) if coleta_id is not None else None
-        except (TypeError, ValueError):
-            coleta_int = None
+        coleta_int = _coleta_int(row)
         if coleta_int is not None and coleta_int in known_ids:
+            if row.get("source") == "coleta_cumprimento":
+                for i, old in enumerate(out):
+                    if _coleta_int(old) == coleta_int:
+                        _juntar_na_memoria(i, row)
+                        break
             continue
         chaves = _chaves_linha(row)
         match_idx: int | None = None
@@ -294,13 +344,11 @@ def mesclar_sem_duplicar(existentes: list[dict], novos: list[dict]) -> list[dict
                     match_idx = i
                     break
         if match_idx is not None:
-            old = out[match_idx]
             if (
                 row.get("source") == "coleta_cumprimento"
-                and old.get("source") != "coleta_cumprimento"
+                and out[match_idx].get("source") != "coleta_cumprimento"
             ):
-                out[match_idx] = row
-                _registrar(row)
+                _juntar_na_memoria(match_idx, row)
             continue
         _registrar(row)
         out.append(row)

@@ -102,8 +102,14 @@ from messages_viewer.levantamento_processual import (
     api_health as levantamento_api_health,
     create_search as levantamento_create_search,
     get_search as levantamento_get_search,
+    list_searches as levantamento_list_searches,
     is_configured as levantamento_api_configured,
     poll_interval_ms as levantamento_poll_interval_ms,
+)
+from messages_viewer.monday_precheck import (
+    incluir_apos_precheck as levantamento_incluir_apos_precheck,
+    is_configured as monday_precheck_configured,
+    precheck_casos as levantamento_precheck_casos,
 )
 from messages_viewer.solicitacao_inclusao import (
     arquivar as solicitacao_inclusao_arquivar,
@@ -163,6 +169,7 @@ from messages_viewer.memoria_drive_planilha import (
 )
 from messages_viewer.cumprimento_busca import (
     buscar_cumprimentos,
+    eh_memoria_de_cumprimento,
     incidente_lista_ampla,
     incidente_match_variants,
     mesclar_sem_duplicar,
@@ -196,6 +203,11 @@ from messages_viewer.plataforma_auth import (
     solicitante_from_user,
     user_can_tab,
     wsgi_eda_session_guard,
+)
+from messages_viewer.selo_totp import (
+    add_account as selo_add_account,
+    delete_account as selo_delete_account,
+    fetch_codes as selo_fetch_codes,
 )
 
 app.register_blueprint(auth_bp, url_prefix="/auth")
@@ -2292,11 +2304,22 @@ def levantamento_processual_page():
     if levantamento_api_configured():
         health_out, _ = levantamento_api_health()
         health_payload = health_out
+    u = current_user()
     return render_template(
         "levantamento_processual.html",
         levantamento_api_configured=levantamento_api_configured(),
         levantamento_api_healthy=bool(health_payload.get("healthy")),
         levantamento_poll_interval_ms=levantamento_poll_interval_ms(),
+        monday_requests_configured=solicitacao_inclusao_configured(),
+        monday_precheck_configured=monday_precheck_configured(),
+        solicitante=solicitante_from_user(u),
+        poll_interval_ms=solicitacao_inclusao_poll_ms(),
+        create_cooldown_ms=solicitacao_inclusao_cooldown_ms(),
+        status_catalog=solicitacao_inclusao_status_catalog(),
+        can_view_autos=solicitacao_inclusao_can_view_autos(u),
+        can_view_gemini_details=solicitacao_inclusao_can_view_gemini_details(u),
+        can_view_other_solicitacoes=solicitacao_inclusao_can_view_other_solicitacoes(u),
+        pt_display=solicitacao_inclusao_pt_display(),
     )
 
 
@@ -2315,7 +2338,48 @@ def api_levantamento_iniciar():
         data.get("nome"),
         cpf=data.get("cpf"),
         processo=data.get("processo"),
+        incidente=data.get("incidente"),
     )
+    return jsonify(out), code
+
+
+@app.route("/api/levantamento-processual/pre-checagem-monday", methods=["POST"])
+def api_levantamento_precheck_monday():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    casos = data.get("casos") or data.get("items") or []
+    if isinstance(data.get("processo"), str) or data.get("is_cumprimento"):
+        casos = [data]
+    if not isinstance(casos, list):
+        return jsonify({"ok": False, "error": "Informe a lista de casos."}), 400
+    out = levantamento_precheck_casos(casos, current_user(), mutate=False)
+    return jsonify(out), (200 if out.get("ok") else 400)
+
+
+@app.route("/api/levantamento-processual/incluir", methods=["POST"])
+def api_levantamento_incluir():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    casos = data.get("casos") or data.get("items") or []
+    if not isinstance(casos, list) or not casos:
+        return jsonify({"ok": False, "error": "Informe os casos a incluir."}), 400
+    try:
+        out, code = levantamento_incluir_apos_precheck(
+            casos,
+            current_user(),
+            confirmar_duplicado=bool(data.get("confirmar_duplicado")),
+        )
+        return jsonify(out), code
+    except Exception as exc:
+        app.logger.exception("levantamento-processual/incluir")
+        return jsonify({"ok": False, "error": str(exc), "items": []}), 500
+
+
+@app.route("/api/levantamento-processual/jobs")
+def api_levantamento_jobs():
+    out, code = levantamento_list_searches(limit=request.args.get("limit", 50))
     return jsonify(out), code
 
 
@@ -2515,19 +2579,7 @@ def api_autos_export_file(job_id: str):
 
 @app.route("/solicitacao-inclusao")
 def solicitacao_inclusao_page():
-    u = current_user()
-    return render_template(
-        "solicitacao_inclusao.html",
-        monday_requests_configured=solicitacao_inclusao_configured(),
-        solicitante=solicitante_from_user(u),
-        poll_interval_ms=solicitacao_inclusao_poll_ms(),
-        create_cooldown_ms=solicitacao_inclusao_cooldown_ms(),
-        status_catalog=solicitacao_inclusao_status_catalog(),
-        can_view_autos=solicitacao_inclusao_can_view_autos(u),
-        can_view_gemini_details=solicitacao_inclusao_can_view_gemini_details(u),
-        can_view_other_solicitacoes=solicitacao_inclusao_can_view_other_solicitacoes(u),
-        pt_display=solicitacao_inclusao_pt_display(),
-    )
+    return redirect(url_for("levantamento_processual_page"), code=302)
 
 
 @app.route("/api/solicitacao-inclusao", methods=["GET"], endpoint="api_solicitacao_inclusao_listar")
@@ -2716,6 +2768,10 @@ def api_memoria_buscar():
     - Processo + incidente: igualdade em TRIM de numero_de_processo e
       TRIM de numero_do_incidente (incidente vazio = todos os incidentes
       do processo; o bloqueio de pipeline só corre por linha/incidente).
+    Cumprimento (id_coleta_cumprimento ou feito_por CMP_CALC) só entra
+    quando pesquisar_cumprimentos está ativo. Com a caixa e um incidente
+    digitado, o incidente filtra o precatório e o cumprimento do mesmo
+    processo entra à parte, porque não tem número de incidente.
     Não combinar parâmetros dos dois modos.
     """
     nome = (request.args.get("nome") or request.args.get("q") or "").strip()
@@ -2742,6 +2798,9 @@ def api_memoria_buscar():
             ),
             400,
         )
+    # 0 e 00 não são incidente: listam o processo inteiro, como o campo vazio.
+    if incidente_lista_ampla(inc):
+        inc = ""
     if proc:
         use_process = True
     elif len(nome) >= 2:
@@ -2798,7 +2857,9 @@ def api_memoria_buscar():
                 incidente=inc,
             )
         # Check duplo: só com incidente informado (sem incidente → filtro por linha).
-        if inc:
+        # Com «Pesquisar Cumprimentos» a resposta segue, para a memória do
+        # cumprimento (sem incidente) não sumir atrás do bloqueio do precatório.
+        if inc and not pesquisar_cumprimentos:
             ctl = _lookup_controle_coleta_status(proc, inc)
             if ctl and _pipeline_coleta_status_bloqueia(ctl.get("status")):
                 return _pipeline_coleta_memoria_response(
@@ -2852,19 +2913,37 @@ def api_memoria_buscar():
             }
         )
 
+    # Cumprimento não tem incidente. Fora da caixa, estas linhas não aparecem.
+    cumprimento_sql = (
+        "(id_coleta_cumprimento IS NOT NULL "
+        "OR TRIM(COALESCE(feito_por, '')) = 'CMP_CALC')"
+    )
+    fora_cumprimento_sql = "" if pesquisar_cumprimentos else f" AND NOT {cumprimento_sql}"
+
     if use_process:
         if inc:
             inc_sql, inc_params = _sql_trim_in(
                 "numero_do_incidente", incidente_match_variants(inc)
             )
-            where_sql = f"""
+            if pesquisar_cumprimentos:
+                where_sql = f"""
+        TRIM(COALESCE(numero_de_processo, '')) = %s
+        AND (
+            {inc_sql}
+            OR {cumprimento_sql}
+        )
+        """
+            else:
+                where_sql = f"""
         TRIM(COALESCE(numero_de_processo, '')) = %s
         AND {inc_sql}
+        {fora_cumprimento_sql}
         """
             params_exec: list = [proc, *inc_params]
         else:
-            where_sql = """
+            where_sql = f"""
         TRIM(COALESCE(numero_de_processo, '')) = %s
+        {fora_cumprimento_sql}
         """
             params_exec = [proc]
         order_by = """
@@ -2875,10 +2954,11 @@ def api_memoria_buscar():
         """
     else:
         like_pat = f"%{esc_like(nome)}%"
-        where_sql = """
+        where_sql = f"""
         requerente IS NOT NULL
         AND TRIM(requerente) <> ''
         AND requerente LIKE %s
+        {fora_cumprimento_sql}
         """
         params_exec = [like_pat]
         order_by = """
@@ -2909,6 +2989,7 @@ def api_memoria_buscar():
         SELECT
             id,
             id_precainfosnew,
+            id_coleta_cumprimento,
             requerente,
             numero_de_processo,
             numero_do_incidente,
@@ -2974,6 +3055,9 @@ def api_memoria_buscar():
             500,
         )
     if results:
+        for row in results:
+            if eh_memoria_de_cumprimento(row):
+                row["memoria_cumprimento"] = True
         results = _reconcile_stale_precainfos_ids(results)
         results = _apply_pipeline_coleta_blocks(results)
         _enrich_results_precainfos_numero_de_meses(results)
@@ -3686,15 +3770,22 @@ def api_memoria_planilha_drive():
         )
     except Exception as e:
         print(f"[memoria-calculo] planilha-drive find: {e}")
-        return jsonify({"ok": False, "error": f"Falha ao consultar o Drive: {e}"}), 502
+        err_txt = str(e)
+        if "internal error" in err_txt.lower() or "HttpError 5" in err_txt:
+            msg = (
+                "O Google Drive respondeu com erro temporário (500). "
+                "Aguarde alguns segundos e tente de novo."
+            )
+        else:
+            msg = f"Falha ao consultar o Drive: {e}"
+        return jsonify({"ok": False, "error": msg}), 502
     if not found:
         return (
             jsonify(
                 {
                     "ok": False,
                     "error": (
-                        "Nenhuma planilha encontrada no Drive para este processo "
-                        "(últimos 90 dias)."
+                        "Nenhuma planilha encontrada no Drive para este processo."
                     ),
                 }
             ),
@@ -3745,7 +3836,15 @@ def api_memoria_planilha_drive_download():
         content, filename = memoria_drive_download_bytes(file_id)
     except Exception as e:
         print(f"[memoria-calculo] planilha-drive download: {e}")
-        return jsonify({"ok": False, "error": f"Falha ao descarregar do Drive: {e}"}), 502
+        err_txt = str(e)
+        if "internal error" in err_txt.lower() or "HttpError 5" in err_txt:
+            msg = (
+                "O Google Drive respondeu com erro temporário (500). "
+                "Aguarde alguns segundos e tente de novo."
+            )
+        else:
+            msg = f"Falha ao descarregar do Drive: {e}"
+        return jsonify({"ok": False, "error": msg}), 502
     from io import BytesIO
     from urllib.parse import quote
 
@@ -4394,6 +4493,61 @@ def api_memoria_controle_coleta_status():
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────
+@app.route("/2fa")
+def totp_2fa_page():
+    return render_template("totp_2fa.html")
+
+
+@app.route("/api/totp/codes", methods=["GET"], endpoint="api_totp_codes")
+def api_totp_codes():
+    """Lista contas TOTP e códigos atuais (painel 2FA)."""
+    payload = selo_fetch_codes()
+    if not payload.get("ok"):
+        return jsonify(
+            {
+                "ok": False,
+                "error": payload.get("error") or "Falha ao obter códigos",
+                "accounts": [],
+            }
+        ), int(payload.get("status") or 503)
+    return jsonify(
+        {
+            "ok": True,
+            "server_time": payload.get("server_time"),
+            "accounts": payload.get("accounts") or [],
+        }
+    )
+
+
+@app.route("/api/totp/accounts", methods=["POST"], endpoint="api_totp_accounts_create")
+def api_totp_accounts_create():
+    data = request.get_json(silent=True) or {}
+    payload = selo_add_account(
+        str(data.get("secret") or ""),
+        str(data.get("name") or ""),
+        str(data.get("issuer") or ""),
+    )
+    if not payload.get("ok"):
+        return jsonify(
+            {"ok": False, "error": payload.get("error") or "Não foi possível adicionar"}
+        ), int(payload.get("status") or 400)
+    return jsonify({"ok": True, "account": payload.get("account")}), 201
+
+
+@app.route(
+    "/api/totp/accounts/<account_id>",
+    methods=["DELETE"],
+    endpoint="api_totp_accounts_delete",
+)
+def api_totp_accounts_delete(account_id: str):
+    payload = selo_delete_account(account_id)
+    if not payload.get("ok"):
+        return jsonify(
+            {"ok": False, "error": payload.get("error") or "Não foi possível remover"}
+        ), int(payload.get("status") or 400)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/summary")
 def get_summary():
     """Métricas agregadas para a capa (um pedido, inclui lista de instâncias)."""

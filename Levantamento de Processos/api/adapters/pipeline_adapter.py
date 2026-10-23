@@ -10,7 +10,7 @@ from tjsp_pipeline.scraper.search_url import (
     build_search_query,
     normalize_party_name,
 )
-from tjsp_pipeline.scraper.show_page import PrecatorioRecord
+from tjsp_pipeline.scraper.show_page import PrecatorioRecord, is_rpv_text, record_is_rpv
 
 
 def normalize_nome(nome: str) -> str:
@@ -26,17 +26,27 @@ def resolve_search_query(
     nome: str | None = None,
     cpf: str | None = None,
     processo: str | None = None,
+    incidente: str | None = None,
 ) -> SearchQuery:
-    return build_search_query(nome=nome, cpf=cpf, processo=processo)
+    return build_search_query(
+        nome=nome, cpf=cpf, processo=processo, incidente=incidente
+    )
 
 
-def scrape_by_query(settings: Settings, query: SearchQuery) -> ScrapeResult:
+def scrape_by_query(
+    settings: Settings,
+    query: SearchQuery,
+    *,
+    on_progress=None,
+) -> ScrapeResult:
     return scrape_precatorios(
         settings,
         search_url=query.url,
         search_kind=query.kind.value,
         search_label=query.label,
         filter_nome=query.filter_nome,
+        filter_incidente=query.filter_incidente,
+        on_progress=on_progress,
     )
 
 
@@ -52,6 +62,8 @@ def enrich_for_search(
     search_url: str,
     links_count: int,
     prior_errors: list[str] | None = None,
+    on_log_line=None,
+    on_tick=None,
 ) -> PipelineResult:
     """
     Toda pesquisa da API: REFACTOR em --reprocessamento + persistência + API_CALCULO
@@ -70,6 +82,8 @@ def enrich_for_search(
         links_count=links_count,
         prior_errors=prior_errors,
         refactor_mode="reprocessamento",
+        on_log_line=on_log_line,
+        on_tick=on_tick,
     )
 
 
