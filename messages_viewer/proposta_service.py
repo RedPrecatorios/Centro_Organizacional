@@ -210,13 +210,10 @@ def buscar_por_processo_incidente(processo: str, incidente: str = "") -> dict[st
             sel.append("NULL AS advogado")
 
         if inc and f_inc:
-            where = (
-                f"TRIM(COALESCE(`{f_proc}`, '')) = %s "
-                f"AND TRIM(COALESCE(`{f_inc}`, '')) = %s"
-            )
+            where = f"`{f_proc}` = %s AND `{f_inc}` = %s"
             params = (proc, inc)
         else:
-            where = f"TRIM(COALESCE(`{f_proc}`, '')) = %s"
+            where = f"`{f_proc}` = %s"
             params = (proc,)
 
         cur.execute(

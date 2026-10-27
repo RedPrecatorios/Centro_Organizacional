@@ -530,8 +530,8 @@ def resolve_id_externo(
                 f"""
                 SELECT id
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                WHERE `{f_proc}` = %s
+                  AND `{f_inc}` = %s
                 ORDER BY id DESC
                 LIMIT 2
                 """,
@@ -542,7 +542,7 @@ def resolve_id_externo(
                 f"""
                 SELECT id
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                 ORDER BY id DESC
                 LIMIT 2
                 """,

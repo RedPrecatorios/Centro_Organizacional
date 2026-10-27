@@ -124,7 +124,7 @@ class PrecainfosReader:
             SELECT {cols}
             FROM `{PRECAINFOSNEW_TABLE}`
             WHERE `Numero_de_Processo` = %s
-              AND CAST(`Numero_do_Incidente` AS CHAR) IN ({placeholders})
+              AND `Numero_do_Incidente` IN ({placeholders})
             ORDER BY id DESC
             LIMIT 1
         """

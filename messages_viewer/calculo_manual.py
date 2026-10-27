@@ -411,8 +411,8 @@ def _find_existing_id(
             found = _one(
                 f"""
                 SELECT id FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) IN ({ph})
+                WHERE `{f_proc}` = %s
+                  AND `{f_inc}` IN ({ph})
                 ORDER BY id DESC LIMIT 1
                 """,
                 tuple([proc] + variants),
@@ -421,8 +421,8 @@ def _find_existing_id(
             found = _one(
                 f"""
                 SELECT id FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                  AND TRIM(COALESCE(`{f_inc}`, '')) IN ('', '0', '00')
+                WHERE `{f_proc}` = %s
+                  AND `{f_inc}` IN ('', '0', '00')
                 ORDER BY id DESC LIMIT 1
                 """,
                 (proc,),
@@ -439,7 +439,7 @@ def _find_existing_id(
                     f"""
                     SELECT id FROM precainfosnew
                     WHERE REPLACE(REPLACE(REPLACE(TRIM(COALESCE(`{f_proc}`, '')), '-', ''), '.', ''), ' ', '') = %s
-                      AND TRIM(COALESCE(`{f_inc}`, '')) IN ({ph})
+                      AND `{f_inc}` IN ({ph})
                     ORDER BY id DESC LIMIT 1
                     """,
                     tuple([proc_d] + variants),
@@ -449,7 +449,7 @@ def _find_existing_id(
                     f"""
                     SELECT id FROM precainfosnew
                     WHERE REPLACE(REPLACE(REPLACE(TRIM(COALESCE(`{f_proc}`, '')), '-', ''), '.', ''), ' ', '') = %s
-                      AND TRIM(COALESCE(`{f_inc}`, '')) IN ('', '0', '00')
+                      AND `{f_inc}` IN ('', '0', '00')
                     ORDER BY id DESC LIMIT 1
                     """,
                     (proc_d,),
@@ -461,7 +461,7 @@ def _find_existing_id(
     found = _one(
         f"""
         SELECT id FROM precainfosnew
-        WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+        WHERE `{f_proc}` = %s
         ORDER BY id DESC LIMIT 1
         """,
         (proc,),

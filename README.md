@@ -172,6 +172,35 @@ O Centro chama esta API via `CALCULO_ATUALIZACAO_API_URL` no `.env`.
 
 ---
 
+## Buscas em `precainfosnew`
+
+A tabela `flaskdb.precainfosnew` (MySQL `159.223.109.249`) é compartilhada pelo painel, pelo levantamento, pela API de cálculo e pelo REFACTOR. Em 27/10/2026 foram criados três índices, sem coluna nova:
+
+| Índice | Colunas |
+|--------|---------|
+| `idx_processo_codigo` | `Processo_Codigo` |
+| `idx_processo_incidente` | `Numero_de_Processo`, `Numero_do_Incidente` |
+| `idx_requerente_principal` | `Requerente`, `Processo_Principal` |
+
+O MariaDB só usa o índice quando o `WHERE` compara a coluna direto. `TRIM()`, `CAST()` ou `REPLACE()` em cima da coluna fazem a consulta ler a tabela inteira (329 mil linhas). Com muitas dessas leituras ao mesmo tempo, a pesquisa do painel passava de minutos.
+
+As buscas por processo e incidente passaram a comparar a coluna direto:
+
+- `messages_viewer/calculo_manual.py`
+- `messages_viewer/pre_analise_processual.py`
+- `messages_viewer/pre_analise_ficha.py`
+- `messages_viewer/proposta_service.py`
+- `messages_viewer/blacklist_pagina.py` (processo e incidente; a busca só por CPF não usa estes índices)
+- `Levantamento de Processos/api/services/precainfos_reader.py`
+- `API_CALCULO/app/memoria_calculo_sync.py` — tenta o índice primeiro; a varredura com `REPLACE` só corre se não achar
+- `REFACTOR_TJSP/src/repositories/precainfosnew_persistence_repository.py`
+
+Continuam de fora destes índices: nome com `Requerente LIKE '%texto%'` e a busca só por CPF. A pesquisa de cumprimentos lê outra tabela.
+
+O painel (`centro-organizacional`) já foi reiniciado com esse código. A API de cálculo, o levantamento processual e um processo do REFACTOR que já estava no ar só carregam a consulta nova no próximo início.
+
+---
+
 ## 6) EDA Diário
 
 Montado no WSGI do Centro em `/eda/` (`eda_integracao.py`). Não é um systemd separado: sobe junto com `centro-organizacional`.

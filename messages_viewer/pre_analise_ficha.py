@@ -948,8 +948,8 @@ def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None
                 cur.execute(
                     f"""
                     SELECT * FROM precainfosnew
-                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-                      AND TRIM(COALESCE(`{f_inc}`, '')) = %s
+                    WHERE `{f_proc}` = %s
+                      AND `{f_inc}` = %s
                     ORDER BY id DESC LIMIT 5
                     """,
                     (cumprimento, inc_var),
@@ -961,7 +961,7 @@ def _precainfos_fetch(cumprimento: str, incidente: str) -> dict[str, Any] | None
             cur.execute(
                 f"""
                 SELECT * FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                 ORDER BY id DESC LIMIT 5
                 """,
                 (cumprimento,),

@@ -375,12 +375,12 @@ def where_precainfos(criterios: dict[str, str], colunas: dict[str, str]) -> tupl
     if criterios.get("processo"):
         if not colunas.get("processo"):
             raise ValueError("A base não tem coluna de processo.")
-        partes.append(f"TRIM(COALESCE(`{colunas['processo']}`, '')) = %s")
+        partes.append(f"`{colunas['processo']}` = %s")
         params.append(criterios["processo"])
     if criterios.get("incidente"):
         if not colunas.get("incidente"):
             raise ValueError("A base não tem coluna de incidente.")
-        partes.append(f"TRIM(COALESCE(`{colunas['incidente']}`, '')) = %s")
+        partes.append(f"`{colunas['incidente']}` = %s")
         params.append(criterios["incidente"])
     if not partes:
         raise ValueError("Informe o CPF ou o número do processo.")
