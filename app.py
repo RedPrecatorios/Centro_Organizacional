@@ -525,10 +525,10 @@ def _find_precainfos_id_by_caso(
     if not f_proc or not f_req:
         return None
     params: list = [proc]
-    where = [f"TRIM(COALESCE(`{f_proc}`, '')) = %s"]
+    where = [f"`{f_proc}` = %s"]
     inc = str(incidente or "").strip()
     if inc and f_inc:
-        inc_sql, inc_params = _sql_trim_in(f"`{f_inc}`", incidente_match_variants(inc))
+        inc_sql, inc_params = _sql_eq_in(f"`{f_inc}`", incidente_match_variants(inc))
         where.append(inc_sql)
         params.extend(inc_params)
     cur.execute(
@@ -866,7 +866,7 @@ def _append_missing_precainfos_creditors(
         )
         req_sql = f"`{f_req}` AS requerente" if f_req else "NULL AS requerente"
         if incidente and f_inc:
-            inc_sql, inc_params = _sql_trim_in(
+            inc_sql, inc_params = _sql_eq_in(
                 f"`{f_inc}`", incidente_match_variants(incidente)
             )
             cur.execute(
@@ -878,7 +878,7 @@ def _append_missing_precainfos_creditors(
                        {calc_sql},
                        {meses_sql}
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                   AND {inc_sql}
                 ORDER BY id DESC
                 LIMIT 20
@@ -898,14 +898,26 @@ def _append_missing_precainfos_creditors(
                        {calc_sql},
                        {meses_sql}
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                 ORDER BY id DESC
                 LIMIT 20
                 """,
                 (processo,),
             )
+        fetched = cur.fetchall() or []
+        _completar_blacklist(
+            blacklist,
+            [
+                {
+                    "numero_de_processo": r.get("numero_de_processo"),
+                    "numero_do_incidente": r.get("numero_do_incidente"),
+                    "requerente": r.get("requerente"),
+                }
+                for r in fetched
+            ],
+        )
         extra: list[dict] = []
-        for r in cur.fetchall() or []:
+        for r in fetched:
             try:
                 pid = int(r.get("id")) if r.get("id") is not None else None
             except (TypeError, ValueError):
@@ -1189,12 +1201,153 @@ def _pipeline_coleta_status_aviso(status: object) -> bool:
     return normalized in avisos
 
 
+def _sql_eq_in(column_sql: str, values: list[str]) -> tuple[str, list[str]]:
+    """``col IN (...)`` sem função na coluna, para o índice poder ser usado."""
+    limpos: list[str] = []
+    vistos: set[str] = set()
+    for value in values:
+        texto = str(value)
+        if texto in vistos:
+            continue
+        vistos.add(texto)
+        limpos.append(texto)
+    if not limpos:
+        return "1=0", []
+    placeholders = ", ".join(["%s"] * len(limpos))
+    return f"{column_sql} IN ({placeholders})", limpos
+
+
 def _sql_trim_in(column_sql: str, values: list[str]) -> tuple[str, list[str]]:
     """``TRIM(col) IN (...)`` com placeholders; lista vazia → predicado falso."""
     if not values:
         return "1=0", []
     placeholders = ", ".join(["%s"] * len(values))
     return f"TRIM(COALESCE({column_sql}, '')) IN ({placeholders})", list(values)
+
+
+def _controle_coleta_colunas(cur) -> tuple[str, str, str] | None:
+    cur.execute("SHOW TABLES LIKE 'controle_coleta_TJSP'")
+    if not cur.fetchone():
+        return None
+    cur.execute("SHOW COLUMNS FROM `controle_coleta_TJSP`")
+    raw_cols = cur.fetchall() or []
+    fields: set[str] = set()
+    for r in raw_cols:
+        if isinstance(r, dict):
+            nm = r.get("Field") or r.get("field")
+            if nm:
+                fields.add(str(nm))
+        else:
+            fields.add(str(r[0]))
+    f_proc = _pick_field(
+        fields,
+        "numero_de_processo",
+        "Numero_de_processo",
+        "Numero_de_Processo",
+        "processo",
+        "Processo",
+    )
+    f_inc = _pick_field(
+        fields,
+        "numero_do_incidente",
+        "Numero_do_incidente",
+        "Numero_do_Incidente",
+        "numero_de_incidente",
+        "Numero_de_incidente",
+        "incidente",
+        "Incidente",
+    )
+    f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
+    if not f_proc or not f_status or not f_inc:
+        return None
+    return f_proc, f_inc, f_status
+
+
+def _lookup_controle_coleta_status_many(
+    pares: list[tuple[str, str]],
+) -> dict[tuple[str, str], dict | None]:
+    """Uma consulta indexada para todos os pares processo+incidente.
+
+    Igualdade directa (com as variantes ``1`` / ``01`` / ``001``), sem
+    ``TRIM`` na coluna, para usar ``uq_processo_incidente_tipo``.
+    Soft-fail: devolve ``None`` em cada par se o flaskdb não responder.
+    """
+    wanted: list[tuple[str, str]] = []
+    vistos: set[tuple[str, str]] = set()
+    for processo, incidente in pares:
+        proc = str(processo or "").strip()
+        inc = str(incidente or "").strip()
+        if not proc or not inc or (proc, inc) in vistos:
+            continue
+        vistos.add((proc, inc))
+        wanted.append((proc, inc))
+    saida: dict[tuple[str, str], dict | None] = {par: None for par in wanted}
+    if not wanted:
+        return saida
+    cfg = _flask_mysql_config()
+    if not cfg:
+        return saida
+    conn = None
+    cur = None
+    try:
+        conn = mysql.connector.connect(
+            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
+        )
+        cur = conn.cursor(dictionary=True)
+        cols = _controle_coleta_colunas(cur)
+        if cols is None:
+            return saida
+        f_proc, f_inc, f_status = cols
+        tuplas_sql: list[str] = []
+        params: list[str] = []
+        for proc, inc in wanted:
+            for variante in incidente_match_variants(inc):
+                tuplas_sql.append("(%s, %s)")
+                params.extend([proc, variante])
+        if not tuplas_sql:
+            return saida
+        cur.execute(
+            f"""
+            SELECT `{f_proc}` AS numero_de_processo,
+                   `{f_inc}` AS numero_do_incidente,
+                   `{f_status}` AS status
+            FROM controle_coleta_TJSP
+            WHERE (`{f_proc}`, `{f_inc}`) IN ({", ".join(tuplas_sql)})
+            """,
+            tuple(params),
+        )
+        por_chave: dict[tuple[str, str], str] = {}
+        for row in cur.fetchall() or []:
+            proc = str(row.get("numero_de_processo") or "").strip()
+            inc_norm = normalizar_incidente(row.get("numero_do_incidente"))
+            if not inc_norm:
+                inc_norm = str(row.get("numero_do_incidente") or "").strip()
+            status = str(row.get("status") or "").strip()
+            if not proc or not status:
+                continue
+            anterior = por_chave.get((proc, inc_norm))
+            if anterior is None or status > anterior:
+                por_chave[(proc, inc_norm)] = status
+        for proc, inc in wanted:
+            inc_norm = normalizar_incidente(inc) or inc
+            status = por_chave.get((proc, inc_norm))
+            if status:
+                saida[(proc, inc)] = {"status": status, "found": True}
+        return saida
+    except mysql.connector.Error as e:
+        print(f"[memoria-calculo] controle_coleta lookup falhou: {e}")
+        return saida
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
 
 
 def _lookup_controle_coleta_status(
@@ -1209,89 +1362,10 @@ def _lookup_controle_coleta_status(
     mesmo processo (evita bloquear um incidente apto por causa de outro).
     """
     proc = str(processo or "").strip()
-    if not proc:
-        return None
     inc = str(incidente or "").strip()
-    if not inc:
+    if not proc or not inc:
         return None
-    cfg = _flask_mysql_config()
-    if not cfg:
-        return None
-    conn = None
-    cur = None
-    try:
-        conn = mysql.connector.connect(
-            **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
-        )
-        cur = conn.cursor(dictionary=True)
-        cur.execute("SHOW TABLES LIKE 'controle_coleta_TJSP'")
-        if not cur.fetchone():
-            return None
-
-        cur.execute("SHOW COLUMNS FROM `controle_coleta_TJSP`")
-        raw_cols = cur.fetchall() or []
-        fields: set[str] = set()
-        for r in raw_cols:
-            if isinstance(r, dict):
-                nm = r.get("Field") or r.get("field")
-                if nm:
-                    fields.add(str(nm))
-            else:
-                fields.add(str(r[0]))
-
-        f_proc = _pick_field(
-            fields,
-            "numero_de_processo",
-            "Numero_de_processo",
-            "Numero_de_Processo",
-            "processo",
-            "Processo",
-        )
-        f_inc = _pick_field(
-            fields,
-            "numero_do_incidente",
-            "Numero_do_incidente",
-            "Numero_do_Incidente",
-            "numero_de_incidente",
-            "Numero_de_incidente",
-            "incidente",
-            "Incidente",
-        )
-        f_status = _pick_field(fields, "status", "Status", "situacao", "Situacao")
-        if not f_proc or not f_status or not f_inc:
-            return None
-
-        inc_sql, inc_params = _sql_trim_in(f"`{f_inc}`", incidente_match_variants(inc))
-        cur.execute(
-            f"""
-            SELECT `{f_status}` AS status
-            FROM controle_coleta_TJSP
-            WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
-              AND {inc_sql}
-            ORDER BY `{f_status}` DESC
-            LIMIT 1
-            """,
-            (proc, *inc_params),
-        )
-        row = cur.fetchone() or {}
-        status = row.get("status")
-        if status is None:
-            return None
-        return {"status": str(status).strip(), "found": True}
-    except mysql.connector.Error as e:
-        print(f"[memoria-calculo] controle_coleta lookup falhou: {e}")
-        return None
-    finally:
-        try:
-            if cur is not None:
-                cur.close()
-        except Exception:
-            pass
-        try:
-            if conn is not None:
-                conn.close()
-        except Exception:
-            pass
+    return _lookup_controle_coleta_status_many([(proc, inc)]).get((proc, inc))
 
 
 def _pipeline_coleta_result_row(
@@ -1367,8 +1441,16 @@ def _apply_pipeline_coleta_blocks(results: list[dict]) -> list[dict]:
     """
     if not results:
         return results
+    pares: list[tuple[str, str]] = []
+    for row in results:
+        if row.get("source") == "blacklist" or row.get("pipeline_blocked"):
+            continue
+        proc = str(row.get("numero_de_processo") or "").strip()
+        inc = str(row.get("numero_do_incidente") or "").strip()
+        if proc and inc:
+            pares.append((proc, inc))
+    encontrados = _lookup_controle_coleta_status_many(pares)
     out: list[dict] = []
-    cache: dict[tuple[str, str], dict | None] = {}
     for row in results:
         if row.get("source") == "blacklist" or row.get("pipeline_blocked"):
             out.append(row)
@@ -1378,10 +1460,7 @@ def _apply_pipeline_coleta_blocks(results: list[dict]) -> list[dict]:
         if not proc or not inc:
             out.append(row)
             continue
-        key = (proc, normalizar_incidente(inc) or inc)
-        if key not in cache:
-            cache[key] = _lookup_controle_coleta_status(proc, inc)
-        ctl = cache[key]
+        ctl = encontrados.get((proc, inc))
         if not ctl:
             out.append(row)
             continue
@@ -1417,7 +1496,46 @@ class _BlacklistAuditError(RuntimeError):
     pass
 
 
-def _load_memoria_blacklist() -> dict[str, dict[str, dict]]:
+def _blacklist_vazio() -> dict[str, dict[str, dict]]:
+    return {"PROCESSO_INCIDENTE": {}, "NOME": {}}
+
+
+def _chaves_blacklist_de_linhas(rows: list[dict]) -> tuple[list[str], list[str]]:
+    processos: list[str] = []
+    nomes: list[str] = []
+    vistos_proc: set[str] = set()
+    vistos_nome: set[str] = set()
+    for row in rows or []:
+        chave = _normalizar_blacklist_processo_incidente(
+            row.get("numero_de_processo"),
+            row.get("numero_do_incidente"),
+        )
+        if chave and chave not in vistos_proc:
+            vistos_proc.add(chave)
+            processos.append(chave)
+        for candidato in (
+            row.get("requerente"),
+            row.get("nome_complementar"),
+            row.get("requerente_coleta"),
+        ):
+            nome = _normalizar_blacklist_nome(candidato)
+            if nome and nome not in vistos_nome:
+                vistos_nome.add(nome)
+                nomes.append(nome)
+    return processos, nomes
+
+
+def _load_memoria_blacklist_chaves(
+    *,
+    processos: list[str] | None = None,
+    nomes: list[str] | None = None,
+) -> dict[str, dict[str, dict]]:
+    """Lê só as chaves pedidas, pelo índice ``(tipo, valor)``."""
+    processos = [p for p in (processos or []) if p]
+    nomes = [n for n in (nomes or []) if n]
+    out = _blacklist_vazio()
+    if not processos and not nomes:
+        return out
     cfg = _eda_mysql_config()
     if not cfg:
         raise _BlacklistUnavailable("Configuração da blacklist indisponível.")
@@ -1426,22 +1544,47 @@ def _load_memoria_blacklist() -> dict[str, dict[str, dict]]:
             **cfg, charset="utf8mb4", collation="utf8mb4_unicode_ci"
         )
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT id, tipo, valor, motivo
-            FROM blacklist
-            WHERE ativo = 1
-              AND tipo IN ('PROCESSO_INCIDENTE', 'NOME')
-            """,
-        )
-        rows = cur.fetchall() or []
+        lote = 400
+        for inicio in range(0, len(processos), lote):
+            pedaco = processos[inicio : inicio + lote]
+            marcas = ", ".join(["%s"] * len(pedaco))
+            cur.execute(
+                f"""
+                SELECT id, tipo, valor, motivo
+                FROM blacklist
+                WHERE ativo = 1
+                  AND tipo = 'PROCESSO_INCIDENTE'
+                  AND valor IN ({marcas})
+                """,
+                tuple(pedaco),
+            )
+            _blacklist_juntar_linhas(out, cur.fetchall() or [])
+        for inicio in range(0, len(nomes), lote):
+            pedaco = nomes[inicio : inicio + lote]
+            marcas = ", ".join(["%s"] * len(pedaco))
+            cur.execute(
+                f"""
+                SELECT id, tipo, valor, motivo
+                FROM blacklist
+                WHERE ativo = 1
+                  AND tipo = 'NOME'
+                  AND valor IN ({marcas})
+                """,
+                tuple(pedaco),
+            )
+            _blacklist_juntar_linhas(out, cur.fetchall() or [])
         cur.close()
         conn.close()
     except mysql.connector.Error as e:
         print(f"[memoria-calculo] erro ao consultar blacklist: {e}")
         raise _BlacklistUnavailable(str(e)) from e
+    return out
 
-    out: dict[str, dict[str, dict]] = {"PROCESSO_INCIDENTE": {}, "NOME": {}}
+
+def _blacklist_juntar_linhas(
+    out: dict[str, dict[str, dict]],
+    rows: list[dict],
+) -> None:
     for row in rows:
         if not _blacklist_status_bloqueia_memoria(row):
             continue
@@ -1455,8 +1598,25 @@ def _load_memoria_blacklist() -> dict[str, dict[str, dict]]:
         else:
             continue
         if normalized:
-            out[tipo][normalized] = row
-    return out
+            out.setdefault(tipo, {})[normalized] = row
+
+
+def _completar_blacklist(blacklist: dict[str, dict[str, dict]], rows: list[dict]) -> None:
+    """Acrescenta ao índice só as chaves das linhas que ainda não foram lidas."""
+    processos, nomes = _chaves_blacklist_de_linhas(rows)
+    faltam_proc = [
+        chave
+        for chave in processos
+        if chave not in (blacklist.get("PROCESSO_INCIDENTE") or {})
+    ]
+    faltam_nome = [
+        nome for nome in nomes if nome not in (blacklist.get("NOME") or {})
+    ]
+    if not faltam_proc and not faltam_nome:
+        return
+    extra = _load_memoria_blacklist_chaves(processos=faltam_proc, nomes=faltam_nome)
+    for tipo in ("PROCESSO_INCIDENTE", "NOME"):
+        blacklist.setdefault(tipo, {}).update(extra.get(tipo) or {})
 
 
 def _blacklist_match_by_tipo_valor(
@@ -1888,18 +2048,22 @@ def _memoria_calculo_bloqueado_mes_atual(
                 variants = incidente_match_variants(inc) if inc else [""]
                 if not variants:
                     variants = [""]
-                placeholders = ", ".join(["%s"] * len(variants))
+                inc_sql, inc_params = _sql_eq_in("numero_do_incidente", variants)
+                # Incidentes gravados como NULL equivalem a vazio no TRIM antigo.
+                nulo_sql = ""
+                if "" in variants:
+                    nulo_sql = " OR numero_do_incidente IS NULL"
                 cur.execute(
                     f"""
                     SELECT `{ultima_f}` AS ultima_atualizacao
                     FROM memoria_calculo
-                    WHERE TRIM(COALESCE(numero_de_processo, '')) = %s
+                    WHERE numero_de_processo = %s
+                      AND ({inc_sql}{nulo_sql})
                       AND TRIM(COALESCE(requerente, '')) = %s
-                      AND TRIM(COALESCE(numero_do_incidente, '')) IN ({placeholders})
                     ORDER BY `{ultima_f}` DESC
                     LIMIT 1
                     """,
-                    (proc, nome, *variants),
+                    (proc, *inc_params, nome),
                 )
                 row = cur.fetchone() or {}
                 ultima = row.get("ultima_atualizacao")
@@ -2765,8 +2929,8 @@ def api_memoria_buscar():
     """
     Dois modos (exclusivos):
     - Nome: LIKE no requerente (mín. 2 caracteres; bind + escape de % e _).
-    - Processo + incidente: igualdade em TRIM de numero_de_processo e
-      TRIM de numero_do_incidente (incidente vazio = todos os incidentes
+    - Processo + incidente: igualdade em numero_de_processo e
+      numero_do_incidente (incidente vazio = todos os incidentes
       do processo; o bloqueio de pipeline só corre por linha/incidente).
     Cumprimento (id_coleta_cumprimento ou feito_por CMP_CALC) só entra
     quando pesquisar_cumprimentos está ativo. Com a caixa e um incidente
@@ -2817,7 +2981,22 @@ def api_memoria_buscar():
         )
 
     try:
-        blacklist = _load_memoria_blacklist()
+        if use_process:
+            if inc:
+                chaves_proc = []
+                for variante in incidente_match_variants(inc):
+                    chave = _normalizar_blacklist_processo_incidente(proc, variante)
+                    if chave and chave not in chaves_proc:
+                        chaves_proc.append(chave)
+            else:
+                chave = _normalizar_blacklist_processo_incidente(proc, "")
+                chaves_proc = [chave] if chave else []
+            blacklist = _load_memoria_blacklist_chaves(processos=chaves_proc)
+        else:
+            nome_chave = _normalizar_blacklist_nome(nome)
+            blacklist = _load_memoria_blacklist_chaves(
+                nomes=[nome_chave] if nome_chave else []
+            )
     except _BlacklistUnavailable:
         return _blacklist_unavailable_response()
     allow_blacklist_override = str(
@@ -2893,17 +3072,20 @@ def api_memoria_buscar():
         return s.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
     def _entregar(rows: list, source: str):
-        merged = _anexar_cumprimentos_se_pedido(
-            list(rows or []),
-            pedido=pesquisar_cumprimentos,
-            use_process=use_process,
-            nome=nome,
-            processo=proc,
-            incidente=inc,
-            blacklist=blacklist,
-            allow_blacklist_override=allow_blacklist_override,
-            audit_context=audit_context,
-        )
+        try:
+            merged = _anexar_cumprimentos_se_pedido(
+                list(rows or []),
+                pedido=pesquisar_cumprimentos,
+                use_process=use_process,
+                nome=nome,
+                processo=proc,
+                incidente=inc,
+                blacklist=blacklist,
+                allow_blacklist_override=allow_blacklist_override,
+                audit_context=audit_context,
+            )
+        except _BlacklistUnavailable:
+            return _blacklist_unavailable_response()
         return jsonify(
             {
                 "ok": True,
@@ -2922,12 +3104,12 @@ def api_memoria_buscar():
 
     if use_process:
         if inc:
-            inc_sql, inc_params = _sql_trim_in(
+            inc_sql, inc_params = _sql_eq_in(
                 "numero_do_incidente", incidente_match_variants(inc)
             )
             if pesquisar_cumprimentos:
                 where_sql = f"""
-        TRIM(COALESCE(numero_de_processo, '')) = %s
+        numero_de_processo = %s
         AND (
             {inc_sql}
             OR {cumprimento_sql}
@@ -2935,14 +3117,14 @@ def api_memoria_buscar():
         """
             else:
                 where_sql = f"""
-        TRIM(COALESCE(numero_de_processo, '')) = %s
+        numero_de_processo = %s
         AND {inc_sql}
         {fora_cumprimento_sql}
         """
             params_exec: list = [proc, *inc_params]
         else:
             where_sql = f"""
-        TRIM(COALESCE(numero_de_processo, '')) = %s
+        numero_de_processo = %s
         {fora_cumprimento_sql}
         """
             params_exec = [proc]
@@ -3033,6 +3215,7 @@ def api_memoria_buscar():
         f"[memoria-calculo] ok em {dt_ms}ms; results={len(raw)}; modo={'processo' if use_process else 'nome'}"
     )
     try:
+        _completar_blacklist(blacklist, raw)
         results = _sanitize_memoria_results_for_blacklist(
             raw,
             blacklist=blacklist,
@@ -3040,6 +3223,8 @@ def api_memoria_buscar():
             allow_override=allow_blacklist_override,
             audit_context=audit_context,
         )
+    except _BlacklistUnavailable:
+        return _blacklist_unavailable_response()
     except _BlacklistAuditError as e:
         return (
             jsonify(
@@ -3062,14 +3247,17 @@ def api_memoria_buscar():
         results = _apply_pipeline_coleta_blocks(results)
         _enrich_results_precainfos_numero_de_meses(results)
         if use_process:
-            results = _append_missing_precainfos_creditors(
-                results,
-                processo=proc,
-                incidente=inc,
-                blacklist=blacklist,
-                allow_blacklist_override=allow_blacklist_override,
-                audit_context=audit_context,
-            )
+            try:
+                results = _append_missing_precainfos_creditors(
+                    results,
+                    processo=proc,
+                    incidente=inc,
+                    blacklist=blacklist,
+                    allow_blacklist_override=allow_blacklist_override,
+                    audit_context=audit_context,
+                )
+            except _BlacklistUnavailable:
+                return _blacklist_unavailable_response()
             results = _apply_pipeline_coleta_blocks(results)
         return _entregar(results, "memoria_calculo")
 
@@ -3137,7 +3325,7 @@ def api_memoria_buscar():
 
         if use_process:
             if inc and f_inc:
-                inc_sql, inc_params = _sql_trim_in(
+                inc_sql, inc_params = _sql_eq_in(
                     f"`{f_inc}`", incidente_match_variants(inc)
                 )
                 cur2.execute(
@@ -3149,7 +3337,7 @@ def api_memoria_buscar():
                            {calc_sql},
                            {meses_sql}
                     FROM precainfosnew
-                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                    WHERE `{f_proc}` = %s
                       AND {inc_sql}
                     ORDER BY id DESC
                     LIMIT 10
@@ -3172,7 +3360,7 @@ def api_memoria_buscar():
                            {calc_sql},
                            {meses_sql}
                     FROM precainfosnew
-                    WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                    WHERE `{f_proc}` = %s
                     ORDER BY id DESC
                     LIMIT 10
                     """,
@@ -3207,6 +3395,10 @@ def api_memoria_buscar():
             pass
         else:
             rows = cur2.fetchall() or []
+        try:
+            _completar_blacklist(blacklist, rows)
+        except _BlacklistUnavailable:
+            return _blacklist_unavailable_response()
         out_rows: list[dict] = []
         for r in rows:
             try:
@@ -3342,6 +3534,7 @@ def _anexar_cumprimentos_se_pedido(
         return results
     if not encontrados:
         return results
+    _completar_blacklist(blacklist, encontrados)
     liberados: list[dict] = []
     for row in encontrados:
         bl_row = None
@@ -4380,14 +4573,14 @@ def api_memoria_precainfos_detalhes():
             400
 
         if f_inc:
-            inc_sql, inc_params = _sql_trim_in(
+            inc_sql, inc_params = _sql_eq_in(
                 f"`{f_inc}`", incidente_match_variants(inc)
             )
             cur.execute(
                 f"""
                 SELECT *
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                   AND {inc_sql}
                   AND TRIM(COALESCE(`{f_req}`, '')) = %s
                 ORDER BY id DESC
@@ -4400,7 +4593,7 @@ def api_memoria_precainfos_detalhes():
                 f"""
                 SELECT *
                 FROM precainfosnew
-                WHERE TRIM(COALESCE(`{f_proc}`, '')) = %s
+                WHERE `{f_proc}` = %s
                   AND TRIM(COALESCE(`{f_req}`, '')) = %s
                 ORDER BY id DESC
                 LIMIT 2
@@ -4722,18 +4915,18 @@ def get_messages():
 
 import uuid
 
-from campanha.api_dominios import (
-    MailgunError,
-    GoDaddyError,
-    adicionar_dominio_completo,
-    listar_dominios,
-    mailgun_list_domains,
-    remover_dominio,
-    verificar_dominio,
+from campanha.api_dominios import listar_dominios
+from campanha.api_elasticemail import (
+    ElasticEmailError,
+    adicionar_dominio_elasticemail,
+    remover_dominio_elasticemail,
+    sincronizar_dominios_elasticemail,
+    verificar_dominio_elasticemail,
 )
 from campanha.api_disparo import (
     buscar_destinatarios_base,
     cancelar_disparo,
+    contar_destinatarios_base,
     iniciar_disparo,
     obter_historico,
     obter_historico_detalhe,
@@ -4906,12 +5099,11 @@ def api_campanha_dominios_add():
         return jsonify({"ok": False, "error": "nome, dominio e from_email sao obrigatorios."}), 400
     try:
         cfg, db = _camp_db()
-        result = adicionar_dominio_completo(dominio, nome, from_name, from_email, reply_to, cfg, db)
+        result = adicionar_dominio_elasticemail(dominio, nome, from_name, from_email, reply_to, cfg, db)
+        result.pop("elasticemail", None)
         return jsonify(result)
-    except MailgunError as e:
-        return jsonify({"ok": False, "error": f"Mailgun: {e.detail}"}), 502
-    except GoDaddyError as e:
-        return jsonify({"ok": False, "error": f"GoDaddy: {e.detail}"}), 502
+    except ElasticEmailError as e:
+        return jsonify({"ok": False, "error": f"Elastic Email: {e.detail}"}), 502
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -4920,7 +5112,7 @@ def api_campanha_dominios_add():
 def api_campanha_dominios_delete(dom_id):
     try:
         cfg, db = _camp_db()
-        result = remover_dominio(dom_id, cfg, db)
+        result = remover_dominio_elasticemail(dom_id, cfg, db)
         code = 200 if result.get("ok") else 404
         return jsonify(result), code
     except Exception as e:
@@ -4939,10 +5131,11 @@ def api_campanha_dominios_verify(dom_id):
         conn.close()
         if not row:
             return jsonify({"ok": False, "error": "Dominio nao encontrado."}), 404
-        result = verificar_dominio(row["dominio"], cfg, db)
+        result = verificar_dominio_elasticemail(row["dominio"], cfg, db)
+        result.pop("elasticemail", None)
         return jsonify(result)
-    except MailgunError as e:
-        return jsonify({"ok": False, "error": f"Mailgun: {e.detail}"}), 502
+    except ElasticEmailError as e:
+        return jsonify({"ok": False, "error": f"Elastic Email: {e.detail}"}), 502
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -5070,8 +5263,9 @@ def api_campanha_destinatarios_preview():
             "fornecedor": request.args.get("fornecedor"),
         }
         filtros = {k: v for k, v in filtros.items() if v}
-        rows = buscar_destinatarios_base(**filtros)
-        return jsonify({"ok": True, "total": len(rows), "preview": rows[:50]})
+        total = contar_destinatarios_base(**filtros)
+        rows = buscar_destinatarios_base(**filtros, limite=50)
+        return jsonify({"ok": True, "total": total, "preview": rows})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -5146,66 +5340,105 @@ def api_campanha_migrar_toml():
     })
 
 
+def _campanha_sincronizar_provedor():
+    """Lista os domínios da conta Elastic Email (GET /v4/domains) e grava no MySQL."""
+    try:
+        db_cfg, db_name = _camp_db()
+        result = sincronizar_dominios_elasticemail(db_cfg, db_name)
+    except ElasticEmailError as e:
+        return jsonify({"ok": False, "error": f"Elastic Email: {e.detail}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    status = int(result.pop("status", 200 if result.get("ok") else 404))
+    return jsonify(result), status
+
+
+@app.route("/api/campanha/sincronizar-elasticemail", methods=["POST"], endpoint="api_campanha_sincronizar_elasticemail")
+def api_campanha_sincronizar_elasticemail():
+    return _campanha_sincronizar_provedor()
+
+
 @app.route("/api/campanha/sincronizar-mailgun", methods=["POST"], endpoint="api_campanha_sincronizar_mailgun")
 def api_campanha_sincronizar_mailgun():
-    """Busca todos os dominios da conta Mailgun e insere os que faltam no banco."""
+    """Alias antigo: a sincronização passou a usar a API do Elastic Email."""
+    return _campanha_sincronizar_provedor()
+
+
+def _pagina_descadastro(mensagem: str, ok: bool, token: str | None = None) -> str:
+    from html import escape
+
+    botao = ""
+    if ok and token and not mensagem:
+        botao = (
+            f'<form method="post" action="/campanha/descadastrar/{escape(token)}">'
+            '<button type="submit">Confirmar descadastro</button></form>'
+        )
+        mensagem = "Confirme para deixar de receber estas mensagens."
+    cor = "#1f7a4d" if ok and token is None else "#333333"
+    return (
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Descadastro</title></head>"
+        "<body style='font-family:Arial,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;'>"
+        f"<p style='color:{cor};font-size:1.05rem;'>{escape(mensagem)}</p>{botao}</body></html>"
+    )
+
+
+@app.route("/campanha/descadastrar/<token>", methods=["GET", "POST"])
+def campanha_descadastrar(token: str):
+    """Página pública. O GET só mostra a confirmação; o POST efetiva o descadastro."""
+    from campanha.api_disparo import _conectar
+    from campanha.entregabilidade import email_do_token, garantir_esquema_campanha, registrar_evento
+
+    email = email_do_token(token)
+    if not email:
+        return _pagina_descadastro("Este link não é válido.", False), 400
+    if request.method == "GET":
+        return _pagina_descadastro("", True, token)
     try:
-        mg_domains = mailgun_list_domains()
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Erro ao consultar Mailgun: {e}"}), 502
+        conn = _conectar()
+        garantir_esquema_campanha(conn)
+        registrar_evento(conn, "unsubscribe", email)
+        conn.close()
+    except Exception:
+        return _pagina_descadastro("Não foi possível concluir o descadastro. Tente de novo.", False), 500
+    return _pagina_descadastro("Você não receberá mais estas mensagens.", True)
 
-    if not mg_domains:
-        return jsonify({"ok": False, "error": "Nenhum dominio encontrado na conta Mailgun."}), 404
 
-    db_cfg, db_name = _camp_db()
-    conn = mysql.connector.connect(**db_cfg, database=db_name)
-    cur = conn.cursor(dictionary=True)
+@app.route("/api/campanha/webhook/elasticemail", methods=["GET", "POST", "HEAD"])
+def api_campanha_webhook_elasticemail():
+    """Recebe abertura, clique, descadastro, reclamação e devolução do Elastic Email."""
+    if request.method in ("GET", "HEAD"):
+        return ("ok", 200, {"Content-Type": "text/plain; charset=utf-8"})
+    from campanha.api_disparo import _conectar
+    from campanha.entregabilidade import (
+        classificar_evento,
+        garantir_esquema_campanha,
+        ler_payload_notificacao,
+        registrar_evento,
+        token_webhook_confere,
+    )
 
-    cur.execute("SELECT dominio FROM campanha_dominios WHERE ativo = 1")
-    ja_cadastrados = {r["dominio"] for r in cur.fetchall()}
-
-    inseridos = 0
-    atualizados = 0
-    for mg in mg_domains:
-        dominio = (mg.get("name") or "").strip()
-        if not dominio:
-            continue
-        state = (mg.get("state") or "unknown").lower()
-        mg_state = "active" if state == "active" else "pending"
-
-        nome = dominio.replace(".", "_").replace("-", "_")
-        from_email = f"contato@{dominio}"
-        from_name = "RED PRECATORIOS"
-
-        if dominio in ja_cadastrados:
-            cur.execute(
-                "UPDATE campanha_dominios SET mailgun_state = %s WHERE dominio = %s AND ativo = 1",
-                (mg_state, dominio),
-            )
-            atualizados += 1
-        else:
-            cur.execute(
-                """INSERT INTO campanha_dominios
-                   (nome, dominio, from_name, from_email, mailgun_state, dns_configured, ativo)
-                   VALUES (%s, %s, %s, %s, %s, %s, 1)
-                   ON DUPLICATE KEY UPDATE
-                       mailgun_state = VALUES(mailgun_state),
-                       ativo = 1""",
-                (nome, dominio, from_name, from_email, mg_state, 1 if mg_state == "active" else 0),
-            )
-            inseridos += 1
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return jsonify({
-        "ok": True,
-        "total_mailgun": len(mg_domains),
-        "inseridos": inseridos,
-        "atualizados": atualizados,
-        "ja_cadastrados": len(ja_cadastrados),
-    })
+    token = (request.args.get("token") or request.headers.get("X-Campanha-Token") or "").strip()
+    if not token_webhook_confere(token):
+        return jsonify({"ok": False}), 401
+    payload = ler_payload_notificacao(
+        request.get_data() or b"",
+        request.content_type or "",
+        request.form.to_dict(flat=True) if request.form else None,
+    )
+    evento = classificar_evento(payload)
+    if not evento:
+        return jsonify({"ok": True, "ignorado": True})
+    tipo, email = evento
+    try:
+        conn = _conectar()
+        garantir_esquema_campanha(conn)
+        registrar_evento(conn, tipo, email)
+        conn.close()
+    except Exception:
+        return jsonify({"ok": False}), 500
+    return jsonify({"ok": True})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -5691,6 +5924,16 @@ def blacklist_remover(row_id: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# LAYOUT
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/layout")
+def layout_page():
+    return render_template("layout.html")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # LOCALIZE — pesquisa e-mail / telefone (MySQL EDA)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -5838,6 +6081,15 @@ except Exception as _e:
     import sys
     print(_log_msg, file=sys.stderr)
     app.config["HAS_EDIARIO"] = False
+
+try:
+    from layout_integracao import tentar_montar_layout
+
+    tentar_montar_layout(app)
+except Exception as _layout_exc:
+    import sys
+    print(f"[Layout] integração: {_layout_exc}", file=sys.stderr)
+    app.config["HAS_LAYOUT"] = False
 
 app.wsgi_app = wsgi_eda_session_guard(app, app.wsgi_app)
 

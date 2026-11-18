@@ -139,6 +139,34 @@ def _worker_loop() -> None:
             job.event.set()
 
 
+def _job_ainda_pendente(prec_id: int) -> _Job | None:
+    """Pedido deste id que ainda não terminou (na fila ou em execução)."""
+    job = _jobs_by_prec.get(prec_id)
+    if job is None or job.event.is_set():
+        return None
+    return job
+
+
+def _payload_aceite(
+    job: _Job,
+    *,
+    already_queued: bool,
+    fila_snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "accepted": True,
+        "id_precainfosnew": job.prec_id,
+        "fila": get_fila_status(),
+    }
+    if already_queued:
+        payload["already_queued"] = True
+        payload["message"] = "Este caso já está na fila de cálculo."
+    if fila_snapshot:
+        payload["fila_ao_entrar"] = fila_snapshot
+    return payload
+
+
 def enqueue(
     prec_id: int,
     *,
@@ -147,31 +175,35 @@ def enqueue(
     form_payload: dict[str, Any] | None = None,
     percentual_honorarios: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Coloca na fila e responde de imediato (sem bloquear a ligação HTTP)."""
-    job = _Job(
-        prec_id=prec_id,
-        feito_por=feito_por,
-        prioridade=bool(prioridade),
-        form_payload=form_payload,
-        percentual_honorarios=percentual_honorarios,
-    )
-    fila_snapshot: dict[str, Any] | None = None
+    """Coloca na fila e responde de imediato (sem bloquear a ligação HTTP).
+
+    O mesmo ``id_precainfosnew`` não entra duas vezes enquanto o pedido
+    anterior ainda não terminou.
+    """
     with _guard:
-        had_busy = bool(_queue) or _current_job is not None
-        _queue.append(job)
-        _jobs_by_prec[prec_id] = job
-    _kick_worker()
-    if had_busy:
-        fila_snapshot = get_fila_status()
-    payload: dict[str, Any] = {
-        "ok": True,
-        "accepted": True,
-        "id_precainfosnew": prec_id,
-        "fila": get_fila_status(),
-    }
-    if fila_snapshot:
-        payload["fila_ao_entrar"] = fila_snapshot
-    return payload, fila_snapshot
+        existing = _job_ainda_pendente(prec_id)
+        if existing is not None:
+            job = existing
+            already_queued = True
+            had_busy = True
+        else:
+            job = _Job(
+                prec_id=prec_id,
+                feito_por=feito_por,
+                prioridade=bool(prioridade),
+                form_payload=form_payload,
+                percentual_honorarios=percentual_honorarios,
+            )
+            had_busy = bool(_queue) or _current_job is not None
+            _queue.append(job)
+            _jobs_by_prec[prec_id] = job
+            already_queued = False
+    if not already_queued:
+        _kick_worker()
+    fila_snapshot = get_fila_status() if had_busy else None
+    return _payload_aceite(
+        job, already_queued=already_queued, fila_snapshot=fila_snapshot
+    ), fila_snapshot
 
 
 def get_prec_id_status(prec_id: int) -> dict[str, Any]:
@@ -229,21 +261,27 @@ def submit_and_wait(
 
     Returns (resultado, fila_ao_entrar) — ``fila_ao_entrar`` preenchido se havia fila/execução.
     """
-    job = _Job(
-        prec_id=prec_id,
-        feito_por=feito_por,
-        prioridade=bool(prioridade),
-        form_payload=form_payload,
-        percentual_honorarios=percentual_honorarios,
-    )
-    fila_snapshot: dict[str, Any] | None = None
     with _guard:
-        had_busy = bool(_queue) or _current_job is not None
-        _queue.append(job)
-        _jobs_by_prec[prec_id] = job
-    _kick_worker()
-    if had_busy:
-        fila_snapshot = get_fila_status()
+        existing = _job_ainda_pendente(prec_id)
+        if existing is not None:
+            job = existing
+            created = False
+            had_busy = True
+        else:
+            job = _Job(
+                prec_id=prec_id,
+                feito_por=feito_por,
+                prioridade=bool(prioridade),
+                form_payload=form_payload,
+                percentual_honorarios=percentual_honorarios,
+            )
+            had_busy = bool(_queue) or _current_job is not None
+            _queue.append(job)
+            _jobs_by_prec[prec_id] = job
+            created = True
+    if created:
+        _kick_worker()
+    fila_snapshot = get_fila_status() if had_busy else None
 
     if not job.event.wait(timeout=timeout):
         return (

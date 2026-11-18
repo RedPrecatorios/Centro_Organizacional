@@ -1567,11 +1567,14 @@
     var filaCancel = document.getElementById('memoria-fila-cancel');
     var filaX = document.getElementById('memoria-fila-x');
     var filaOnConfirm = null;
+    var filaOnCancel = null;
+    var atualizacaoEmCurso = false;
     var prioriModal = document.getElementById('memoria-priori-modal');
     var prioriSim = document.getElementById('memoria-priori-sim');
     var prioriNao = document.getElementById('memoria-priori-nao');
     var prioriX = document.getElementById('memoria-priori-x');
     var prioriOnAnswer = null;
+    var prioriOnDismiss = null;
     var blacklistModal = document.getElementById('memoria-blacklist-modal');
     var blacklistX = document.getElementById('memoria-blacklist-x');
     var blacklistCancel = document.getElementById('memoria-blacklist-cancel');
@@ -2721,36 +2724,46 @@
     }
 
     function hideFilaModal() {
+      var cancelar = filaOnCancel;
       filaOnConfirm = null;
+      filaOnCancel = null;
       if (filaModal) filaModal.setAttribute('hidden', '');
+      if (typeof cancelar === 'function') cancelar();
     }
 
     function hidePrioriModal() {
+      var dispensar = prioriOnDismiss;
       prioriOnAnswer = null;
+      prioriOnDismiss = null;
       if (prioriModal) prioriModal.setAttribute('hidden', '');
+      if (typeof dispensar === 'function') dispensar();
     }
 
-    function showPrioriModal(onAnswer) {
+    function showPrioriModal(onAnswer, onDismiss) {
       if (!prioriModal) {
         if (typeof onAnswer === 'function') onAnswer(false);
         return;
       }
       prioriOnAnswer = typeof onAnswer === 'function' ? onAnswer : null;
+      prioriOnDismiss = typeof onDismiss === 'function' ? onDismiss : null;
       prioriModal.removeAttribute('hidden');
     }
 
     function answerPriori(val) {
       var cb = prioriOnAnswer;
-      hidePrioriModal();
+      prioriOnDismiss = null;
+      prioriOnAnswer = null;
+      if (prioriModal) prioriModal.setAttribute('hidden', '');
       if (typeof cb === 'function') cb(!!val);
     }
 
-    function showFilaModal(fila, onConfirm) {
+    function showFilaModal(fila, onConfirm, onCancel) {
       if (!filaModal || !filaBody) {
         if (typeof onConfirm === 'function') onConfirm();
         return;
       }
       filaOnConfirm = typeof onConfirm === 'function' ? onConfirm : null;
+      filaOnCancel = typeof onCancel === 'function' ? onCancel : null;
       filaBody.innerHTML = buildFilaModalHtml(fila);
       if (filaConfirm) {
         filaConfirm.style.display = filaOnConfirm ? '' : 'none';
@@ -2769,6 +2782,23 @@
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .catch(function () { return { ok: false, d: null }; });
+    }
+
+    function consultarFilaAntesDeEnfileirar(aoEnfileirar, aoCancelar, aoFalhar) {
+      return fetchFilaCalculo().then(function (fo) {
+        if (!fo || !fo.ok || !fo.d || !fo.d.ok || !fo.d.fila) {
+          if (typeof aoFalhar === 'function') aoFalhar();
+          else setMsg('Não foi possível consultar a fila de cálculo. Tente novamente.', true);
+          if (typeof aoCancelar === 'function') aoCancelar();
+          return;
+        }
+        var fila = fo.d.fila;
+        if (fila.em_execucao || (Number(fila.casos_na_fila) || 0) > 0) {
+          showFilaModal(fila, aoEnfileirar, aoCancelar);
+          return;
+        }
+        if (typeof aoEnfileirar === 'function') aoEnfileirar();
+      });
     }
 
     function aplicarResultadoAtualizarCalculo(d) {
@@ -2893,7 +2923,12 @@
             if (!isNaN(pid) && pid > 0) {
               idPrecainfosnewSelecionado = pid;
             }
-            setMsg('Cálculo enfileirado. Acompanhar progresso…', false);
+            setMsg(
+              o.d.already_queued
+                ? 'Este caso já está na fila de cálculo.'
+                : 'Cálculo enfileirado. Acompanhar progresso…',
+              false
+            );
             if (o.d.fila) {
               // Informativo; o poll continua automaticamente.
             }
@@ -2950,6 +2985,7 @@
           return false;
         })
         .finally(function () {
+          atualizacaoEmCurso = false;
           btnAtualizarCalculo.textContent = prev;
           syncAtualizarCalculoButtonState(currentRow);
         });
@@ -3018,7 +3054,9 @@
     if (filaConfirm) {
       filaConfirm.addEventListener('click', function () {
         var cb = filaOnConfirm;
-        hideFilaModal();
+        filaOnCancel = null;
+        filaOnConfirm = null;
+        if (filaModal) filaModal.setAttribute('hidden', '');
         if (cb) cb();
       });
     }
@@ -3123,14 +3161,15 @@
           setMsg('Informe um número inteiro de meses maior ou igual a 2.', true);
           return;
         }
-        fetchFilaCalculo().then(function (fo) {
-          var fila = fo.d && fo.d.ok && fo.d.fila ? fo.d.fila : null;
-          if (fila && (fila.em_execucao || (Number(fila.casos_na_fila) || 0) > 0)) {
-            showFilaModal(fila, function () { executarSalvarNumeroMeses(mesesVal); });
-            return;
+        if (btnSalvarMeses) btnSalvarMeses.disabled = true;
+        if (btnAtualizarCalculo) btnAtualizarCalculo.disabled = true;
+        consultarFilaAntesDeEnfileirar(
+          function () { executarSalvarNumeroMeses(mesesVal); },
+          function () {
+            if (btnSalvarMeses) btnSalvarMeses.disabled = false;
+            syncAtualizarCalculoButtonState(currentRow);
           }
-          executarSalvarNumeroMeses(mesesVal);
-        });
+        );
       });
     }
 
@@ -3242,14 +3281,16 @@
           setMsg('Pesquise e carregue um caso (requerente ou processo) antes de atualizar o cálculo.', true);
           return;
         }
-        fetchFilaCalculo().then(function (fo) {
-          var fila = fo.d && fo.d.ok && fo.d.fila ? fo.d.fila : null;
-          if (fila && (fila.em_execucao || (Number(fila.casos_na_fila) || 0) > 0)) {
-            showFilaModal(fila, function () { executarAtualizarCalculo(); });
-            return;
+        if (atualizacaoEmCurso || btnAtualizarCalculo.disabled) return;
+        atualizacaoEmCurso = true;
+        btnAtualizarCalculo.disabled = true;
+        consultarFilaAntesDeEnfileirar(
+          function () { executarAtualizarCalculo(); },
+          function () {
+            atualizacaoEmCurso = false;
+            syncAtualizarCalculoButtonState(currentRow);
           }
-          executarAtualizarCalculo();
-        });
+        );
       });
     }
     function stopAnalisePoll() {
@@ -4223,17 +4264,17 @@
           setManualMsg('Preencha requerente e nº do processo antes de enviar.', true);
           return;
         }
+        if (manualSubmit) manualSubmit.disabled = true;
         showPrioriModal(function (prioridade) {
           payload.prioridade = !!prioridade;
-          fetchFilaCalculo().then(function (o) {
-            var fila = o && o.d && o.d.fila;
-            if (fila && (fila.em_execucao || (fila.casos_na_fila || 0) > 0)) {
-              showFilaModal(fila, function () { executarCalculoManual(payload, manualSubmit); });
-              return;
+          consultarFilaAntesDeEnfileirar(
+            function () { executarCalculoManual(payload, manualSubmit); },
+            function () { syncManualSubmitState(); },
+            function () {
+              setManualMsg('Não foi possível consultar a fila de cálculo. Tente novamente.', true);
             }
-            executarCalculoManual(payload, manualSubmit);
-          });
-        });
+          );
+        }, function () { syncManualSubmitState(); });
       });
     }
 

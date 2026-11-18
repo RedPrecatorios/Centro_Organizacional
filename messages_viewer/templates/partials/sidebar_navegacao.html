@@ -111,6 +111,14 @@
       Blacklist{% if page_in_maintenance('blacklist') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
     </a>
     {% endif %}
+    {% if user_can('layout') %}
+    <a class="dash-nav-item{% if request.endpoint == 'layout_page' %} active{% endif %}{% if page_in_maintenance('layout') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('layout_page') }}">
+      <span class="dash-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </span>
+      Layout{% if page_in_maintenance('layout') %}<span class="dash-nav-maint-badge">Manutenção</span>{% endif %}
+    </a>
+    {% endif %}
     {% if user_can('localize') %}
     <a class="dash-nav-item{% if request.endpoint == 'localize_page' %} active{% endif %}{% if page_in_maintenance('localize') %} dash-nav-item--maintenance{% endif %}" href="{{ url_for('localize_page') }}">
       <span class="dash-nav-icon" aria-hidden="true">

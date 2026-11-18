@@ -82,6 +82,7 @@ TAB_PANELS: tuple[tuple[str, str, str], ...] = (
     ("campanha", "Campanha", "E-mail: domínios, templates e disparos"),
     ("auditoria_syscall", "Auditoria syscall", "Ligações auditadas (request_audit)"),
     ("localize", "Localize", "Pesquisa de e-mails e telefones na base EDA"),
+    ("layout", "Layout", "Mapa do escritório. Só entra quem estiver marcado, inclusive administrador."),
     (
         "blacklist",
         "Blacklist",
@@ -607,10 +608,24 @@ def permission_ids_from_form(form, prefix: str) -> list[str]:
 _UNIFIED_LEVANTAMENTO_TABS = frozenset({"levantamento_processual", "solicitacao_inclusao"})
 
 
+def user_can_layout(user: dict | None = None) -> bool:
+    """O Layout não segue o acesso geral de administrador. Só a permissão marcada."""
+    u = current_user() if user is None else user
+    if not isinstance(u, dict) or not u.get("active", True):
+        return False
+    try:
+        uid = int(u["id"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return "layout" in get_user_tabs(uid)
+
+
 def user_can_tab(tab: str) -> bool:
     u = current_user()
     if not u:
         return False
+    if tab == "layout":
+        return user_can_layout(u)
     if u.get("role") == "admin":
         return True
     if tab not in PERMISSION_IDS:
@@ -649,6 +664,7 @@ def _first_accessible_url_for_user(u: dict) -> str | None:
         ("campanha", "campanha_page"),
         ("auditoria_syscall", "auditoria_syscall_page"),
         ("localize", "localize_page"),
+        ("layout", "layout_page"),
         ("blacklist", "blacklist_page"),
         ("totp_2fa", "totp_2fa_page"),
         ("outro_modulo", "embedded.index"),
@@ -695,6 +711,8 @@ def _tab_for_login_path(path_with_query: str) -> str | None:
         return "auditoria_syscall"
     if path.startswith("/localize"):
         return "localize"
+    if path.startswith("/layout"):
+        return "layout"
     if path.startswith("/blacklist") or path.startswith("/api/blacklist"):
         return "blacklist"
     if path.startswith("/2fa") or path.startswith("/api/totp"):
@@ -855,6 +873,7 @@ def _endpoint_to_tab() -> str | None:
         "api_campanha_destinatarios_preview": "campanha",
         "api_campanha_migrar_toml": "campanha",
         "api_campanha_sincronizar_mailgun": "campanha",
+        "api_campanha_sincronizar_elasticemail": "campanha",
         "api_campanha_templates_list": "campanha",
         "api_campanha_templates_create": "campanha",
         "api_campanha_templates_get": "campanha",
@@ -865,6 +884,7 @@ def _endpoint_to_tab() -> str | None:
         "api_auditoria_syscall_detalhe": "auditoria_syscall",
         "localize_page": "localize",
         "api_localize_pesquisar": "localize",
+        "layout_page": "layout",
         "blacklist_page": "blacklist",
         "blacklist_adicionar": "blacklist_inserir",
         "blacklist_localizar": "blacklist_inserir",
@@ -882,6 +902,10 @@ def _endpoint_to_tab() -> str | None:
 def is_public_request() -> bool:
     p = request.path
     if p.startswith("/static/"):
+        return True
+    if p.startswith("/campanha/descadastrar"):
+        return True
+    if p.startswith("/api/campanha/webhook/elasticemail"):
         return True
     ep = request.endpoint
     if ep == "auth.login":
@@ -985,6 +1009,11 @@ def plataforma_before_request() -> Any | None:
             return handle_access_denied("deny")
         return None
 
+    if needs == "layout":
+        if not user_can_layout(u):
+            return handle_access_denied("deny")
+        return None
+
     if u.get("role") == "admin":
         return None
     if needs in _UNIFIED_LEVANTAMENTO_TABS and user_can_unified_levantamento():
@@ -1008,6 +1037,8 @@ def wsgi_eda_session_guard(app, inner_wsgi):
     mounts: list[tuple[str, str, str, str]] = []
     if app.config.get("HAS_EDIARIO", False):
         mounts.append(("/eda", "eda", "EDA Diário", "HAS_EDIARIO"))
+    if app.config.get("HAS_LAYOUT", False):
+        mounts.append(("/layout-app", "layout", "Layout", "HAS_LAYOUT"))
 
     def _match_mount(path: str) -> tuple[str, str] | None:
         for prefix, tab, label, _flag in mounts:
@@ -1032,6 +1063,8 @@ def wsgi_eda_session_guard(app, inner_wsgi):
             if u and u.get("active"):
                 if u.get("role") == "colaborador" and not collaborator_ip_allowed(_current_remote_ip()):
                     ip_forbidden = True
+                elif tab == "layout":
+                    allowed = user_can_layout(u)
                 elif u.get("role") == "admin" or user_can_tab(tab):
                     allowed = True
             if allowed:
@@ -1245,6 +1278,47 @@ def admin_usuarios():
                             ok = "Perfil atualizado."
                         except mysql.connector.errors.IntegrityError:
                             err = "Esse e-mail já está associado a outro usuário."
+            elif act == "save_layout_access":
+                puid = int(request.form.get("user_id", 0) or 0)
+                grant = bool(request.form.get("layout_access"))
+                if not puid:
+                    err = "Usuário inválido."
+                else:
+                    with auth_connection() as conn:
+                        cur = auth_cursor(conn)
+                        cur.execute(
+                            "SELECT id, role FROM plataforma_users WHERE id = %s",
+                            (puid,),
+                        )
+                        ro = cur.fetchone()
+                        if not ro or ro["role"] != "admin":
+                            err = "Usuário inválido."
+                        else:
+                            cur.execute(
+                                """
+                                DELETE FROM plataforma_user_permissions
+                                WHERE user_id = %s AND tab_id = 'layout'
+                                """,
+                                (puid,),
+                            )
+                            if grant:
+                                cur.execute(
+                                    """
+                                    INSERT INTO plataforma_user_permissions (user_id, tab_id)
+                                    VALUES (%s, 'layout')
+                                    """,
+                                    (puid,),
+                                )
+                            cur.execute(
+                                """
+                                UPDATE plataforma_users
+                                SET perms_version = perms_version + 1
+                                WHERE id = %s
+                                """,
+                                (puid,),
+                            )
+                            conn.commit()
+                            ok = "Acesso ao Layout atualizado."
             elif act == "save_perms":
                 puid = int(request.form.get("user_id", 0))
                 if puid and puid != int(u0["id"]):

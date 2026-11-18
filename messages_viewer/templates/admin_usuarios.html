@@ -200,9 +200,9 @@
                       {{ 'Ativo' if u.active else 'Inativo' }}
                     </span>
                   </td>
-                  <td class="admin-user-paineis" title="{% if u.role == 'admin' %}Todos os painéis{% elif ns.titles %}{{ ns.titles|join(', ') }}{% else %}Nenhum painel{% endif %}">
+                  <td class="admin-user-paineis" title="{% if u.role == 'admin' %}Todos os painéis{% if 'layout' in u.tabs %}, inclusive Layout{% else %}, menos Layout{% endif %}{% elif ns.titles %}{{ ns.titles|join(', ') }}{% else %}Nenhum painel{% endif %}">
                     {% if u.role == 'admin' %}
-                    <span class="admin-paineis-count">Todos</span>
+                    <span class="admin-paineis-count">Todos{% if 'layout' in u.tabs %} + Layout{% else %}, sem Layout{% endif %}</span>
                     {% elif ns.titles %}
                     <span class="admin-paineis-count">{{ ns.titles|length }} painel{{ 's' if ns.titles|length != 1 else '' }}</span>
                     {% else %}
@@ -259,7 +259,19 @@
                         <button class="auth-submit admin-perm-btn" type="submit">Salvar painéis</button>
                       </form>
                       {% else %}
-                      <p class="admin-note">Administrador — acesso a todos os painéis da plataforma, inclusive a Blacklist.</p>
+                      <p class="admin-note">Administrador — acesso a todos os painéis, inclusive a Blacklist. O Layout só abre se estiver marcado abaixo.</p>
+                      <form class="admin-perm-form" method="post" action="{{ url_for('auth.admin_usuarios') }}">
+                        <input type="hidden" name="action" value="save_layout_access" />
+                        <input type="hidden" name="user_id" value="{{ u.id }}" />
+                        <label class="admin-panel-card">
+                          <input type="checkbox" name="layout_access" value="1" {% if 'layout' in u.tabs %}checked{% endif %} />
+                          <span class="admin-panel-card-body">
+                            <span class="admin-panel-card-title">Layout</span>
+                            <span class="admin-panel-card-desc">Mapa do escritório, inventário e cadastro de usuário.</span>
+                          </span>
+                        </label>
+                        <button class="auth-submit admin-perm-btn" type="submit">Salvar acesso ao Layout</button>
+                      </form>
                       {% endif %}
 
                       <form class="admin-pass" method="post" action="{{ url_for('auth.admin_usuarios') }}">
@@ -318,6 +330,7 @@
   function setAllInRoot(root, checked) {
     if (!root) return;
     root.querySelectorAll('.admin-panel-cb').forEach(function (cb) {
+      if (checked && cb.name === 'tab_layout') return;
       cb.disabled = false;
       cb.checked = checked;
       var card = cb.closest('.admin-panel-card');

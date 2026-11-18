@@ -35,7 +35,7 @@
         <div class="camp-section-header">
           <h2>Dominios Cadastrados</h2>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-            <button type="button" class="camp-btn camp-btn-secondary" id="btn-sync-mailgun" title="Buscar todos os dominios da conta Mailgun e importar os que faltam">Sincronizar com Mailgun</button>
+            <button type="button" class="camp-btn camp-btn-secondary" id="btn-sync-elasticemail" title="Atualiza o cadastro e publica SPF, DKIM e tracking no GoDaddy quando ainda faltam">Sincronizar com Elastic Email</button>
             <button type="button" class="camp-btn camp-btn-secondary" id="btn-migrar-toml" title="Importar dominios do arquivo campanha/config.toml para o banco">Importar do config.toml</button>
             <button type="button" class="camp-btn camp-btn-primary" id="btn-add-dominio">+ Adicionar Dominio</button>
           </div>
@@ -73,10 +73,11 @@
         </div>
 
         <div id="dominios-loading" class="camp-loading"><div class="camp-spin"></div> Carregando dominios...</div>
+        <p id="rodizio-semana" class="camp-empty" style="display:none"></p>
         <table class="camp-table" id="dominios-table" style="display:none">
           <thead>
             <tr>
-              <th>Nome</th><th>Dominio</th><th>From</th><th>Mailgun</th><th>DNS</th><th>Acoes</th>
+              <th>Nome</th><th>Dominio</th><th>From</th><th>Elastic Email</th><th>DNS</th><th>Semana</th><th>Acoes</th>
             </tr>
           </thead>
           <tbody id="dominios-tbody"></tbody>
@@ -285,6 +286,10 @@
               <span class="camp-stat-label">Duplicados</span>
             </div>
             <div class="camp-stat">
+              <span class="camp-stat-value" id="stat-prazo">0</span>
+              <span class="camp-stat-label">Prazo 30 dias</span>
+            </div>
+            <div class="camp-stat">
               <span class="camp-stat-value" id="stat-total">0</span>
               <span class="camp-stat-label">Total</span>
             </div>
@@ -316,13 +321,25 @@
             <span class="camp-dash-card-value" id="dash-taxa">--</span>
             <span class="camp-dash-card-label">Taxa de Sucesso</span>
           </div>
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-aberturas">--</span>
+            <span class="camp-dash-card-label">Aberturas</span>
+          </div>
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-recusas">--</span>
+            <span class="camp-dash-card-label">Recusas</span>
+          </div>
+          <div class="camp-dash-card">
+            <span class="camp-dash-card-value" id="dash-bounces">--</span>
+            <span class="camp-dash-card-label">Devoluções</span>
+          </div>
         </div>
 
         <div id="dash-loading" class="camp-loading"><div class="camp-spin"></div> Carregando historico...</div>
         <table class="camp-table" id="dash-table" style="display:none">
           <thead>
             <tr>
-              <th>Campanha</th><th>Data</th><th>Assunto</th><th>Total</th><th>Enviados</th><th>Falhos</th><th>Status</th>
+              <th>Campanha</th><th>Data</th><th>Assunto</th><th>Total</th><th>Enviados</th><th>Falhos</th><th>Prazo 30d</th><th>Aberturas</th><th>Recusas</th><th>Devoluções</th><th>Status</th>
             </tr>
           </thead>
           <tbody id="dash-tbody"></tbody>
@@ -381,15 +398,28 @@
         const tr = document.createElement('tr');
         const stateCls = r.mailgun_state === 'active' ? 'camp-badge-ok' : (r.mailgun_state === 'failed' ? 'camp-badge-err' : 'camp-badge-warn');
         const dnsCls = r.dns_configured ? 'camp-badge-ok' : 'camp-badge-warn';
+        const stateLabel = {active:'ativo', pending:'pendente', failed:'falhou', deleted:'removido'}[r.mailgun_state] || r.mailgun_state;
+        const rodizioLabel = r.rodizio === 'em_uso' ? 'Em uso' : (r.rodizio === 'aguardando' ? 'Aguardando' : '—');
+        const rodizioCls = r.rodizio === 'em_uso' ? 'camp-badge-ok' : (r.rodizio === 'aguardando' ? 'camp-badge-warn' : '');
         tr.innerHTML = `<td>${esc(r.nome)}</td><td>${esc(r.dominio)}</td><td>${esc(r.from_name)} &lt;${esc(r.from_email)}&gt;</td>`
-          + `<td><span class="camp-badge ${stateCls}">${esc(r.mailgun_state)}</span></td>`
+          + `<td><span class="camp-badge ${stateCls}">${esc(stateLabel)}</span></td>`
           + `<td><span class="camp-badge ${dnsCls}">${r.dns_configured ? 'OK' : 'Pendente'}</span></td>`
+          + `<td><span class="camp-badge ${rodizioCls}">${rodizioLabel}</span></td>`
           + `<td class="camp-actions">`
           + `<button class="camp-btn camp-btn-xs camp-btn-secondary" onclick="verificarDom(${r.id})">Verificar</button>`
           + `<button class="camp-btn camp-btn-xs camp-btn-danger" onclick="removerDom(${r.id},'${esc(r.dominio)}')">Remover</button>`
           + `</td>`;
         domTbody.appendChild(tr);
       });
+      const emUso = rows.filter(r => r.rodizio === 'em_uso');
+      const aviso = document.getElementById('rodizio-semana');
+      if (emUso.length && aviso) {
+        const ate = emUso[0].rodizio_ate ? new Date(emUso[0].rodizio_ate + 'T12:00:00').toLocaleDateString('pt-BR') : '';
+        aviso.textContent = 'Esta semana: ' + emUso.map(r => r.dominio).join(' e ')
+          + (ate ? ' (até ' + ate + ').' : '.')
+          + ' Na segunda-feira entra o par seguinte.';
+        aviso.style.display = '';
+      }
       domTable.style.display = '';
     }).catch(e => { domLoading.style.display='none'; domEmpty.textContent = 'Erro: '+e; domEmpty.style.display=''; });
   }
@@ -425,31 +455,44 @@
 
   window.verificarDom = function(id) {
     fetch('/api/campanha/dominios/'+id+'/verificar', { method:'POST' }).then(r=>r.json()).then(d => {
-      alert(d.ok ? 'Status Mailgun: ' + d.mailgun_state : (d.error || 'Erro'));
+      const st = {active:'ativo', pending:'pendente', failed:'falhou', deleted:'removido'}[d.mailgun_state] || d.mailgun_state;
+      alert(d.ok ? 'Status Elastic Email: ' + st : (d.error || 'Erro'));
       loadDominios();
     }).catch(e => alert('Erro: '+e));
   };
   window.removerDom = function(id, nome) {
-    if (!confirm('Remover dominio "'+nome+'"? Isso remove do Mailgun tambem.')) return;
+    if (!confirm('Remover dominio "'+nome+'"? Isso remove do Elastic Email tambem.')) return;
     fetch('/api/campanha/dominios/'+id, { method:'DELETE' }).then(r=>r.json()).then(d => {
-      alert(d.ok ? 'Dominio removido.' : (d.error||'Erro'));
+      alert(d.ok ? ('Dominio removido.' + (d.provider_error ? '\nAviso Elastic Email: ' + d.provider_error : '')) : (d.error||'Erro'));
       loadDominios();
     }).catch(e => alert('Erro: '+e));
   };
 
-  document.getElementById('btn-sync-mailgun').addEventListener('click', () => {
-    if (!confirm('Buscar todos os dominios da conta Mailgun e importar os que nao estao cadastrados na plataforma?')) return;
-    const btn = document.getElementById('btn-sync-mailgun');
+  document.getElementById('btn-sync-elasticemail').addEventListener('click', () => {
+    if (!confirm('Sincronizar com o Elastic Email?\n\nAtualiza o cadastro. Dominios sem SPF/DKIM recebem esses registros no GoDaddy e uma revalidacao. Os que ja estao verificados nao tem o DNS alterado. Dominios desativados nao voltam.')) return;
+    const btn = document.getElementById('btn-sync-elasticemail');
     btn.disabled = true; btn.textContent = 'Sincronizando...';
-    fetch('/api/campanha/sincronizar-mailgun', { method:'POST' }).then(r=>r.json()).then(d => {
-      btn.disabled = false; btn.textContent = 'Sincronizar com Mailgun';
+    fetch('/api/campanha/sincronizar-elasticemail', { method:'POST' }).then(r=>r.json()).then(d => {
+      btn.disabled = false; btn.textContent = 'Sincronizar com Elastic Email';
       if (d.ok) {
-        alert('Sincronizacao concluida!\n\nTotal no Mailgun: ' + d.total_mailgun + '\nNovos inseridos: ' + d.inseridos + '\nAtualizados (status): ' + d.atualizados);
+        let msg = 'Sincronizacao concluida!\n\nTotal no Elastic Email: ' + d.total_elasticemail
+          + '\nNovos inseridos: ' + d.inseridos
+          + '\nAtualizados (status): ' + d.atualizados
+          + '\nDNS ja prontos: ' + (d.dns_ja_prontos || 0)
+          + '\nDNS publicados agora: ' + (d.dns_publicados || 0)
+          + '\nDNS ainda pendentes: ' + (d.dns_pendentes || 0);
+        if (d.godaddy_configurado === false && (d.dns_pendentes || 0) > 0) {
+          msg += '\n\nA API do GoDaddy nao esta configurada, entao o DNS pendente nao foi publicado.';
+        }
+        if (d.dns_falhas && d.dns_falhas.length) {
+          msg += '\n\n' + d.dns_falhas.map(function(f){ return f.dominio + ': ' + f.erro; }).join('\n');
+        }
+        alert(msg);
         loadDominios();
       } else {
         alert('Erro: ' + (d.error || 'Falha na sincronizacao'));
       }
-    }).catch(e => { btn.disabled = false; btn.textContent = 'Sincronizar com Mailgun'; alert('Erro: ' + e); });
+    }).catch(e => { btn.disabled = false; btn.textContent = 'Sincronizar com Elastic Email'; alert('Erro: ' + e); });
   });
 
   document.getElementById('btn-migrar-toml').addEventListener('click', () => {
@@ -856,6 +899,7 @@
     document.getElementById('stat-falhos').textContent = d.falhos || 0;
     document.getElementById('stat-blacklist').textContent = d.blacklist_skip || 0;
     document.getElementById('stat-duplicados').textContent = d.duplicados || 0;
+    document.getElementById('stat-prazo').textContent = d.reenvio_skip || 0;
     document.getElementById('stat-total').textContent = d.total || 0;
     const logEl = document.getElementById('monitor-log');
     if (d.log_lines && d.log_lines.length) {
@@ -882,11 +926,20 @@
       const rows = d.campanhas || [];
       if (!rows.length) { document.getElementById('dash-empty').style.display = ''; return; }
 
-      let totalCamp = rows.length, totalEnv = 0, totalDest = 0;
-      rows.forEach(r => { totalEnv += (r.enviados||0); totalDest += (r.total_destinatarios||0); });
+      let totalCamp = rows.length, totalEnv = 0, totalDest = 0, totalAb = 0, totalRec = 0, totalDev = 0;
+      rows.forEach(r => {
+        totalEnv += (r.enviados||0);
+        totalDest += (r.total_destinatarios||0);
+        totalAb += (r.aberturas||0);
+        totalRec += (r.recusas||0);
+        totalDev += (r.bounces||0);
+      });
       document.getElementById('dash-total-camp').textContent = totalCamp;
       document.getElementById('dash-total-env').textContent = totalEnv.toLocaleString('pt-BR');
       document.getElementById('dash-taxa').textContent = totalDest ? (totalEnv/totalDest*100).toFixed(1)+'%' : '--';
+      document.getElementById('dash-aberturas').textContent = totalAb.toLocaleString('pt-BR');
+      document.getElementById('dash-recusas').textContent = totalRec.toLocaleString('pt-BR');
+      document.getElementById('dash-bounces').textContent = totalDev.toLocaleString('pt-BR');
 
       const tbody = document.getElementById('dash-tbody');
       tbody.innerHTML = '';
@@ -896,6 +949,7 @@
         const dt = r.iniciado_em ? new Date(r.iniciado_em).toLocaleString('pt-BR') : '--';
         tr.innerHTML = `<td>${esc(r.campaign_id)}</td><td>${dt}</td><td>${esc(r.assunto||'')}</td>`
           + `<td>${r.total_destinatarios}</td><td>${r.enviados}</td><td>${r.falhos}</td>`
+          + `<td>${r.reenvio_skip||0}</td><td>${r.aberturas||0}</td><td>${r.recusas||0}</td><td>${r.bounces||0}</td>`
           + `<td><span class="camp-badge ${stCls}">${esc(r.status)}</span></td>`;
         tbody.appendChild(tr);
       });

@@ -59,6 +59,21 @@ journalctl -u api-calculo -f
 journalctl -u atualizacao-calculo-api -f
 ```
 
+### Sessões do tmux
+
+Nesta máquina o tmux **não serve** os projetos. Os processos que atendem porta sobem pelo systemd (tabela acima). As sessões só acompanham log ou guardam um shell na pasta do projeto. A exceção é o REFACTOR: o reprocessamento roda dentro do tmux, não como serviço.
+
+| Sessão | Pasta | O que executa |
+|--------|-------|----------------|
+| `API_CALCULO` | `../API_CALCULO/` | `journalctl -u api-calculo -u api-calculo-drive-worker -f`. A outra janela é um shell parado. O `run.py` da porta `9487` é o serviço `api-calculo`. |
+| `app_plataforma` | `Centro_Organizacional/` | `journalctl -u centro-organizacional -u apache2 -f`. A outra janela é um shell parado. O painel é o serviço `centro-organizacional`. |
+| `calculo_api` | `ATUALIZACAO_CALCULO-main/ATUALIZACAO_CALCULO-main/` | `journalctl -u atualizacao-calculo-api -f`. A outra janela é um shell parado. A API da porta `5099` é o serviço `atualizacao-calculo-api`. |
+| `campanha` | `Centro_Organizacional/` | Shell parado. A campanha do painel sobe com `centro-organizacional`. |
+| `levantamneto` | `Levantamento de Processos/` | `journalctl -u levantamento-processual-api -f`. A API da porta `8003` é o serviço `levantamento-processual-api`. |
+| `refactor_tjsp` | `../REFACTOR_TJSP/` | `python3 main.py --reprocessamento --txt casos_manuais.txt`. É o único processo de projeto que vive dentro do tmux. |
+
+Para carregar código novo da API de cálculo, do painel, do levantamento ou da atualização de cálculo, reinicie o serviço systemd correspondente. Abrir ou fechar a sessão do tmux não troca o processo que está na porta. O REFACTOR só pega código novo na próxima vez que o `main.py` dessa sessão for iniciado.
+
 ---
 
 ## 1) Centro Organizacional (painel)
@@ -197,7 +212,7 @@ As buscas por processo e incidente passaram a comparar a coluna direto:
 
 Continuam de fora destes índices: nome com `Requerente LIKE '%texto%'` e a busca só por CPF. A pesquisa de cumprimentos lê outra tabela.
 
-O painel (`centro-organizacional`) já foi reiniciado com esse código. A API de cálculo, o levantamento processual e um processo do REFACTOR que já estava no ar só carregam a consulta nova no próximo início.
+O painel (`centro-organizacional`) e o levantamento processual já foram reiniciados com esse código. O REFACTOR da sessão `refactor_tjsp` também já subiu depois da alteração. A API de cálculo (`api-calculo`, porta `9487`) só carrega a consulta nova no próximo `sudo systemctl restart api-calculo`.
 
 ---
 

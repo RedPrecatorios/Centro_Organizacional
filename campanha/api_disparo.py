@@ -15,6 +15,18 @@ from typing import Any
 import mysql.connector
 
 from campanha.api_templates import obter_template
+from concurrent.futures import ALL_COMPLETED, FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+from campanha.entregabilidade import (
+    aplicar_rodape,
+    emails_recebidos_na_janela,
+    garantir_esquema_campanha,
+    headers_descadastro,
+    paralelismo_para_prazo,
+    prazo_envio_segundos,
+    selecionar_par_da_semana,
+    url_descadastro,
+)
 from campanha.core import (
     BlacklistConfig,
     ContentConfig,
@@ -34,6 +46,7 @@ from campanha.core import (
     _render_template,
     _round_robin,
     _smtp_send,
+    _update_emails_campanha_log,
     build_recipient_template_vars,
     load_blacklist_for_campanha,
     recipient_blocked_by_blacklist,
@@ -43,6 +56,7 @@ from campanha.core import (
 _disparo_lock = threading.Lock()
 _disparo_atual: dict[str, Any] | None = None
 _cancelar_flag = threading.Event()
+_ultimo_flush_db = 0.0
 
 
 def _db_config() -> tuple[dict, str]:
@@ -64,16 +78,17 @@ def _conectar():
     return mysql.connector.connect(**cfg, database=db_name)
 
 
-def _atualizar_progresso(campaign_id: str, **fields):
-    global _disparo_atual
+def _atualizar_progresso(campaign_id: str, forcar: bool = False, **fields):
+    global _disparo_atual, _ultimo_flush_db
     if _disparo_atual and _disparo_atual.get("campaign_id") == campaign_id:
-        _disparo_atual.update(fields)
+        _disparo_atual.update({k: v for k, v in fields.items() if k != "log_line"})
 
     sets = []
     params = []
     field_map = {
         "enviados": "enviados", "falhos": "falhos",
         "blacklist_skip": "blacklist_skip", "duplicados": "duplicados",
+        "reenvio_skip": "reenvio_skip",
         "progresso_pct": "progresso_pct", "status": "status",
         "concluido_em": "concluido_em",
     }
@@ -92,6 +107,12 @@ def _atualizar_progresso(campaign_id: str, **fields):
 
     if not sets:
         return
+    if "status" in fields or "concluido_em" in fields:
+        forcar = True
+    agora = time.monotonic()
+    if not forcar and (agora - _ultimo_flush_db) < 1.0:
+        return
+    _ultimo_flush_db = agora
     params.append(campaign_id)
     try:
         conn = _conectar()
@@ -109,6 +130,73 @@ def _atualizar_progresso(campaign_id: str, **fields):
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+def _enviar_mensagem(domain, sending, mailgun, elasticemail, msg, meta: dict) -> tuple[bool, str | None, float]:
+    inicio = time.monotonic()
+    error = None
+    ok = False
+    for attempt in range(1, sending.max_retries + 1):
+        if _cancelar_flag.is_set():
+            return False, "cancelado", time.monotonic() - inicio
+        try:
+            if sending.method == "elasticemail" and elasticemail:
+                _elasticemail_send(domain, sending, elasticemail, msg)
+            elif sending.method == "mailgun" and mailgun:
+                _mailgun_send(domain, sending, mailgun, msg)
+            else:
+                _smtp_send(domain, sending, msg)
+            ok = True
+            error = None
+            break
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            time.sleep(min(10, 2 * attempt))
+    if error != "cancelado":
+        _registrar_resultado_email(
+            meta["to_norm"],
+            "sent" if ok else "failed",
+            None if ok else error,
+            meta["campaign_id"],
+            meta["dominio"],
+            meta["remetente"],
+        )
+    return ok, error, time.monotonic() - inicio
+
+
+def _data_curta(iso: str) -> str:
+    partes = (iso or "").split("-")
+    if len(partes) != 3:
+        return iso
+    return f"{partes[2]}/{partes[1]}/{partes[0]}"
+
+
+def _registrar_resultado_email(
+    email_norm: str,
+    status: str,
+    erro: str | None,
+    campaign_id: str,
+    dominio: str | None,
+    remetente: str | None,
+) -> None:
+    try:
+        conn = _conectar()
+        _update_emails_campanha_log(
+            conn,
+            email_norm_upper=email_norm,
+            status=status,
+            erro=erro,
+            campaign_id=campaign_id,
+            dry_run=False,
+            dominio=dominio,
+            remetente=remetente,
+        )
+        conn.close()
+    except Exception as exc:
+        _atualizar_progresso(
+            campaign_id,
+            log_line=f"[{_ts()}] Aviso: não gravei o resultado de {email_norm}: {exc}",
+        )
 
 
 def _thread_disparo(
@@ -158,6 +246,21 @@ def _thread_disparo(
             _disparo_atual["status"] = "erro"
         return
 
+    try:
+        conn_janela = _conectar()
+        garantir_esquema_campanha(conn_janela)
+        recentes = emails_recebidos_na_janela(conn_janela, 30)
+        conn_janela.close()
+    except Exception as e:
+        _atualizar_progresso(
+            campaign_id, status="erro",
+            log_line=f"[{_ts()}] ERRO ao ler o prazo de 30 dias: {e}",
+            concluido_em=datetime.now(timezone.utc).isoformat(),
+        )
+        if _disparo_atual:
+            _disparo_atual["status"] = "erro"
+        return
+
     html_t = (
         content.html_inline
         if content.html_inline is not None
@@ -169,117 +272,167 @@ def _thread_disparo(
         else _read_text(content.text_template)
     )
 
-    per_min = max(1, sending.per_domain_per_minute)
-    min_interval = 60.0 / per_min
-    last_sent: dict[str, float] = {d.name: 0.0 for d in domains}
     rr = _round_robin(domains)
+    _, info_par = selecionar_par_da_semana(list(domains), lambda d: d.from_email.split("@")[-1])
+    nomes = ", ".join(d.from_email.split("@")[-1] for d in domains)
+    prazo_s = float(prazo_envio_segundos())
+    prazo_min = int(prazo_s // 60)
+    inicio_disparo = time.monotonic()
+    latencias: list[float] = []
+    limite_em_voo = paralelismo_para_prazo(len(recipients), 1.0, prazo_s)
+    teto_em_voo = max(limite_em_voo, paralelismo_para_prazo(len(recipients), 4.0, prazo_s))
+    _atualizar_progresso(
+        campaign_id,
+        forcar=True,
+        log_line=(
+            f"[{_ts()}] Par da semana: {nomes} (até {_data_curta(info_par.get('fim') or '')}). "
+            f"Prazo: {prazo_min} min para {len(recipients)} destinatário(s). "
+            f"O ritmo se ajusta ao que falta."
+        ),
+    )
 
     sent_keys: set[str] = set()
-    totals = {"enviados": 0, "falhos": 0, "blacklist_skip": 0, "duplicados": 0}
+    totals = {"enviados": 0, "falhos": 0, "blacklist_skip": 0, "duplicados": 0, "reenvio_skip": 0}
     total = len(recipients)
+    concluidos = 0
+    em_voo: dict = {}
+    limite_atual = limite_em_voo
 
-    for i, r in enumerate(recipients):
-        if _cancelar_flag.is_set():
-            _atualizar_progresso(
-                campaign_id, status="cancelado",
-                log_line=f"[{_ts()}] Cancelado pelo utilizador.",
-                concluido_em=datetime.now(timezone.utc).isoformat(),
-            )
-            if _disparo_atual:
-                _disparo_atual["status"] = "cancelado"
-            return
+    def _recalibrar(faltam: int) -> None:
+        nonlocal limite_atual
+        sobra = prazo_s - (time.monotonic() - inicio_disparo)
+        media = (sum(latencias) / len(latencias)) if latencias else 1.0
+        preciso = paralelismo_para_prazo(max(1, faltam), media, sobra)
+        limite_atual = max(1, min(teto_em_voo, preciso))
 
-        to_norm = _norm_email(r.email)
-        if not to_norm:
-            continue
-
-        bloqueado, motivo_bl = recipient_blocked_by_blacklist(r, bl)
-        if bloqueado:
-            totals["blacklist_skip"] += 1
-            pct = round(((i + 1) / total) * 100, 2)
-            proc, inc = recipient_processo_incidente(r)
-            bl_msg = f"{r.email} [{motivo_bl}]"
-            if proc:
-                bl_msg += f" (proc={proc}" + (f" inc={inc})" if inc else ")")
-            _atualizar_progresso(
-                campaign_id, blacklist_skip=totals["blacklist_skip"],
-                progresso_pct=pct, log_line=f"[{_ts()}] Blacklist: {bl_msg}",
-            )
-            continue
-
-        vars_ = build_recipient_template_vars(
-            r, content.subject, dict(content.vars), mapeamento,
-        )
-        subj_final = vars_["subject"]
-        key = _idempotency_key(campaign_id, r.email, subj_final)
-        if key in sent_keys:
-            totals["duplicados"] += 1
-            pct = round(((i + 1) / total) * 100, 2)
-            _atualizar_progresso(
-                campaign_id, duplicados=totals["duplicados"],
-                progresso_pct=pct, log_line=f"[{_ts()}] Duplicado: {r.email}",
-            )
-            continue
-        sent_keys.add(key)
-
-        domain = next(rr)
-
-        now = time.time()
-        delta = now - last_sent[domain.name]
-        if delta < min_interval:
-            time.sleep(min_interval - delta)
-
-        html = _render_template(html_t, vars_)
-        text = _render_template(text_t, vars_)
-
-        msg = _build_message(
-            domain=domain, to_email=r.email, subject=subj_final,
-            html=html, text=text,
-            headers={"X-Campaign-Id": campaign_id, "X-Idempotency-Key": key},
-            reply_to=_effective_reply_to(domain, sending),
-        )
-
-        ok = False
-        error = None
-        for attempt in range(1, sending.max_retries + 1):
-            if _cancelar_flag.is_set():
-                break
-            try:
-                if sending.method == "elasticemail" and elasticemail:
-                    _elasticemail_send(domain, sending, elasticemail, msg)
-                elif sending.method == "mailgun" and mailgun:
-                    _mailgun_send(domain, sending, mailgun, msg)
-                else:
-                    _smtp_send(domain, sending, msg)
-                ok = True
-                break
-            except Exception as e:
-                error = f"{type(e).__name__}: {e}"
-                time.sleep(min(10, 2 * attempt))
-
-        last_sent[domain.name] = time.time()
-        pct = round(((i + 1) / total) * 100, 2)
-
+    def _anotar_envio(meta: dict, ok: bool, error: str | None, duracao: float) -> None:
+        nonlocal concluidos
+        concluidos += 1
+        if duracao > 0 and error != "cancelado":
+            latencias.append(duracao)
+        pct = round((concluidos / total) * 100, 2) if total else 100.0
         if ok:
             totals["enviados"] += 1
+            recentes.add(meta["to_norm"])
             _atualizar_progresso(
                 campaign_id, enviados=totals["enviados"],
-                progresso_pct=pct, log_line=f"[{_ts()}] Enviado: {r.email} via {domain.name}",
+                progresso_pct=pct,
+                log_line=f"[{_ts()}] Enviado: {meta['email']} via {meta['dominio']}",
             )
-        else:
-            totals["falhos"] += 1
-            _atualizar_progresso(
-                campaign_id, falhos=totals["falhos"],
-                progresso_pct=pct, log_line=f"[{_ts()}] FALHOU: {r.email} -- {error}",
+            return
+        if error == "cancelado":
+            return
+        totals["falhos"] += 1
+        _atualizar_progresso(
+            campaign_id, falhos=totals["falhos"],
+            progresso_pct=pct, log_line=f"[{_ts()}] FALHOU: {meta['email']} -- {error}",
+        )
+
+    def _colher(esperar_todos: bool) -> None:
+        if not em_voo:
+            return
+        feitos, _pendentes = wait(
+            set(em_voo),
+            return_when=ALL_COMPLETED if esperar_todos else FIRST_COMPLETED,
+        )
+        for fut in feitos:
+            meta = em_voo.pop(fut)
+            try:
+                ok, error, duracao = fut.result()
+            except Exception as exc:
+                ok, error, duracao = False, f"{type(exc).__name__}: {exc}", 0.0
+            _anotar_envio(meta, ok, error, duracao)
+
+    pool = ThreadPoolExecutor(max_workers=teto_em_voo)
+    try:
+        for i, r in enumerate(recipients):
+            if _cancelar_flag.is_set():
+                break
+
+            to_norm = _norm_email(r.email)
+            if not to_norm:
+                continue
+
+            bloqueado, motivo_bl = recipient_blocked_by_blacklist(r, bl)
+            if bloqueado:
+                totals["blacklist_skip"] += 1
+                pct = round(((i + 1) / total) * 100, 2)
+                proc, inc = recipient_processo_incidente(r)
+                bl_msg = f"{r.email} [{motivo_bl}]"
+                if proc:
+                    bl_msg += f" (proc={proc}" + (f" inc={inc})" if inc else ")")
+                _atualizar_progresso(
+                    campaign_id, blacklist_skip=totals["blacklist_skip"],
+                    progresso_pct=pct, log_line=f"[{_ts()}] Blacklist: {bl_msg}",
+                )
+                _registrar_resultado_email(
+                    to_norm, "skipped_blacklist", motivo_bl, campaign_id, None, None,
+                )
+                continue
+
+            if to_norm in recentes:
+                totals["reenvio_skip"] += 1
+                pct = round(((i + 1) / total) * 100, 2)
+                _atualizar_progresso(
+                    campaign_id, reenvio_skip=totals["reenvio_skip"],
+                    progresso_pct=pct,
+                    log_line=f"[{_ts()}] Prazo 30 dias: {r.email}",
+                )
+                continue
+
+            vars_ = build_recipient_template_vars(
+                r, content.subject, dict(content.vars), mapeamento,
             )
+            subj_final = vars_["subject"]
+            key = _idempotency_key(campaign_id, r.email, subj_final)
+            if key in sent_keys:
+                totals["duplicados"] += 1
+                pct = round(((i + 1) / total) * 100, 2)
+                _atualizar_progresso(
+                    campaign_id, duplicados=totals["duplicados"],
+                    progresso_pct=pct, log_line=f"[{_ts()}] Duplicado: {r.email}",
+                )
+                continue
+            sent_keys.add(key)
+
+            domain = next(rr)
+            link = url_descadastro(r.email)
+            vars_["unsubscribe_url"] = link
+            html = _render_template(html_t, vars_)
+            text = _render_template(text_t, vars_)
+            html, text = aplicar_rodape(html, text, link)
+            msg = _build_message(
+                domain=domain, to_email=r.email, subject=subj_final,
+                html=html, text=text,
+                headers=headers_descadastro(link, campaign_id, key),
+                reply_to=_effective_reply_to(domain, sending),
+            )
+            meta = {
+                "to_norm": to_norm,
+                "email": r.email,
+                "dominio": domain.name,
+                "remetente": domain.from_email,
+                "campaign_id": campaign_id,
+            }
+            fut = pool.submit(_enviar_mensagem, domain, sending, mailgun, elasticemail, msg, meta)
+            em_voo[fut] = meta
+            faltam = max(1, (total - i - 1) + len(em_voo))
+            _recalibrar(faltam)
+            while len(em_voo) >= limite_atual and not _cancelar_flag.is_set():
+                _colher(False)
+                _recalibrar(max(1, (total - i - 1) + len(em_voo)))
+        _colher(True)
+    finally:
+        pool.shutdown(wait=True)
 
     final_status = "cancelado" if _cancelar_flag.is_set() else "concluido"
     _atualizar_progresso(
-        campaign_id, status=final_status, progresso_pct=100.0,
+        campaign_id, forcar=True, status=final_status, progresso_pct=100.0,
         concluido_em=datetime.now(timezone.utc).isoformat(),
         log_line=(
             f"[{_ts()}] Concluido -- Env:{totals['enviados']} "
-            f"Falha:{totals['falhos']} BL:{totals['blacklist_skip']} Dup:{totals['duplicados']}"
+            f"Falha:{totals['falhos']} BL:{totals['blacklist_skip']} "
+            f"Prazo30:{totals['reenvio_skip']} Dup:{totals['duplicados']}"
         ),
     )
     if _disparo_atual:
@@ -318,6 +471,7 @@ def iniciar_disparo(
         conn = mysql.connector.connect(**cfg_dict, database=db_name)
         cur = conn.cursor(dictionary=True)
 
+        # mailgun_state guarda o estado no provedor atual (Elastic Email): active = SPF+DKIM ok.
         cur.execute("SELECT * FROM campanha_dominios WHERE ativo = 1 AND mailgun_state = 'active' ORDER BY nome")
         dom_rows = cur.fetchall()
         if not dom_rows:
@@ -329,6 +483,9 @@ def iniciar_disparo(
             conn.close()
             _disparo_lock.release()
             return {"ok": False, "error": "Nenhum dominio cadastrado. Adicione dominios antes de disparar."}
+
+        par, _info_par = selecionar_par_da_semana(dom_rows, lambda r: r.get("dominio") or "")
+        dom_rows = [r for r in par if r.get("mailgun_state") == "active"] or par
 
         domains = [
             DomainSender(
@@ -412,7 +569,7 @@ def iniciar_disparo(
             "status": "preparando",
             "total": len(recipients),
             "enviados": 0, "falhos": 0,
-            "blacklist_skip": 0, "duplicados": 0,
+            "blacklist_skip": 0, "duplicados": 0, "reenvio_skip": 0,
             "progresso_pct": 0, "log_lines": [],
             "iniciado_em": None,
         }
@@ -454,6 +611,7 @@ def obter_status() -> dict:
         "falhos": _disparo_atual.get("falhos", 0),
         "blacklist_skip": _disparo_atual.get("blacklist_skip", 0),
         "duplicados": _disparo_atual.get("duplicados", 0),
+        "reenvio_skip": _disparo_atual.get("reenvio_skip", 0),
         "progresso_pct": _disparo_atual.get("progresso_pct", 0),
         "log_lines": (_disparo_atual.get("log_lines") or [])[-30:],
     }
@@ -461,11 +619,12 @@ def obter_status() -> dict:
 
 def obter_historico(limit: int = 50) -> list[dict]:
     conn = _conectar()
+    garantir_esquema_campanha(conn)
     cur = conn.cursor(dictionary=True)
     cur.execute(
         """SELECT campaign_id, assunto, total_destinatarios, enviados, falhos,
-                  blacklist_skip, duplicados, status, progresso_pct, origem,
-                  iniciado_em, concluido_em, criado_por
+                  blacklist_skip, duplicados, reenvio_skip, aberturas, recusas, bounces,
+                  status, progresso_pct, origem, iniciado_em, concluido_em, criado_por
            FROM campanha_disparos ORDER BY id DESC LIMIT %s""",
         (limit,),
     )
@@ -501,21 +660,16 @@ def obter_historico_detalhe(campaign_id: str) -> dict | None:
     return row
 
 
-def buscar_destinatarios_base(
+def _where_destinatarios(
     periodo_entrada_inicio: str | None = None,
     periodo_entrada_fim: str | None = None,
     periodo_disparo_inicio: str | None = None,
     periodo_disparo_fim: str | None = None,
     status_disparo: str | None = None,
     fornecedor: str | None = None,
-) -> list[dict]:
-    """Busca emails da tabela `emails` com filtros."""
-    conn = _conectar()
-    cur = conn.cursor(dictionary=True)
-
+) -> tuple[str, list]:
     where = ["1=1"]
     params: list = []
-
     if periodo_entrada_inicio:
         where.append("e.primeira_aparicao >= %s")
         params.append(periodo_entrada_inicio)
@@ -537,7 +691,47 @@ def buscar_destinatarios_base(
     if fornecedor:
         where.append("e.fornecedor = %s")
         params.append(fornecedor)
+    return " AND ".join(where), params
 
+
+def contar_destinatarios_base(**filtros) -> int:
+    where, params = _where_destinatarios(**filtros)
+    conn = _conectar()
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT e.email, p.nome, p.cpf,
+                   pj.numero_processo, pj.numero_incidente
+            FROM emails e
+            JOIN processos_juridicos pj ON pj.id = e.id_processo_juridico
+            JOIN pessoas p ON p.id = pj.id_pessoa
+            WHERE {where}
+        ) t
+        """,
+        params,
+    )
+    total = int(cur.fetchone()[0] or 0)
+    cur.close()
+    conn.close()
+    return total
+
+
+def buscar_destinatarios_base(
+    periodo_entrada_inicio: str | None = None,
+    periodo_entrada_fim: str | None = None,
+    periodo_disparo_inicio: str | None = None,
+    periodo_disparo_fim: str | None = None,
+    status_disparo: str | None = None,
+    fornecedor: str | None = None,
+    limite: int | None = None,
+) -> list[dict]:
+    """Busca emails da tabela `emails` com filtros. Sem limite, devolve a lista inteira."""
+    where, params = _where_destinatarios(
+        periodo_entrada_inicio, periodo_entrada_fim,
+        periodo_disparo_inicio, periodo_disparo_fim,
+        status_disparo, fornecedor,
+    )
     sql = f"""
         SELECT DISTINCT e.email, p.nome, p.cpf,
                pj.numero_processo AS processo,
@@ -545,10 +739,14 @@ def buscar_destinatarios_base(
         FROM emails e
         JOIN processos_juridicos pj ON pj.id = e.id_processo_juridico
         JOIN pessoas p ON p.id = pj.id_pessoa
-        WHERE {' AND '.join(where)}
+        WHERE {where}
         ORDER BY e.email
-        LIMIT 10000
     """
+    if limite is not None:
+        sql += " LIMIT %s"
+        params.append(int(limite))
+    conn = _conectar()
+    cur = conn.cursor(dictionary=True)
     cur.execute(sql, params)
     rows = cur.fetchall()
     cur.close()

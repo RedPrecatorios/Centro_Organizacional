@@ -218,11 +218,22 @@ def _ensure_emails_campanha_columns_mysql(conn) -> None:
                 "DATETIME(3) DEFAULT NULL COMMENT 'Primeiro disparo registrado pela campanha'",
             ),
             ("campanha_disparo_ultimo", "DATETIME(3) DEFAULT NULL COMMENT 'Ultimo disparo registrado pela campanha'"),
+            (
+                "campanha_disparo_ultimo_sucesso",
+                "DATETIME(3) DEFAULT NULL COMMENT 'Ultimo envio aceito; base do prazo de 30 dias'",
+            ),
             ("campanha_disparo_campaign_id", "VARCHAR(191) DEFAULT NULL"),
             ("campanha_disparo_dry_run", "TINYINT(1) DEFAULT NULL COMMENT '1=simulacao'"),
             ("campanha_disparo_dominio", "VARCHAR(128) DEFAULT NULL COMMENT 'Chave domains do disparo'"),
             ("campanha_disparo_remetente", "VARCHAR(320) DEFAULT NULL COMMENT 'Remetente from'"),
+            ("campanha_aberturas", "INT NOT NULL DEFAULT 0"),
+            ("campanha_ultima_abertura", "DATETIME(3) DEFAULT NULL"),
+            ("campanha_cliques", "INT NOT NULL DEFAULT 0"),
+            ("campanha_descadastro", "DATETIME(3) DEFAULT NULL"),
+            ("campanha_reclamacao", "DATETIME(3) DEFAULT NULL"),
+            ("campanha_bounce", "DATETIME(3) DEFAULT NULL"),
         ]
+        sucesso_nova = False
         for col_name, col_type in cols:
             cur.execute(
                 """
@@ -235,6 +246,19 @@ def _ensure_emails_campanha_columns_mysql(conn) -> None:
             )
             if cur.fetchone()[0] == 0:
                 cur.execute(f"ALTER TABLE emails ADD COLUMN `{col_name}` {col_type}")
+                if col_name == "campanha_disparo_ultimo_sucesso":
+                    sucesso_nova = True
+        if sucesso_nova:
+            cur.execute(
+                """
+                UPDATE emails
+                   SET campanha_disparo_ultimo_sucesso = campanha_disparo_ultimo
+                 WHERE campanha_disparo_status = 'sent'
+                   AND campanha_disparo_ultimo_sucesso IS NULL
+                   AND campanha_disparo_ultimo IS NOT NULL
+                   AND (campanha_disparo_dry_run IS NULL OR campanha_disparo_dry_run = 0)
+                """
+            )
         conn.commit()
     finally:
         cur.close()
@@ -252,30 +276,69 @@ def _update_emails_campanha_log(
     remetente: str | None,
 ) -> None:
     cur = conn.cursor()
+    # Falha e bloqueio não apagam o último envio aceito. Simulação não abre o prazo de 30 dias.
     sql = """
     UPDATE emails SET
-      campanha_disparo_status = %s,
-      campanha_disparo_erro = %s,
-      campanha_disparo_ultimo = CURRENT_TIMESTAMP(3),
-      campanha_disparo_campaign_id = %s,
-      campanha_disparo_dry_run = %s,
-      campanha_disparo_dominio = %s,
-      campanha_disparo_remetente = %s,
-      campanha_disparo_data_entrada = COALESCE(
-        campanha_disparo_data_entrada, CURRENT_TIMESTAMP(3)
-      )
+      campanha_disparo_status = CASE
+        WHEN %s IN ('sent', 'failed') THEN %s
+        WHEN campanha_disparo_ultimo_sucesso IS NOT NULL THEN campanha_disparo_status
+        ELSE %s
+      END,
+      campanha_disparo_erro = CASE
+        WHEN %s = 'failed' THEN %s
+        WHEN campanha_disparo_ultimo_sucesso IS NOT NULL THEN campanha_disparo_erro
+        ELSE campanha_disparo_erro
+      END,
+      campanha_disparo_ultimo = CASE
+        WHEN %s IN ('sent', 'failed') THEN CURRENT_TIMESTAMP(3)
+        WHEN campanha_disparo_ultimo_sucesso IS NOT NULL THEN campanha_disparo_ultimo
+        ELSE CURRENT_TIMESTAMP(3)
+      END,
+      campanha_disparo_ultimo_sucesso = CASE
+        WHEN %s = 'sent' AND %s = 0 THEN CURRENT_TIMESTAMP(3)
+        ELSE campanha_disparo_ultimo_sucesso
+      END,
+      campanha_disparo_campaign_id = CASE
+        WHEN %s IN ('sent', 'failed') THEN %s
+        WHEN campanha_disparo_ultimo_sucesso IS NOT NULL THEN campanha_disparo_campaign_id
+        ELSE %s
+      END,
+      campanha_disparo_dry_run = CASE
+        WHEN %s IN ('sent', 'failed') THEN %s
+        ELSE campanha_disparo_dry_run
+      END,
+      campanha_disparo_dominio = CASE
+        WHEN %s IN ('sent', 'failed') THEN %s
+        ELSE campanha_disparo_dominio
+      END,
+      campanha_disparo_remetente = CASE
+        WHEN %s IN ('sent', 'failed') THEN %s
+        ELSE campanha_disparo_remetente
+      END,
+      campanha_disparo_data_entrada = CASE
+        WHEN %s = 'sent' THEN COALESCE(campanha_disparo_data_entrada, CURRENT_TIMESTAMP(3))
+        ELSE campanha_disparo_data_entrada
+      END
     WHERE email IS NOT NULL AND UPPER(TRIM(email)) = %s
     """
     err = erro[:65535] if erro else None
+    status_db = status[:40]
+    campanha_db = campaign_id[:191]
+    dry = 1 if dry_run else 0
+    dominio_db = dominio[:128] if dominio else None
+    remetente_db = remetente[:320] if remetente else None
     cur.execute(
         sql,
         (
-            status[:40],
-            err,
-            campaign_id[:191],
-            1 if dry_run else 0,
-            (dominio[:128] if dominio else None),
-            (remetente[:320] if remetente else None),
+            status_db, status_db, status_db,
+            status_db, err,
+            status_db,
+            status_db, dry,
+            status_db, campanha_db, campanha_db,
+            status_db, dry,
+            status_db, dominio_db,
+            status_db, remetente_db,
+            status_db,
             email_norm_upper[:300],
         ),
     )
@@ -884,6 +947,10 @@ def _elasticemail_send(domain: DomainSender, cfg: SendingConfig, ee: ElasticEmai
     # A chave no objeto é a mesma do .env; o cliente lê ELASTICEMAIL_API_KEY.
     if not os.environ.get("ELASTICEMAIL_API_KEY", "").strip() and ee.api_key:
         os.environ["ELASTICEMAIL_API_KEY"] = ee.api_key
+    headers = {}
+    for nome in ("List-Unsubscribe", "List-Unsubscribe-Post", "X-Campaign-Id"):
+        if msg[nome]:
+            headers[nome] = str(msg[nome])
     elasticemail_send(
         from_addr=from_addr,
         to_addr=to_addr,
@@ -892,6 +959,8 @@ def _elasticemail_send(domain: DomainSender, cfg: SendingConfig, ee: ElasticEmai
         text=text_content,
         reply_to=reply,
         timeout=cfg.smtp_timeout_seconds,
+        headers=headers or None,
+        rastrear=True,
     )
 
 
@@ -966,10 +1035,16 @@ def run_campaign(
         else _read_text(cfg.content.text_template)
     )
 
-    # rate limit simples (por domínio): espaçamento mínimo entre envios
-    per_min = max(1, int(cfg.sending.per_domain_per_minute))
-    min_interval = 60.0 / per_min
-    last_sent_at: dict[str, float] = {d.name: 0.0 for d in cfg.domains}
+    from dataclasses import replace
+
+    from campanha.entregabilidade import selecionar_par_da_semana
+
+    par, _info_par = selecionar_par_da_semana(
+        list(cfg.domains),
+        lambda d: (d.from_email or "").split("@")[-1],
+    )
+    if par:
+        cfg = replace(cfg, domains=par)
 
     rr = _round_robin(cfg.domains)
 
@@ -979,14 +1054,25 @@ def run_campaign(
             emails_log_conn = mysql.connector.connect(**_mysql_connect_kwargs(cfg.mysql))
             _ensure_emails_campanha_columns_mysql(emails_log_conn)
 
+        from campanha.entregabilidade import (
+            aplicar_rodape,
+            emails_recebidos_na_janela,
+            headers_descadastro,
+            url_descadastro,
+        )
+
+        recentes: set[str] = set()
+        if emails_log_conn is not None:
+            recentes = emails_recebidos_na_janela(emails_log_conn, 30)
+
         totals = {
             "input": len(recipients),
             "skipped_blacklist": 0,
             "skipped_duplicate": 0,
+            "skipped_recente": 0,
             "sent": 0,
             "failed": 0,
         }
-
         for r in recipients:
             to_norm = _norm_email(r.email)
             if not to_norm:
@@ -1026,6 +1112,18 @@ def run_campaign(
                         )
                 continue
 
+            if to_norm in recentes:
+                totals["skipped_recente"] += 1
+                logger.write(
+                    {
+                        "event": "skip_recente",
+                        "campaign_id": campaign_id,
+                        "to": r.email,
+                        "name": r.name,
+                    }
+                )
+                continue
+
             key = _idempotency_key(campaign_id, r.email, cfg.content.subject)
             if key in sent_keys:
                 totals["skipped_duplicate"] += 1
@@ -1062,12 +1160,6 @@ def run_campaign(
 
             domain = next(rr)
 
-            # rate limit por domínio (espere o suficiente desde o último envio)
-            now = time.time()
-            delta = now - last_sent_at[domain.name]
-            if delta < min_interval:
-                time.sleep(min_interval - delta)
-
             vars_ = dict(cfg.content.vars)
             vars_.update(
                 {
@@ -1081,8 +1173,11 @@ def run_campaign(
                 }
             )
             vars_.update(r.fields)
+            link = url_descadastro(r.email)
+            vars_["unsubscribe_url"] = link
             html = _render_template(html_t, vars_)
             text = _render_template(text_t, vars_)
+            html, text = aplicar_rodape(html, text, link)
 
             msg = _build_message(
                 domain=domain,
@@ -1090,7 +1185,7 @@ def run_campaign(
                 subject=cfg.content.subject,
                 html=html,
                 text=text,
-                headers={"X-Campaign-Id": campaign_id, "X-Idempotency-Key": key},
+                headers=headers_descadastro(link, campaign_id, key),
                 reply_to=_effective_reply_to(domain, cfg.sending),
             )
 
@@ -1121,10 +1216,9 @@ def run_campaign(
                     error = f"{type(e).__name__}: {e}"
                     break
 
-            last_sent_at[domain.name] = time.time()
-
             if ok:
                 totals["sent"] += 1
+                recentes.add(to_norm)
                 sent_keys.add(key)
                 _append_sent_key(sent_keys_file, key)
                 logger.write(

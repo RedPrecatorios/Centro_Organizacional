@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>RED Layout — Controle de Baias</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/layout-app/static/styles.css?v=goto41" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='18' width='100' height='100' fill='%23b42318'/><text x='50' y='64' text-anchor='middle' font-size='48' fill='white' font-family='Arial'>R</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">RED</span>
+      <div>
+        <strong>Layout</strong>
+        <small>Controle de baias e máquinas</small>
+      </div>
+    </div>
+
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 21.5 21.5 20l-6-6zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input id="search" type="search" placeholder="Buscar hostname, pessoa, e-mail, ramal ou baia..." autocomplete="off" />
+    </label>
+
+    <nav class="view-toggle" role="tablist">
+      <button class="active" data-view="map" type="button">Mapa</button>
+      <button data-view="inventory" type="button">Inventário</button>
+      <button data-view="goto" type="button">Gerenciar Usuário</button>
+      <button data-view="history" type="button">Histórico</button>
+    </nav>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <main>
+    <section id="map-view" class="view active">
+      <div class="map-toolbar">
+        <div class="filters" id="area-filters"></div>
+      </div>
+      <div class="map-controls">
+        <div class="map-control">
+          <span class="map-control-label">Ocupação</span>
+          <div class="seg" role="group" aria-label="Ocupação">
+            <button type="button" data-map-occupancy="all">Todas</button>
+            <button type="button" data-map-occupancy="busy">Ocupadas</button>
+            <button type="button" data-map-occupancy="free">Livres</button>
+          </div>
+        </div>
+        <div class="map-control">
+          <span class="map-control-label">Rótulo</span>
+          <div class="seg" role="group" aria-label="Rótulo da baia">
+            <button type="button" data-map-label="person">Pessoa</button>
+            <button type="button" data-map-label="hostname">Hostname</button>
+            <button type="button" data-map-label="ramal">Ramal</button>
+            <button type="button" data-map-label="area">Área</button>
+          </div>
+        </div>
+        <div class="map-control">
+          <label class="map-toggle"><input type="checkbox" id="map-rooms" /> Salas</label>
+          <label class="map-toggle"><input type="checkbox" id="map-empty" /> Baias livres</label>
+        </div>
+        <div class="map-control map-zoom">
+          <button type="button" class="icon-btn" data-map-zoom="-" aria-label="Diminuir zoom">−</button>
+          <span id="map-zoom-label">100%</span>
+          <button type="button" class="icon-btn" data-map-zoom="+" aria-label="Aumentar zoom">+</button>
+          <button type="button" class="btn ghost" id="map-print">Imprimir</button>
+        </div>
+      </div>
+      <div class="map-wrap" id="map-wrap">
+        <div id="floorplan"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <section id="inventory-view" class="view">
+      <div class="table-toolbar">
+        <div class="filters" id="inv-filters"></div>
+        <div class="table-actions">
+          <button type="button" class="btn ghost" id="btn-export">Exportar CSV</button>
+          <label class="btn ghost file-btn">
+            Importar CSV
+            <input type="file" id="import-file" accept=".csv,text/csv" hidden />
+          </label>
+          <button type="button" class="btn primary" id="btn-new">Nova máquina</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Hostname</th>
+              <th>Baia</th>
+              <th>Usuário</th>
+              <th>Área</th>
+              <th>E-mail</th>
+              <th>Ramal</th>
+              <th>Telefone</th>
+              <th>Windows</th>
+              <th>Office</th>
+              <th>BitLocker</th>
+            </tr>
+          </thead>
+          <tbody id="inventory-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="goto-view" class="view">
+      <div class="users-layout">
+        <div class="goto-card">
+          <p class="kicker">Monday · Plataforma · SysCall · GoTo</p>
+          <h2>Novo usuário</h2>
+          <p class="goto-status" id="plataforma-status">Verificando Plataforma Central…</p>
+          <p class="goto-status" id="monday-status">Verificando Monday…</p>
+          <p class="goto-status" id="syscall-status">Verificando SysCall…</p>
+          <p class="goto-status" id="goto-status">Verificando GoTo…</p>
+          <form id="goto-form">
+            <div class="grid">
+              <div class="field">
+                <label>Nome
+                  <input name="first_name" required minlength="1" maxlength="80" autocomplete="given-name" />
+                </label>
+              </div>
+              <div class="field">
+                <label>Sobrenome
+                  <input name="last_name" required minlength="1" maxlength="80" autocomplete="family-name" />
+                </label>
+              </div>
+              <div class="field full">
+                <label>E-mail
+                  <input name="email" type="email" required maxlength="200" placeholder="nome.sobrenome@redprecatorios.com.br" autocomplete="email" />
+                </label>
+              </div>
+              <fieldset class="field full type-fieldset" id="goto-area">
+                <legend>Tipo do usuário</legend>
+                <div class="type-options">
+                  <label class="type-option">
+                    <input type="radio" name="area" value="COMPRAS" required />
+                    Comprador
+                  </label>
+                  <label class="type-option">
+                    <input type="radio" name="area" value="JURIDICO" required />
+                    Jurídico
+                  </label>
+                  <label class="type-option">
+                    <input type="radio" name="area" value="CALCULO" required />
+                    Calculista
+                  </label>
+                </div>
+              </fieldset>
+              <p class="hint full" id="goto-area-hint">Escolha o tipo. A Plataforma Central cria o login NomeSobrenome com senha Nome@ano. A Monday recebe convite de membro. Comprador não entra sozinho no SysCall: ao criar, o painel pede para cadastrar manualmente (Operador / RedPre), com user e senha iguais à parte antes do @.</p>
+              <div class="field full goto-enable-row">
+                <button type="button" class="btn" id="goto-enable" aria-pressed="false">Adicionar GoTo</button>
+                <p class="hint" id="goto-enable-hint">Ative somente para compradores. Desligado, nada é criado na GoTo.</p>
+              </div>
+              <div id="goto-options" hidden>
+                <p class="hint" id="goto-email-status">Informe o e-mail para verificar se o usuário já existe.</p>
+                <div class="field full">
+                  <label>Número de contato
+                    <select name="phone" id="goto-phone"></select>
+                  </label>
+                </div>
+                <p class="hint" id="goto-phone-hint">Ao escolher um número, a GoTo recebe o nome, o identificador de chamada e encaminha as chamadas para o ramal da pessoa.</p>
+                <div id="goto-existing" class="person-summary" hidden></div>
+                <div class="field full">
+                  <label class="check-row">
+                    <input name="send_welcome" type="checkbox" checked />
+                    Enviar e-mail de boas-vindas da GoTo
+                  </label>
+                </div>
+                <p class="hint">A criação atribui GoTo Connect Standard, grupo Compradores, idioma Português (Brasil) e fuso de Brasília.</p>
+              </div>
+              <div class="field full">
+                <label>Vincular à máquina
+                  <select name="machine_id" id="goto-machine"></select>
+                </label>
+              </div>
+              <p class="hint" id="goto-bay-hint">A baia segue a máquina escolhida.</p>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn primary" id="goto-submit">Criar usuário</button>
+            </div>
+          </form>
+          <p class="goto-feedback" id="goto-result" hidden role="status"></p>
+        </div>
+
+        <div class="users-panel">
+          <div class="table-toolbar">
+            <h2>Usuários cadastrados</h2>
+            <div class="toolbar-actions">
+              <button type="button" class="btn ghost" id="goto-phones-refresh">Atualizar lista telefônica</button>
+              <button type="button" class="btn ghost" id="goto-refresh">Atualizar</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>E-mail</th>
+                  <th>Número de contato</th>
+                  <th>Máquina / baia</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="goto-users-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="history-view" class="view">
+      <div class="table-toolbar">
+        <div>
+          <h2>Histórico de usuários</h2>
+          <p class="hint">Auditoria de quem já passou pela plataforma: dados, data de entrada e data de exclusão. A conta permanece suspensa na GoTo.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>E-mail</th>
+              <th>Área</th>
+              <th>Número</th>
+              <th>Máquina / baia</th>
+              <th>Entrada</th>
+              <th>Exclusão</th>
+            </tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-panel">
+      <header>
+        <div>
+          <p class="kicker" id="drawer-kicker">Baia</p>
+          <h2 id="drawer-title">Detalhes</h2>
+        </div>
+        <button type="button" class="icon-btn" id="drawer-close" aria-label="Fechar">×</button>
+      </header>
+      <form id="machine-form"></form>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" hidden role="status"></div>
+  <div class="modal-backdrop" id="syscall-manual" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="syscall-manual-title">
+      <p class="kicker">SysCall</p>
+      <h2 id="syscall-manual-title">Cadastre este usuário no SysCall</h2>
+      <p>O usuário foi criado aqui. O SysCall não recebe esse cadastro automaticamente. Inclua a pessoa manualmente no SysCall com os dados abaixo.</p>
+      <dl class="modal-data">
+        <div><dt>Nome</dt><dd id="syscall-manual-nome"></dd></div>
+        <div><dt>E-mail</dt><dd id="syscall-manual-email"></dd></div>
+        <div><dt>Usuário</dt><dd id="syscall-manual-user"></dd></div>
+        <div><dt>Senha</dt><dd id="syscall-manual-pass"></dd></div>
+        <div><dt>Tipo</dt><dd>Operador / RedPre</dd></div>
+      </dl>
+      <div class="form-actions">
+        <button type="button" class="btn primary" id="syscall-manual-ok">Entendi</button>
+      </div>
+    </div>
+  </div>
+  <script src="/layout-app/static/app.js?v=goto42"></script>
+</body>
+</html>

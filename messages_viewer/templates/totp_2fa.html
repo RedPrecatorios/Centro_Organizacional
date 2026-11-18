@@ -34,8 +34,21 @@
 
       <section class="totp-add-card" aria-labelledby="totp-add-title">
         <h2 class="dash-section-title" id="totp-add-title">Inserir novo código</h2>
-        <p class="totp-add-hint">Cole a chave secreta (Base32) ou o link <code>otpauth://</code>. Nome e emissor são opcionais se vierem no link.</p>
+        <p class="totp-add-hint">Cole a chave secreta (Base32), o link <code>otpauth://</code>, ou leia o QR Code de cadastro. Nome e emissor são opcionais se vierem no link ou no QR.</p>
         <form id="totp-add-form" class="totp-add-form" autocomplete="off">
+          <div class="totp-qr">
+            <div class="totp-qr-actions">
+              <button type="button" class="refresh-btn" id="totp-qr-file-btn">Ler imagem do QR</button>
+              <button type="button" class="refresh-btn" id="totp-qr-cam-btn">Usar câmera</button>
+              <input type="file" id="totp-qr-file" class="totp-qr-file" accept="image/*" />
+            </div>
+            <div id="totp-qr-cam" class="totp-qr-cam dash-hidden">
+              <video id="totp-qr-video" playsinline muted></video>
+              <p class="totp-qr-cam-hint">Aponte para o QR Code. A leitura fica neste navegador.</p>
+              <button type="button" class="totp-btn" id="totp-qr-cam-stop">Fechar câmera</button>
+            </div>
+            <canvas id="totp-qr-canvas" class="totp-qr-canvas" hidden></canvas>
+          </div>
           <div class="totp-field totp-field-wide">
             <label for="totp-secret">Chave ou otpauth://</label>
             <textarea id="totp-secret" class="auth-input totp-textarea" rows="2" required placeholder="JBSWY3DPEHPK3PXP ou otpauth://totp/..."></textarea>
@@ -65,6 +78,7 @@
     </main>
   </div>
 
+  <script src="{{ url_for('static', filename='js/jsQR.min.js') }}"></script>
   <script>
   (function () {
     const listEl = document.getElementById('totp-list');
@@ -75,6 +89,16 @@
     const form = document.getElementById('totp-add-form');
     const btnRefresh = document.getElementById('totp-refresh');
     const btnAdd = document.getElementById('totp-add-btn');
+    const btnQrFile = document.getElementById('totp-qr-file-btn');
+    const btnQrCam = document.getElementById('totp-qr-cam-btn');
+    const btnQrStop = document.getElementById('totp-qr-cam-stop');
+    const qrFile = document.getElementById('totp-qr-file');
+    const qrCam = document.getElementById('totp-qr-cam');
+    const qrVideo = document.getElementById('totp-qr-video');
+    const qrCanvas = document.getElementById('totp-qr-canvas');
+    let camStream = null;
+    let camTimer = null;
+    let camLooking = false;
 
     let accounts = [];
     let toastT = null;
@@ -248,6 +272,189 @@
         btnRefresh.classList.remove('spinning');
       }
     }
+
+    function decodeImageData(imageData) {
+      if (typeof jsQR !== 'function' || !imageData) return '';
+      var code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'attemptBoth'
+      });
+      return code && code.data ? String(code.data).trim() : '';
+    }
+
+    function canvasFromSource(source, sw, sh) {
+      var maxEdge = 1600;
+      var scale = Math.min(1, maxEdge / Math.max(sw, sh));
+      var w = Math.max(1, Math.round(sw * scale));
+      var h = Math.max(1, Math.round(sh * scale));
+      qrCanvas.width = w;
+      qrCanvas.height = h;
+      var ctx = qrCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(source, 0, 0, w, h);
+      return ctx.getImageData(0, 0, w, h);
+    }
+
+    function decodeSource(source, sw, sh, thorough) {
+      if (!sw || !sh) return '';
+      var found = decodeImageData(canvasFromSource(source, sw, sh));
+      if (found || !thorough) return found;
+      if (Math.max(sw, sh) <= 1600) return '';
+      qrCanvas.width = sw;
+      qrCanvas.height = sh;
+      var ctx = qrCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(source, 0, 0, sw, sh);
+      return decodeImageData(ctx.getImageData(0, 0, sw, sh));
+    }
+
+    function parseOtpauth(raw) {
+      try {
+        var u = new URL(raw);
+        if ((u.protocol || '').toLowerCase() !== 'otpauth:') return null;
+        var path = decodeURIComponent(u.pathname || '').replace(/^\//, '');
+        var issuer = u.searchParams.get('issuer') || '';
+        var name = path;
+        var colon = path.indexOf(':');
+        if (colon >= 0) {
+          if (!issuer) issuer = path.slice(0, colon);
+          name = path.slice(colon + 1);
+        }
+        return { name: name.trim(), issuer: issuer.trim() };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function applyQrText(text) {
+      var raw = String(text || '').replace(/[\u200b\u200c\u200d\ufeff]/g, '').trim();
+      if (!raw) {
+        showToast('QR sem conteúdo.', true);
+        return;
+      }
+      if (/^otpauth-migration:/i.test(raw)) {
+        showToast('Esse QR junta várias contas. Use o QR de cadastro de uma conta (otpauth://).', true);
+        return;
+      }
+      var secretEl = document.getElementById('totp-secret');
+      var nameEl = document.getElementById('totp-name');
+      var issuerEl = document.getElementById('totp-issuer');
+      if (/^otpauth:\/\//i.test(raw)) {
+        if (!/^otpauth:\/\/totp\//i.test(raw)) {
+          showToast('Só aceito QR de código TOTP (otpauth://totp/).', true);
+          return;
+        }
+        secretEl.value = raw;
+        var parsed = parseOtpauth(raw);
+        if (parsed) {
+          if (!nameEl.value.trim() && parsed.name) nameEl.value = parsed.name;
+          if (!issuerEl.value.trim() && parsed.issuer) issuerEl.value = parsed.issuer;
+        }
+        if (!nameEl.value.trim()) {
+          showToast('QR lido. Informe o nome da conta e clique em Adicionar.');
+          nameEl.focus();
+          return;
+        }
+        showToast('QR lido. Adicionando conta…');
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        return;
+      }
+      var cleaned = raw.replace(/[\s\-]+/g, '');
+      if (/^[A-Za-z2-7]{16,128}$/.test(cleaned)) {
+        secretEl.value = cleaned;
+        if (!nameEl.value.trim()) {
+          showToast('Chave lida. Informe o nome da conta e clique em Adicionar.');
+          nameEl.focus();
+          return;
+        }
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        return;
+      }
+      showToast('Este QR não é uma chave 2FA.', true);
+    }
+
+    function stopCamera() {
+      camLooking = false;
+      if (camTimer) cancelAnimationFrame(camTimer);
+      camTimer = null;
+      if (camStream) {
+        camStream.getTracks().forEach(function (track) { track.stop(); });
+        camStream = null;
+      }
+      qrVideo.srcObject = null;
+      qrCam.classList.add('dash-hidden');
+      btnQrCam.disabled = false;
+    }
+
+    var lastCamScan = 0;
+    function scanCameraFrame(ts) {
+      if (!camLooking) return;
+      if (!lastCamScan || ts - lastCamScan > 140) {
+        lastCamScan = ts;
+        if (qrVideo.readyState >= 2 && qrVideo.videoWidth) {
+          var text = decodeSource(qrVideo, qrVideo.videoWidth, qrVideo.videoHeight, false);
+          if (text) {
+            stopCamera();
+            applyQrText(text);
+            return;
+          }
+        }
+      }
+      camTimer = requestAnimationFrame(scanCameraFrame);
+    }
+
+    btnQrFile.addEventListener('click', function () {
+      qrFile.click();
+    });
+
+    qrFile.addEventListener('change', function () {
+      var file = qrFile.files && qrFile.files[0];
+      qrFile.value = '';
+      if (!file) return;
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var text = decodeSource(img, img.naturalWidth, img.naturalHeight, true);
+        if (!text) {
+          showToast('Não encontrei um QR Code nessa imagem.', true);
+          return;
+        }
+        applyQrText(text);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        showToast('Não foi possível abrir a imagem.', true);
+      };
+      img.src = url;
+    });
+
+    btnQrCam.addEventListener('click', async function () {
+      if (camLooking) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Este navegador não libera a câmera. Envie uma imagem do QR.', true);
+        return;
+      }
+      btnQrCam.disabled = true;
+      try {
+        camStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        qrVideo.srcObject = camStream;
+        qrCam.classList.remove('dash-hidden');
+        await qrVideo.play();
+        camLooking = true;
+        scanCameraFrame();
+      } catch (e) {
+        stopCamera();
+        showToast('Não foi possível abrir a câmera. Envie uma imagem do QR.', true);
+      }
+    });
+
+    btnQrStop.addEventListener('click', stopCamera);
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) stopCamera();
+    });
 
     form.addEventListener('submit', async function (ev) {
       ev.preventDefault();

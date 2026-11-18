@@ -49,14 +49,14 @@ text_template = "campanha/templates/default.txt"
 company_name = "RED PRECATÓRIOS"
 support_email = "contato@redprecatorios.com.br"
 
-# Cada bloco = um remetente. Com Mailgun: from_email DEVE ser do domínio VERIFICADO no Mailgun.
+# Cada bloco = um remetente. O domínio do from_email precisa estar verificado no Elastic Email.
 # Pode repetir vários
 
 [[domains]]
 name = "comunicared"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@comunicared.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -67,7 +67,7 @@ smtp_starttls = true
 name = "redcomunica1"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica1.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -78,7 +78,7 @@ smtp_starttls = true
 name = "redcomunica2"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica2.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -89,7 +89,7 @@ smtp_starttls = true
 name = "redcomunica3"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica3.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -100,7 +100,7 @@ smtp_starttls = true
 name = "redcomunica4"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica4.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -111,7 +111,7 @@ smtp_starttls = true
 name = "redcomunica5"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica5.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -122,7 +122,7 @@ smtp_starttls = true
 name = "redcomunica6"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica6.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -133,7 +133,7 @@ smtp_starttls = true
 name = "redcomunica7"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica7.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -144,7 +144,7 @@ smtp_starttls = true
 name = "redcomunica8"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica8.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""
@@ -155,7 +155,7 @@ smtp_starttls = true
 name = "redcomunica9"
 from_name = "RED PRECATÓRIOS"
 from_email = "contato@redcomunica9.online"
-# Com method = "mailgun" não precisa preencher SMTP abaixo.
+# SMTP vazio: o envio usa a API do Elastic Email.
 smtp_host = ""
 smtp_port = 587
 smtp_user = ""

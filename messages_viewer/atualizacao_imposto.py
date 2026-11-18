@@ -278,6 +278,29 @@ def _detect_banco(comprovante_pdf: Path, banco_hint: str | None) -> str:
     return "CEF"
 
 
+def _motivo_bloqueio(
+    *,
+    is_cnpj: bool,
+    pronto: bool,
+    tem_ir: bool,
+    campo_origem: str | None,
+) -> str | None:
+    if is_cnpj:
+        return "CNPJ ignorado"
+    if pronto:
+        return None
+    if not tem_ir and campo_origem == "leitura_imagem_falhou":
+        return (
+            "Comprovante é imagem (sem texto) e a leitura automática falhou. "
+            "Tente enviar de novo."
+        )
+    if not tem_ir and campo_origem == "leitura_imagem_sem_ir":
+        return "A leitura da imagem do comprovante não encontrou imposto retido."
+    if not tem_ir:
+        return "Sem IR retido no comprovante"
+    return "Número de meses RRA ausente no comprovante"
+
+
 def _build_single_case_payload(
     *,
     demonstrativo_pdf: Path,
@@ -339,6 +362,7 @@ def _build_single_case_payload(
         "comprovante": {
             "pdf_path": str(comprovante_pdf),
             "success": True,
+            "data_levantamento": ir_dict.get("data_levantamento"),
             "ir_retido": ir_dict,
         },
     }
@@ -366,18 +390,11 @@ def _build_single_case_payload(
         "valor_ir_retido": ir_dict.get("valor_ir_retido"),
         "numero_meses_rra": ir_dict.get("numero_meses_rra"),
         "pronto_para_calculo": pronto,
-        "motivo_bloqueio": (
-            "CNPJ ignorado"
-            if is_cnpj
-            else (
-                None
-                if pronto
-                else (
-                    "Sem IR retido no comprovante"
-                    if not tem_ir
-                    else "Número de meses RRA ausente no comprovante"
-                )
-            )
+        "motivo_bloqueio": _motivo_bloqueio(
+            is_cnpj=is_cnpj,
+            pronto=pronto,
+            tem_ir=tem_ir,
+            campo_origem=ir.campo_origem,
         ),
     }
     return payload, precheck

@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -135,15 +137,20 @@ def _gd_request(method: str, url: str, data: Any = None, timeout: int = 30) -> A
         raise GoDaddyError(0, "Credenciais GoDaddy não configuradas (GODADDY_API_KEY / GODADDY_API_SECRET).")
 
     body = json.dumps(data).encode("utf-8") if data is not None else None
-    req = urllib.request.Request(url, data=body, method=method, headers=headers)
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            return json.loads(raw.decode("utf-8")) if raw else {}
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
-        raise GoDaddyError(e.code, raw) from e
+    ultimo_erro: GoDaddyError | None = None
+    for tentativa in range(4):
+        req = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw.decode("utf-8")) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+            ultimo_erro = GoDaddyError(e.code, raw)
+            if e.code not in (403, 429, 500, 502, 503) or tentativa == 3:
+                raise ultimo_erro from e
+            time.sleep(1.5 * (tentativa + 1))
+    raise ultimo_erro or GoDaddyError(0, "Falha GoDaddy")
 
 
 class GoDaddyError(Exception):
@@ -194,6 +201,173 @@ def godaddy_add_dns_records(domain: str, records: list[dict]) -> None:
 def godaddy_get_dns_records(domain: str) -> list[dict]:
     url = f"https://api.godaddy.com/v1/domains/{domain}/records"
     return _gd_request("GET", url)
+
+
+def godaddy_rel_name(domain: str, name: str) -> str:
+    domain = (domain or "").strip().lower().rstrip(".")
+    rel = (name or "@").strip().lower().rstrip(".")
+    if rel in ("", "@", domain):
+        return "@"
+    suffix = f".{domain}"
+    if domain and rel.endswith(suffix):
+        rel = rel[: -len(suffix)]
+    return rel or "@"
+
+
+def _dns_unquote(value: str) -> str:
+    text = str(value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        text = text[1:-1]
+    return text.strip()
+
+
+def merge_spf(current: str | None, include: str = "include:_spf.elasticemail.com") -> str:
+    """Inclui o SPF do Elastic Email sem descartar os mecanismos que já existem."""
+    default = f"v=spf1 {include} ~all"
+    text = _dns_unquote(current or "")
+    if not text.lower().startswith("v=spf1"):
+        return default
+    if "_spf.elasticemail.com" in text.lower():
+        return text
+    matched = re.search(r"\s([~\-+?]?all)\s*$", text, re.I)
+    if matched:
+        return text[: matched.start()] + f" {include} " + matched.group(1)
+    return text + f" {include} ~all"
+
+
+def _dkim_p(value: str) -> str:
+    text = re.sub(r"\s+", "", _dns_unquote(value))
+    matched = re.search(r"p=([A-Za-z0-9+/=]+)", text)
+    return matched.group(1) if matched else ""
+
+
+def _looks_dkim(value: str) -> bool:
+    text = _dns_unquote(value).lower().replace(" ", "")
+    return "p=" in text and ("k=rsa" in text or text.startswith("v=dkim1"))
+
+
+def _put_items(records: list[dict]) -> list[dict]:
+    out = []
+    for rec in records:
+        item = {"data": rec["data"], "ttl": int(rec.get("ttl") or 3600)}
+        if rec.get("priority") is not None:
+            item["priority"] = int(rec["priority"])
+        out.append(item)
+    return out
+
+
+def godaddy_ensure_records(domain: str, records: list[dict]) -> dict:
+    """Publica SPF, DKIM, tracking e DMARC sem apagar os TXT que já estão no ápice.
+
+    Cada item: type, name, value, mode = spf | dkim | cname | if_absent.
+    Domínio já correto não é reescrito.
+    """
+    existing = godaddy_get_dns_records(domain)
+    if not isinstance(existing, list):
+        existing = []
+    changed: list[str] = []
+    skipped: list[str] = []
+
+    def group_for(rtype: str, rel: str) -> list[dict]:
+        found = []
+        for rec in existing:
+            if str(rec.get("type") or "").upper() != rtype:
+                continue
+            if godaddy_rel_name(domain, str(rec.get("name") or "@")) == rel:
+                found.append(rec)
+        return found
+
+    for rec in records:
+        rtype = str(rec.get("type") or "").upper()
+        rel = godaddy_rel_name(domain, str(rec.get("name") or "@"))
+        mode = str(rec.get("mode") or "set")
+        value = str(rec.get("value") or "").strip()
+        if not rtype or not value:
+            continue
+        group = group_for(rtype, rel)
+        new_group: list[dict] | None = None
+
+        if mode == "spf":
+            idx = next((i for i, item in enumerate(group) if _dns_unquote(item.get("data") or "").lower().startswith("v=spf1")), None)
+            if idx is None:
+                new_group = list(group) + [{"data": value, "ttl": 3600}]
+            else:
+                merged = merge_spf(_dns_unquote(group[idx].get("data") or ""))
+                if merged == _dns_unquote(group[idx].get("data") or ""):
+                    skipped.append(f"{rtype} {rel}")
+                    continue
+                new_group = list(group)
+                updated = dict(group[idx])
+                updated["data"] = merged
+                new_group[idx] = updated
+        elif mode == "dkim":
+            wanted = _dkim_p(value)
+            if not wanted:
+                skipped.append(f"{rtype} {rel}")
+                continue
+            if any(_dkim_p(item.get("data") or "") == wanted for item in group):
+                skipped.append(f"{rtype} {rel}")
+                continue
+            others = [item for item in group if not _looks_dkim(item.get("data") or "")]
+            new_group = others + [{"data": value, "ttl": 3600}]
+        elif mode == "dmarc":
+            desejado = _dns_unquote(value)
+            rua = ""
+            achou_rua = re.search(r"rua=mailto:([^;\s]+)", desejado, re.I)
+            if achou_rua:
+                rua = achou_rua.group(1).lower()
+
+            def _eh_dmarc(item: dict) -> bool:
+                return _dns_unquote(item.get("data") or "").lower().startswith("v=dmarc1")
+
+            atual = next((item for item in group if _eh_dmarc(item)), None)
+            if atual is None:
+                new_group = list(group) + [{"data": desejado, "ttl": 3600}]
+            else:
+                texto = _dns_unquote(atual.get("data") or "")
+                politica = re.search(r"\bp\s*=\s*(none|quarantine|reject)", texto, re.I)
+                if politica and politica.group(1).lower() != "none":
+                    skipped.append(f"{rtype} {rel}")
+                    continue
+                if rua and rua in texto.lower():
+                    skipped.append(f"{rtype} {rel}")
+                    continue
+                new_group = []
+                trocou = False
+                for item in group:
+                    if not trocou and _eh_dmarc(item):
+                        atualizado = dict(item)
+                        atualizado["data"] = desejado
+                        new_group.append(atualizado)
+                        trocou = True
+                    else:
+                        new_group.append(item)
+        elif mode == "cname":
+            target = value.rstrip(".").lower()
+            if any(str(item.get("data") or "").rstrip(".").lower() == target for item in group):
+                skipped.append(f"{rtype} {rel}")
+                continue
+            new_group = [{"data": value.rstrip("."), "ttl": group[0].get("ttl") if group else 3600}]
+        else:
+            if group:
+                skipped.append(f"{rtype} {rel}")
+                continue
+            new_group = [{"data": value, "ttl": 3600}]
+
+        if not new_group:
+            continue
+        quoted = urllib.parse.quote(rel, safe="@._-")
+        url = f"https://api.godaddy.com/v1/domains/{domain}/records/{rtype}/{quoted}"
+        _gd_request("PUT", url, _put_items(new_group))
+        changed.append(f"{rtype} {rel}")
+        existing = [item for item in existing if not (
+            str(item.get("type") or "").upper() == rtype
+            and godaddy_rel_name(domain, str(item.get("name") or "@")) == rel
+        )]
+        for item in new_group:
+            existing.append({"type": rtype, "name": rel, "data": item["data"], "ttl": item.get("ttl") or 3600})
+
+    return {"changed": changed, "skipped": skipped}
 
 
 # ── Combined flow ─────────────────────────────────────────────────────────────
@@ -360,14 +534,30 @@ def desativar_dominios_exceto(
         mg_error = None
         mg_deleted = False
         if delete_mailgun and dominio:
-            try:
-                mailgun_delete_domain(dominio)
-                mg_deleted = True
-            except MailgunError as e:
-                if e.status != 404:
-                    mg_error = str(e)
-                else:
+            from campanha.api_elasticemail import (
+                ElasticEmailError,
+                elasticemail_configured,
+                elasticemail_delete_domain,
+            )
+
+            if elasticemail_configured():
+                try:
+                    elasticemail_delete_domain(dominio)
                     mg_deleted = True
+                except ElasticEmailError as e:
+                    if e.status != 404:
+                        mg_error = str(e)
+                    else:
+                        mg_deleted = True
+            else:
+                try:
+                    mailgun_delete_domain(dominio)
+                    mg_deleted = True
+                except MailgunError as e:
+                    if e.status != 404:
+                        mg_error = str(e)
+                    else:
+                        mg_deleted = True
         if mg_deleted:
             cur.execute(
                 "UPDATE campanha_dominios SET ativo = 0, mailgun_state = 'deleted' WHERE id = %s",
@@ -405,8 +595,20 @@ def listar_dominios(db_config: dict, db_name: str) -> list[dict]:
     rows = cur.fetchall()
     cur.close()
     conn.close()
+    from campanha.entregabilidade import selecionar_par_da_semana
+
+    _par, info = selecionar_par_da_semana(rows, lambda r: r.get("dominio") or "")
+    em_uso = {chave.lower() for chave in info.get("chaves") or []}
     for r in rows:
         for k in ("criado_em", "atualizado_em"):
             if r.get(k) and hasattr(r[k], "isoformat"):
                 r[k] = r[k].isoformat()
+        dominio = (r.get("dominio") or "").lower()
+        if r.get("mailgun_state") == "active" and dominio in em_uso:
+            r["rodizio"] = "em_uso"
+        elif r.get("mailgun_state") == "active":
+            r["rodizio"] = "aguardando"
+        else:
+            r["rodizio"] = ""
+        r["rodizio_ate"] = info.get("fim") or ""
     return rows
